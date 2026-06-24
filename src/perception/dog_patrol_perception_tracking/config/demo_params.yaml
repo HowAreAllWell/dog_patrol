@@ -1,0 +1,99 @@
+vision_demo_host_node:
+  ros__parameters:
+    camera:
+      backend: "gstreamer"
+      # Replace with real URL in deployment, or override via --ros-args.
+      rtsp_url: "rtsp://example.invalid/stream"
+      gstreamer_pipeline: ""
+      mvs_model: "MV-CU013-A0UC"
+      mvs_serial: ""
+      width: 1280
+      height: 1024
+      fps: 30.0
+      timeout_ms: 1000
+
+    detector:
+      runtime_path: "/path/to/vision_demo_ws/assets/models/engines/orin_jp621_trt_local/yolo26n_fp16_640.engine"
+      raw_conf_threshold: 0.10
+      input_width: 640
+      input_height: 640
+      person_conf_threshold: 0.10
+      car_conf_threshold: 0.10
+      enable_fake_detection: false
+
+    tracker:
+      config_path: "/path/to/vision_demo_ws/src/vision_demo_host/config/bot_sort.yaml"
+      gmc_enabled: true
+      reid_enabled: true
+      track_high_thresh: 0.5
+      track_low_thresh: 0.1
+      new_track_thresh: 0.7
+      match_thresh: 0.8
+      track_buffer: 30
+      gmc_method: "sparseOptFlow"
+      gmc_downscale: 4
+      with_reid: true
+      reid_backend: "light"
+      reid_model_path: ""
+      reid_input_width: 128
+      reid_input_height: 256
+
+    target:
+      lost_threshold_frames: 180
+      min_person_area_px: 1000.0
+      max_center_jump_norm: 2.0
+      min_area_ratio: 0.25
+      max_area_ratio: 4.0
+      pending_recovery_frames: 3
+
+    bearing:
+      camera_horizontal_fov_rad: 1.5708
+      camera_mount_x: 0.22646
+      camera_mount_y: 0.03
+      camera_mount_z: 0.20738
+      camera_mount_roll: 0.0
+      camera_mount_pitch: -1.57079
+      camera_mount_yaw: -3.14159
+
+    sid:
+      feat_bank_size: 30
+      recover_sim_thresh_strict: 0.85
+      recover_sim_thresh_relaxed: 0.75
+      recover_relaxed_max_missing_frames: 180
+      occlusion_protect_frames: 30
+      missing_assign_min_area_ratio: 0.40
+      missing_assign_max_area_ratio: 4.00
+      missing_assign_max_center_dist_norm: 2.50
+      missing_assign_max_app_cost: 0.50
+      overlap_iou_freeze: 0.10
+      split_stable_frames: 3
+      merge_hold_frames: 2
+      app_w: 0.70
+      geo_w: 0.20
+      time_w: 0.10
+      active_assign_max_cost: 0.55
+      recovery_max_cost: 0.45
+      raw_continuity_max_cost: 0.55
+      min_assignment_margin: 0.08
+      stable_frames_before_feature_update: 3
+      merged_requires_overlap: true
+      reid_enable: true
+      reid_backend: "light"
+      reid_model_path: ""
+      reid_input_width: 128
+      reid_input_height: 256
+
+    udp:
+      ip: "127.0.0.1"
+      port: 5005
+
+    visualization:
+      enable: false
+
+    recording:
+      enable: false
+      path: "/tmp/vision_demo_out.mp4"
+      fps: 15.0
+
+    runtime:
+      tick_ms: 33

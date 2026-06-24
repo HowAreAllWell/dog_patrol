@@ -1,0 +1,12 @@
+# Baseline reference: previous minimal tracker behavior.
+core_mode: "old_minimal"
+use_gmc: true
+use_reid: false
+gmc_method: "sparseOptFlow"
+gmc_downscale: 4
+with_reid: false
+track_high_thresh: 0.5
+track_low_thresh: 0.1
+new_track_thresh: 0.7
+match_thresh: 0.8
+track_buffer: 30

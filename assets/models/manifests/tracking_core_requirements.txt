@@ -1,0 +1,16 @@
+ultralytics==8.4.33
+torch==2.8.0
+torchvision==0.23.0
+onnx==1.21.0
+numpy==1.26.4
+opencv-python==4.10.0.84
+scipy==1.15.3
+pillow==12.1.1
+PyYAML==6.0.3
+requests==2.33.1
+polars==1.39.3
+psutil==7.2.2
+ultralytics-thop==2.0.18
+protobuf==7.34.1
+ml_dtypes==0.5.4
+triton==3.6.0

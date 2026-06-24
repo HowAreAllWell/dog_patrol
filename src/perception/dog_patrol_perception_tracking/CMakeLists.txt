@@ -1,0 +1,144 @@
+cmake_minimum_required(VERSION 3.8)
+project(vision_demo_host)
+
+if(CMAKE_COMPILER_IS_GNUCXX OR CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+  add_compile_options(-Wall -Wextra -Wpedantic)
+endif()
+
+find_package(ament_cmake REQUIRED)
+find_package(rclcpp REQUIRED)
+find_package(OpenCV REQUIRED)
+find_package(CUDAToolkit REQUIRED)
+
+find_library(TENSORRT_LIB nvinfer REQUIRED)
+find_path(TENSORRT_INCLUDE_DIR NvInfer.h REQUIRED)
+
+option(ENABLE_HIK_MVS "Enable Hikrobot MVS camera backend" ON)
+
+set(HIK_MVS_AVAILABLE OFF)
+if(ENABLE_HIK_MVS)
+  find_path(MVS_INCLUDE_DIR MvCameraControl.h PATHS /opt/MVS/include)
+  find_library(MVS_LIB MvCameraControl PATHS /opt/MVS/lib/64 /opt/MVS/lib/aarch64)
+  if(MVS_INCLUDE_DIR AND MVS_LIB)
+    set(HIK_MVS_AVAILABLE ON)
+    message(STATUS "Hik MVS backend enabled")
+    get_filename_component(MVS_LIB_DIR "${MVS_LIB}" DIRECTORY)
+  else()
+    message(WARNING "ENABLE_HIK_MVS=ON but the MVS SDK was not found under /opt/MVS; building without Hik MVS backend")
+  endif()
+endif()
+
+set(MODULE_SOURCES
+  src/modules/camera_ingest.cpp
+  src/modules/preprocess_infer.cpp
+  src/modules/det_filter.cpp
+  src/modules/appearance_feature_service.cpp
+  src/modules/reid_embedder.cpp
+  src/modules/association_utils.cpp
+  src/modules/mot_tracker.cpp
+  src/modules/primary_target_manager.cpp
+  src/modules/bearing_estimator.cpp
+  src/modules/udp_json_adapter.cpp
+  src/modules/legacy_identity_matcher.cpp
+  src/modules/identity_manager.cpp
+  src/modules/visualizer_recorder.cpp
+  src/modules/runtime_monitor.cpp
+)
+
+add_library(${PROJECT_NAME}_modules ${MODULE_SOURCES})
+target_include_directories(${PROJECT_NAME}_modules PUBLIC
+  $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+  $<INSTALL_INTERFACE:include>
+  ${TENSORRT_INCLUDE_DIR})
+target_include_directories(${PROJECT_NAME}_modules PRIVATE src/modules)
+target_compile_features(${PROJECT_NAME}_modules PUBLIC cxx_std_17)
+ament_target_dependencies(${PROJECT_NAME}_modules rclcpp)
+target_link_libraries(${PROJECT_NAME}_modules ${OpenCV_LIBS})
+target_link_libraries(${PROJECT_NAME}_modules ${TENSORRT_LIB} CUDA::cudart)
+if(HIK_MVS_AVAILABLE)
+  target_include_directories(${PROJECT_NAME}_modules PRIVATE ${MVS_INCLUDE_DIR})
+  target_link_libraries(${PROJECT_NAME}_modules ${MVS_LIB})
+  target_compile_definitions(${PROJECT_NAME}_modules PRIVATE VISION_DEMO_HOST_ENABLE_HIK_MVS=1)
+  set_property(TARGET ${PROJECT_NAME}_modules APPEND PROPERTY BUILD_RPATH "${MVS_LIB_DIR}")
+  set_property(TARGET ${PROJECT_NAME}_modules APPEND PROPERTY INSTALL_RPATH "${MVS_LIB_DIR}")
+endif()
+
+add_executable(vision_demo_node src/main.cpp)
+target_compile_features(vision_demo_node PUBLIC cxx_std_17)
+ament_target_dependencies(vision_demo_node rclcpp)
+target_link_libraries(vision_demo_node ${PROJECT_NAME}_modules)
+
+add_executable(record_test_set src/tools/record_test_set.cpp)
+target_compile_features(record_test_set PUBLIC cxx_std_17)
+target_link_libraries(record_test_set ${PROJECT_NAME}_modules ${OpenCV_LIBS})
+
+add_executable(offline_eval_recordings src/tools/offline_eval_recordings.cpp)
+target_compile_features(offline_eval_recordings PUBLIC cxx_std_17)
+target_link_libraries(offline_eval_recordings ${PROJECT_NAME}_modules ${OpenCV_LIBS})
+
+install(TARGETS
+  ${PROJECT_NAME}_modules
+  vision_demo_node
+  record_test_set
+  offline_eval_recordings
+  DESTINATION lib/${PROJECT_NAME})
+
+install(DIRECTORY include/
+  DESTINATION include)
+
+install(DIRECTORY config launch
+  DESTINATION share/${PROJECT_NAME})
+
+if(BUILD_TESTING)
+  find_package(ament_cmake_gtest REQUIRED)
+
+  ament_add_gtest(test_primary_target_manager test/test_primary_target_manager.cpp)
+  if(TARGET test_primary_target_manager)
+    target_compile_features(test_primary_target_manager PUBLIC cxx_std_17)
+    target_include_directories(test_primary_target_manager PRIVATE include)
+    target_link_libraries(test_primary_target_manager ${PROJECT_NAME}_modules)
+    ament_target_dependencies(test_primary_target_manager rclcpp)
+  endif()
+
+  ament_add_gtest(test_legacy_identity_matcher test/test_legacy_identity_matcher.cpp)
+  if(TARGET test_legacy_identity_matcher)
+    target_compile_features(test_legacy_identity_matcher PUBLIC cxx_std_17)
+    target_include_directories(test_legacy_identity_matcher PRIVATE include src/modules)
+    target_link_libraries(test_legacy_identity_matcher ${PROJECT_NAME}_modules)
+    ament_target_dependencies(test_legacy_identity_matcher rclcpp)
+  endif()
+
+  ament_add_gtest(test_identity_manager test/test_identity_manager.cpp)
+  if(TARGET test_identity_manager)
+    target_compile_features(test_identity_manager PUBLIC cxx_std_17)
+    target_include_directories(test_identity_manager PRIVATE include)
+    target_link_libraries(test_identity_manager ${PROJECT_NAME}_modules)
+    ament_target_dependencies(test_identity_manager rclcpp)
+  endif()
+
+  ament_add_gtest(test_mot_tracker_config test/test_mot_tracker_config.cpp)
+  if(TARGET test_mot_tracker_config)
+    target_compile_features(test_mot_tracker_config PUBLIC cxx_std_17)
+    target_include_directories(test_mot_tracker_config PRIVATE include)
+    target_link_libraries(test_mot_tracker_config ${PROJECT_NAME}_modules)
+    ament_target_dependencies(test_mot_tracker_config rclcpp)
+  endif()
+
+  ament_add_gtest(test_appearance_feature_service test/test_appearance_feature_service.cpp)
+  if(TARGET test_appearance_feature_service)
+    target_compile_features(test_appearance_feature_service PUBLIC cxx_std_17)
+    target_include_directories(test_appearance_feature_service PRIVATE include)
+    target_link_libraries(test_appearance_feature_service ${PROJECT_NAME}_modules)
+    ament_target_dependencies(test_appearance_feature_service rclcpp)
+  endif()
+
+  ament_add_gtest(test_udp_json_adapter test/test_udp_json_adapter.cpp)
+  if(TARGET test_udp_json_adapter)
+    target_compile_features(test_udp_json_adapter PUBLIC cxx_std_17)
+    target_include_directories(test_udp_json_adapter PRIVATE include)
+    target_link_libraries(test_udp_json_adapter ${PROJECT_NAME}_modules)
+    ament_target_dependencies(test_udp_json_adapter rclcpp)
+  endif()
+endif()
+
+ament_package()
