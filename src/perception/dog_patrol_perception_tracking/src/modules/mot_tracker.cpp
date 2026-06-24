@@ -22,7 +22,9 @@ namespace vision_demo_host {
 namespace {
 
 constexpr float kLargeCost = 1e6F;
-constexpr float kDuplicateSpawnIou = 0.85F;
+constexpr float kDuplicateTrackedSpawnIou = 0.10F;
+constexpr float kDuplicateTrackedCenterDistNorm = 0.40F;
+constexpr int kLostCenterDuplicateSuppressFrames = 6;
 
 std::string Trim(const std::string &s) {
   const auto begin = s.find_first_not_of(" \t\r\n");
@@ -1145,13 +1147,17 @@ bool MotTracker::ShouldSuppressNewTrack(const Detection &det) const {
       continue;
     }
 
-    const float iou = ComputeIoU(track.bbox, det.bbox);
-    if (track.life_state == TrackLifeState::kTracked && iou >= kDuplicateSpawnIou) {
+    const cv::Rect2f duplicate_ref_bbox =
+        track.life_state == TrackLifeState::kLost ? track.predicted_bbox : track.bbox;
+    const float iou = ComputeIoU(duplicate_ref_bbox, det.bbox);
+    if (track.life_state == TrackLifeState::kTracked && iou >= kDuplicateTrackedSpawnIou &&
+        CenterDistanceNorm(duplicate_ref_bbox, det.bbox) <= kDuplicateTrackedCenterDistNorm) {
       return true;
     }
+    const bool recently_lost = track.time_since_update <= kLostCenterDuplicateSuppressFrames;
     if (track.life_state == TrackLifeState::kLost &&
         (iou >= config_.duplicate_lost_iou ||
-         CenterDistanceNorm(track.bbox, det.bbox) <= config_.duplicate_lost_center_dist_norm)) {
+         (recently_lost && CenterDistanceNorm(duplicate_ref_bbox, det.bbox) <= config_.duplicate_lost_center_dist_norm))) {
       return true;
     }
   }

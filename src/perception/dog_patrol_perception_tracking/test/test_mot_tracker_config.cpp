@@ -128,6 +128,51 @@ TEST(MotTrackerConfigTest, LowScoreDetectionCanEnterStage2) {
   EXPECT_EQ(second.front().association.stage, "stage2_confirmed_low");
 }
 
+TEST(MotTrackerConfigTest, AgedLostTrackDoesNotSuppressSeparatedHighScoreDetectionByCenterOnly) {
+  const auto yaml = WriteTrackerConfig(
+      "vision_demo_tracker_lost_center_suppress.yaml",
+      "track_high_thresh: 0.50\n"
+      "track_low_thresh: 0.10\n"
+      "new_track_thresh: 0.70\n"
+      "confirm_hits: 1\n"
+      "track_buffer: 30\n"
+      "stage1_iou_min: 0.20\n"
+      "stage1_max_cost: 0.80\n"
+      "lost_recovery_max_cost: 0.60\n"
+      "assoc_iou_weight: 1.0\n"
+      "assoc_motion_weight: 0.0\n"
+      "assoc_app_weight: 0.0\n"
+      "duplicate_lost_iou: 0.50\n"
+      "duplicate_lost_center_dist_norm: 1.0\n");
+
+  vision_demo_host::MotTracker tracker(BaseTrackerConfig(yaml));
+  std::string error;
+  ASSERT_TRUE(tracker.Initialize(&error)) << error;
+
+  const cv::Mat frame(240, 240, CV_8UC3, cv::Scalar(32, 64, 96));
+  const auto first = tracker.Update(
+      {PersonDet(0.90F, cv::Rect2f(90, 30, 40, 100)), PersonDet(0.90F, cv::Rect2f(10, 30, 40, 100))},
+      frame);
+  ASSERT_EQ(first.size(), 2U);
+
+  for (int i = 0; i < 8; ++i) {
+    const auto only_other = tracker.Update({PersonDet(0.90F, cv::Rect2f(10, 30, 40, 100))}, frame);
+    ASSERT_EQ(only_other.size(), 1U);
+  }
+
+  const auto separated = tracker.Update(
+      {PersonDet(0.90F, cv::Rect2f(10, 30, 40, 100)), PersonDet(0.90F, cv::Rect2f(40, 10, 140, 140))},
+      frame);
+  ASSERT_EQ(separated.size(), 2U);
+  bool saw_new_track = false;
+  for (const auto &track : separated) {
+    if (track.association.stage == "new_track_high") {
+      saw_new_track = true;
+    }
+  }
+  EXPECT_TRUE(saw_new_track);
+}
+
 TEST(DetFilterTest, DefaultsPreserveLowScoreDetections) {
   vision_demo_host::DetFilter filter(vision_demo_host::DetFilter::Config{});
 
