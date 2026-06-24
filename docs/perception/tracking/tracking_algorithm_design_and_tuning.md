@@ -189,7 +189,7 @@ hidden candidate 的规则：
 启用 ONNX ReID 示例：
 
 ```bash
-REID_MODEL="/path/to/vision_demo_ws/assets/models/reid/osnet_x1_0_market1501_256x128.onnx"
+REID_MODEL="/path/to/my_workplace/vision_demo_ws/assets/models/reid/osnet_x1_0_market1501_256x128.onnx"
 
 ros2 run vision_demo_host vision_demo_node --ros-args \
   -p tracker.reid_backend:=osnet_onnx \

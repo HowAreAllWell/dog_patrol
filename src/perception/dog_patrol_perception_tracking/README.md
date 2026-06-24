@@ -39,7 +39,7 @@ Orin 宿主机侧视觉验收 demo（round 3: BoT-SORT 最小可验证接入）�
 - `visualization.enable` / `recording.enable`
 
 建议 engine 路径：
-- `/path/to/vision_demo_ws/assets/models/engines/orin_jp621_trt_local/yolo26n_fp16_640.engine`
+- `/path/to/my_workplace/vision_demo_ws/assets/models/engines/orin_jp621_trt_local/yolo26n_fp16_640.engine`
 
 ## 输出 JSON 字段
 
@@ -92,7 +92,7 @@ Orin 宿主机侧视觉验收 demo（round 3: BoT-SORT 最小可验证接入）�
 ## 构建
 
 ```bash
-cd /path/to/vision_demo_ws
+cd /path/to/my_workplace/vision_demo_ws
 source /opt/ros/humble/setup.bash
 colcon build --packages-select vision_demo_host
 ```
@@ -102,30 +102,30 @@ colcon build --packages-select vision_demo_host
 方式 1（直接用 `rtsp_url`）：
 
 ```bash
-cd /path/to/vision_demo_ws
+cd /path/to/my_workplace/vision_demo_ws
 source install/setup.bash
 ros2 run vision_demo_host vision_demo_node --ros-args \
   -p camera.gstreamer_pipeline:='' \
   -p camera.rtsp_url:='rtsp://example.invalid/stream' \
-  -p detector.runtime_path:='/path/to/vision_demo_ws/assets/models/engines/orin_jp621_trt_local/yolo26n_fp16_640.engine' \
+  -p detector.runtime_path:='/path/to/my_workplace/vision_demo_ws/assets/models/engines/orin_jp621_trt_local/yolo26n_fp16_640.engine' \
   -p detector.enable_fake_detection:=false
 ```
 
 方式 2（直接传完整 GStreamer pipeline）：
 
 ```bash
-cd /path/to/vision_demo_ws
+cd /path/to/my_workplace/vision_demo_ws
 source install/setup.bash
 ros2 run vision_demo_host vision_demo_node --ros-args \
   -p camera.gstreamer_pipeline:='rtspsrc location=rtsp://example.invalid/stream latency=200 protocols=tcp ! rtph264depay ! h264parse ! nvv4l2decoder ! nvvidconv ! video/x-raw,format=BGRx ! videoconvert ! video/x-raw,format=BGR ! appsink drop=1 max-buffers=1 sync=false' \
-  -p detector.runtime_path:='/path/to/vision_demo_ws/assets/models/engines/orin_jp621_trt_local/yolo26n_fp16_640.engine' \
+  -p detector.runtime_path:='/path/to/my_workplace/vision_demo_ws/assets/models/engines/orin_jp621_trt_local/yolo26n_fp16_640.engine' \
   -p detector.enable_fake_detection:=false
 ```
 
 方式 3（Hikrobot MVS / USB3 Vision 工业相机）：
 
 ```bash
-cd /path/to/vision_demo_ws
+cd /path/to/my_workplace/vision_demo_ws
 source install/setup.bash
 ros2 run vision_demo_host vision_demo_node --ros-args \
   -p camera.backend:='hik_mvs' \
@@ -134,7 +134,7 @@ ros2 run vision_demo_host vision_demo_node --ros-args \
   -p camera.width:=1280 \
   -p camera.height:=1024 \
   -p camera.fps:=30.0 \
-  -p detector.runtime_path:='/path/to/vision_demo_ws/assets/models/engines/orin_jp621_trt_local/yolo26n_fp16_640.engine' \
+  -p detector.runtime_path:='/path/to/my_workplace/vision_demo_ws/assets/models/engines/orin_jp621_trt_local/yolo26n_fp16_640.engine' \
   -p detector.enable_fake_detection:=false
 ```
 
@@ -152,7 +152,7 @@ nc -u -l -p 5005
 ## 一键现场方位测试脚本
 
 脚本入口：
-- `/path/to/vision_demo_ws/src/vision_demo_host/scripts/live_bearing_test.sh`
+- `/path/to/my_workplace/vision_demo_ws/src/vision_demo_host/scripts/live_bearing_test.sh`
 
 功能：
 - 自动启动 UDP 监听并实时打印：`track_state`、`target_id`、`u/v`、`bearing_base_rad`、`elevation_base_rad`（含角度制）
@@ -162,7 +162,7 @@ nc -u -l -p 5005
 示例（实时预览 + 实时方位打印，不录制）：
 
 ```bash
-cd /path/to/vision_demo_ws
+cd /path/to/my_workplace/vision_demo_ws
 src/vision_demo_host/scripts/live_bearing_test.sh \
   --rtsp-url 'rtsp://example.invalid/stream' \
   --viz true \
@@ -172,12 +172,12 @@ src/vision_demo_host/scripts/live_bearing_test.sh \
 示例（实时预览 + 录制）：
 
 ```bash
-cd /path/to/vision_demo_ws
+cd /path/to/my_workplace/vision_demo_ws
 src/vision_demo_host/scripts/live_bearing_test.sh \
   --rtsp-url 'rtsp://example.invalid/stream' \
   --viz true \
   --rec true \
-  --record-path '/path/to/vision_demo_ws/data/recordings/live_$(date +%Y%m%d_%H%M%S).mp4' \
+  --record-path '/path/to/my_workplace/vision_demo_ws/data/recordings/live_$(date +%Y%m%d_%H%M%S).mp4' \
   --record-fps 25.0
 ```
 
@@ -247,24 +247,24 @@ Tracker ReID 配置（`tracker.*`）：
 一键离线评估脚本（5段录制集，三组对照）：
 
 ```bash
-/path/to/vision_demo_ws/src/vision_demo_host/scripts/eval_tracker_core_round1.sh
+/path/to/my_workplace/vision_demo_ws/src/vision_demo_host/scripts/eval_tracker_core_round1.sh
 ```
 
 ## 问题文档
 
-- 历史问题记录已归档到 `/path/to/vision_demo_ws/docs/archive/issues/`
-- 特定遮挡案例记录已归档到 `/path/to/vision_demo_ws/docs/archive/cases/`
+- 历史问题记录已归档到 `/path/to/my_workplace/vision_demo_ws/docs/archive/issues/`
+- 特定遮挡案例记录已归档到 `/path/to/my_workplace/vision_demo_ws/docs/archive/cases/`
 
 ## GMC Benchmark（A/B/C）
 
 已提供一键脚本（真实 RTSP）：
 
 ```bash
-/path/to/vision_demo_ws/src/vision_demo_host/scripts/bench_gmc_rtsp.sh
+/path/to/my_workplace/vision_demo_ws/src/vision_demo_host/scripts/bench_gmc_rtsp.sh
 ```
 
 输出目录（日志 + 汇总表）：
-- `/path/to/vision_demo_ws/log/bench_gmc_sparse_optflow/`
+- `/path/to/my_workplace/vision_demo_ws/log/bench_gmc_sparse_optflow/`
 - 汇总表：`summary.md`
 
 当前已验证结论（用户终端真实 RTSP）：
@@ -282,12 +282,12 @@ Tracker ReID 配置（`tracker.*`）：
 
 入口：
 - 可执行：`record_test_set`
-- 位置：`/path/to/vision_demo_ws/src/vision_demo_host/src/tools/record_test_set.cpp`
+- 位置：`/path/to/my_workplace/vision_demo_ws/src/vision_demo_host/src/tools/record_test_set.cpp`
 
 构建：
 
 ```bash
-cd /path/to/vision_demo_ws
+cd /path/to/my_workplace/vision_demo_ws
 source /opt/ros/humble/setup.bash
 colcon build --packages-select vision_demo_host
 ```
@@ -295,7 +295,7 @@ colcon build --packages-select vision_demo_host
 运行（带预览）：
 
 ```bash
-cd /path/to/vision_demo_ws
+cd /path/to/my_workplace/vision_demo_ws
 source install/setup.bash
 ros2 run vision_demo_host record_test_set \
   --rtsp-url 'rtsp://example.invalid/stream' \
@@ -307,7 +307,7 @@ ros2 run vision_demo_host record_test_set \
 运行（Hikrobot MVS / USB3 Vision 工业相机，带预览）：
 
 ```bash
-cd /path/to/vision_demo_ws
+cd /path/to/my_workplace/vision_demo_ws
 export LD_LIBRARY_PATH=/opt/MVS/lib/aarch64:/opt/MVS/lib/64:${LD_LIBRARY_PATH:-}
 source install/setup.bash
 ros2 run vision_demo_host record_test_set \
@@ -324,7 +324,7 @@ ros2 run vision_demo_host record_test_set \
 运行（Hikrobot MVS，无损 FFV1/MKV）：
 
 ```bash
-cd /path/to/vision_demo_ws
+cd /path/to/my_workplace/vision_demo_ws
 export LD_LIBRARY_PATH=/opt/MVS/lib/aarch64:/opt/MVS/lib/64:${LD_LIBRARY_PATH:-}
 source install/setup.bash
 ros2 run vision_demo_host record_test_set \
@@ -342,7 +342,7 @@ ros2 run vision_demo_host record_test_set \
 运行（无预览退路）：
 
 ```bash
-cd /path/to/vision_demo_ws
+cd /path/to/my_workplace/vision_demo_ws
 source install/setup.bash
 ros2 run vision_demo_host record_test_set \
   --rtsp-url 'rtsp://example.invalid/stream' \
@@ -358,7 +358,7 @@ ros2 run vision_demo_host record_test_set \
 - `c`：切换叠字显示
 
 输出目录结构（示例）：
-- `/path/to/vision_demo_ws/data/recordings/demo_set_01_20260402_154500/`
+- `/path/to/my_workplace/vision_demo_ws/data/recordings/demo_set_01_20260402_154500/`
 - `video.mp4`（默认 H264）或 `video.mkv`（`--recording-mode ffv1`）
 - `frame_timestamps.csv`
 - `markers.csv`
@@ -389,8 +389,8 @@ ros2 run vision_demo_host record_test_set \
 
 入口：
 - 可执行：`offline_eval_recordings`
-- 默认录制集根目录：`/path/to/vision_demo_ws/data/recordings`
-- 默认结果目录：`/path/to/vision_demo_ws/data/eval_results`
+- 默认数据集根目录：`/path/to/my_workplace/vision_demo_ws/data/datasets`
+- 默认结果目录：`/path/to/my_workplace/vision_demo_ws/data/eval_results`
 
 用途：
 - 对固定录制集逐帧回放，复用当前主链模块做可重复评估：
@@ -400,10 +400,10 @@ ros2 run vision_demo_host record_test_set \
   - `primary_target_manager`
   - `bearing_estimator`
 
-运行（默认处理 5 个固定 `orin_test_set_*`）：
+运行（默认处理 `orin_hik_h264_MOT/01,02,03`）：
 
 ```bash
-cd /path/to/vision_demo_ws
+cd /path/to/my_workplace/vision_demo_ws
 source /opt/ros/humble/setup.bash
 source install/setup.bash
 ros2 run vision_demo_host offline_eval_recordings
@@ -411,9 +411,9 @@ ros2 run vision_demo_host offline_eval_recordings
 
 常用参数：
 - `--detector-engine <path>`
-- `--det-raw-conf <f>`（默认 `0.25`）
-- `--det-person-conf <f>`（默认 `0.35`）
-- `--det-car-conf <f>`（默认 `0.35`）
+- `--det-raw-conf <f>`（默认 `0.10`）
+- `--det-person-conf <f>`（默认 `0.10`）
+- `--det-car-conf <f>`（默认 `0.10`）
 - `--tracker-config <path>`
 - `--tracker-reid-backend <light|osnet_onnx>`
 - `--tracker-reid-model-path <path>`
@@ -443,7 +443,7 @@ ros2 run vision_demo_host offline_eval_recordings
 - `--sid-reid-model-path <path>`
 
 输出结构：
-- `/path/to/vision_demo_ws/data/eval_results/<run_name>_<timestamp>/`
+- `/path/to/my_workplace/vision_demo_ws/data/eval_results/<run_name>_<timestamp>/`
 - 每个测试集子目录（默认短名）：
   - `s01/`, `s02/`, ...（可通过参数关闭短名）
   - `eval_overlay.mp4`（默认开启，叠加轨迹与状态）
@@ -451,7 +451,7 @@ ros2 run vision_demo_host offline_eval_recordings
   - `summary.md`
   - `per_frame.csv`（可关闭）
 - 映射表：
-  - `dataset_dir_map.csv`（`sXX` 与原始 `orin_test_set_*` 的对应关系）
+  - `dataset_dir_map.csv`（`sXX` 与原始数据集目录的对应关系）
 - 总表：
   - `global_summary.md`
 

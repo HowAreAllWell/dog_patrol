@@ -22,7 +22,7 @@ appearance_alpha: 0.92
 appearance_h_bins: 24
 appearance_s_bins: 12
 diag_assoc_enable: true
-diag_assoc_dir: "/path/to/vision_demo_ws/data/reports/detection_collapse_chain_audit_round1/artifacts/diag"
+diag_assoc_dir: "/path/to/my_workplace/vision_demo_ws/data/reports/detection_collapse_chain_audit_round1/artifacts/diag"
 diag_frame_start: 212
 diag_frame_end: 224
 diag_stage1_use_appearance: false

@@ -25,15 +25,15 @@
 namespace {
 
 struct Options {
-  std::filesystem::path recordings_root{"/path/to/vision_demo_ws/data/recordings"};
-  std::filesystem::path results_root{"/path/to/vision_demo_ws/data/eval_results"};
+  std::filesystem::path recordings_root{"/path/to/my_workplace/vision_demo_ws/data/datasets"};
+  std::filesystem::path results_root{"/path/to/my_workplace/vision_demo_ws/data/eval_results"};
   std::string run_name{"oe"};
   std::string detector_engine_path{
-      "/path/to/vision_demo_ws/assets/models/engines/orin_jp621_trt_local/yolo26n_fp16_640.engine"};
+      "/path/to/my_workplace/vision_demo_ws/assets/models/engines/orin_jp621_trt_local/yolo26n_fp16_640.engine"};
   float det_raw_conf_threshold{0.10F};
   float det_person_conf_threshold{0.10F};
   float det_car_conf_threshold{0.10F};
-  std::string tracker_config_path{"/path/to/vision_demo_ws/src/vision_demo_host/config/bot_sort.yaml"};
+  std::string tracker_config_path{"/path/to/my_workplace/vision_demo_ws/src/vision_demo_host/config/bot_sort.yaml"};
   std::string tracker_reid_backend{"light"};
   std::string tracker_reid_model_path{};
   int tracker_reid_input_width{128};
@@ -75,11 +75,9 @@ struct Options {
   int sid_reid_input_width{128};
   int sid_reid_input_height{256};
   std::vector<std::string> datasets{
-      "orin_test_set_20260402_172102",
-      "orin_test_set_20260402_172259",
-      "orin_test_set_20260402_172415",
-      "orin_test_set_20260402_172535",
-      "orin_test_set_20260402_172919"};
+      "orin_hik_h264_MOT/01",
+      "orin_hik_h264_MOT/02",
+      "orin_hik_h264_MOT/03"};
 };
 
 struct DatasetMetrics {
@@ -151,8 +149,8 @@ std::string TimestampCompactNow() {
 void PrintUsage() {
   std::cout
       << "Usage: offline_eval_recordings [options]\n"
-      << "  --recordings-root <path>      (default: /path/to/vision_demo_ws/data/recordings)\n"
-      << "  --results-root <path>         (default: /path/to/vision_demo_ws/data/eval_results)\n"
+      << "  --recordings-root <path>      (default: /path/to/my_workplace/vision_demo_ws/data/datasets)\n"
+      << "  --results-root <path>         (default: /path/to/my_workplace/vision_demo_ws/data/eval_results)\n"
       << "  --run-name <name>             (default: oe)\n"
       << "  --detector-engine <path>\n"
       << "  --det-raw-conf <f>             (default: 0.10)\n"
@@ -163,7 +161,7 @@ void PrintUsage() {
       << "  --tracker-reid-model-path <path>      (default: \"\")\n"
       << "  --tracker-reid-input-width <n>        (default: 128)\n"
       << "  --tracker-reid-input-height <n>       (default: 256)\n"
-      << "  --datasets <a,b,c>            (default: 5 fixed orin_test_set_* dirs)\n"
+      << "  --datasets <a,b,c>            (default: orin_hik_h264_MOT/01,02,03)\n"
       << "  --enable-udp                  (default: off)\n"
       << "  --udp-ip <ip>                 (default: 127.0.0.1)\n"
       << "  --udp-port <port>             (default: 5005)\n"
