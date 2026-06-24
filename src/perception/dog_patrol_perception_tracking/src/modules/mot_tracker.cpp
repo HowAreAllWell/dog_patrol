@@ -23,7 +23,7 @@ namespace {
 
 constexpr float kLargeCost = 1e6F;
 constexpr float kDuplicateTrackedSpawnIou = 0.10F;
-constexpr float kDuplicateTrackedCenterDistNorm = 0.40F;
+constexpr float kDuplicateTrackedCenterDistNorm = 0.25F;
 constexpr float kDuplicateTrackedLowOverlapIou = 0.20F;
 constexpr float kDuplicateTrackedLowOverlapCenterDistNorm = 0.30F;
 constexpr float kDuplicateOutputIou = 0.60F;

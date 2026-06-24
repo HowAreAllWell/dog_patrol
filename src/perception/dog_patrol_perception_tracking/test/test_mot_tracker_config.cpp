@@ -173,6 +173,45 @@ TEST(MotTrackerConfigTest, AgedLostTrackDoesNotSuppressSeparatedHighScoreDetecti
   EXPECT_TRUE(saw_new_track);
 }
 
+TEST(MotTrackerConfigTest, SeparatedHighScoreDetectionSpawnsDuringSplit) {
+  const auto yaml = WriteTrackerConfig(
+      "vision_demo_tracker_split_spawn.yaml",
+      "track_high_thresh: 0.50\n"
+      "track_low_thresh: 0.10\n"
+      "new_track_thresh: 0.70\n"
+      "core_mode: old_minimal\n"
+      "confirm_hits: 1\n"
+      "stage1_iou_min: 0.20\n"
+      "stage1_max_cost: 0.95\n"
+      "unconfirmed_max_cost: 0.95\n"
+      "assoc_iou_weight: 1.0\n"
+      "assoc_motion_weight: 0.0\n"
+      "assoc_app_weight: 0.0\n");
+
+  vision_demo_host::MotTracker tracker(BaseTrackerConfig(yaml));
+  std::string error;
+  ASSERT_TRUE(tracker.Initialize(&error)) << error;
+
+  const cv::Mat frame(1024, 1280, CV_8UC3, cv::Scalar(32, 64, 96));
+  const auto merged = tracker.Update({PersonDet(0.90F, cv::Rect2f(585.0F, 212.0F, 274.0F, 553.0F))}, frame);
+  ASSERT_EQ(merged.size(), 1U);
+
+  tracker.Update({PersonDet(0.84F, cv::Rect2f(638.5F, 245.75F, 161.0F, 499.25F))}, frame);
+
+  const auto split = tracker.Update(
+      {PersonDet(0.85F, cv::Rect2f(640.0F, 248.5F, 147.5F, 468.5F)),
+       PersonDet(0.88F, cv::Rect2f(704.0F, 207.25F, 191.0F, 552.75F))},
+      frame);
+  ASSERT_EQ(split.size(), 2U);
+  bool saw_different_track = false;
+  for (const auto &track : split) {
+    if (track.id != merged.front().id) {
+      saw_different_track = true;
+    }
+  }
+  EXPECT_TRUE(saw_different_track);
+}
+
 TEST(MotTrackerConfigTest, DuplicateOverlappedOutputsAreHiddenDuringOcclusion) {
   const auto yaml = WriteTrackerConfig(
       "vision_demo_tracker_duplicate_output.yaml",
