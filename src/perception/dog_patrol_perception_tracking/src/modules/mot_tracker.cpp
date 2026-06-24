@@ -26,6 +26,9 @@ constexpr float kDuplicateTrackedSpawnIou = 0.10F;
 constexpr float kDuplicateTrackedCenterDistNorm = 0.40F;
 constexpr float kDuplicateTrackedLowOverlapIou = 0.20F;
 constexpr float kDuplicateTrackedLowOverlapCenterDistNorm = 0.30F;
+constexpr float kDuplicateOutputIou = 0.60F;
+constexpr float kDuplicateOutputCenterDistNorm = 0.15F;
+constexpr float kDuplicateOutputMaxAreaRatio = 1.05F;
 constexpr int kLostCenterDuplicateSuppressFrames = 6;
 
 std::string Trim(const std::string &s) {
@@ -1171,6 +1174,26 @@ bool MotTracker::ShouldSuppressNewTrack(const Detection &det) const {
   return false;
 }
 
+bool MotTracker::IsDuplicateOutputTrack(const TrackState &candidate, const TrackState &other) const {
+  if (candidate.id == other.id || candidate.class_id != other.class_id || candidate.class_id != ClassId::kPerson) {
+    return false;
+  }
+  if (other.life_state != TrackLifeState::kTracked || other.time_since_update > 0) {
+    return false;
+  }
+  if (candidate.score > other.score) {
+    return false;
+  }
+  const float candidate_area = std::max(1.0F, candidate.bbox.area());
+  const float other_area = std::max(1.0F, other.bbox.area());
+  if (candidate_area > other_area * kDuplicateOutputMaxAreaRatio) {
+    return false;
+  }
+  const float iou = ComputeIoU(candidate.bbox, other.bbox);
+  const float center_dist_norm = CenterDistanceNorm(candidate.bbox, other.bbox);
+  return iou >= kDuplicateOutputIou && center_dist_norm <= kDuplicateOutputCenterDistNorm;
+}
+
 std::vector<std::pair<int, int>> MotTracker::MatchByHungarian(const std::vector<int> &track_indices,
                                                               const std::vector<Detection> &detections,
                                                               const std::vector<cv::Mat> &det_feats,
@@ -1540,8 +1563,19 @@ std::vector<Track> MotTracker::UpdateOldMinimal(const std::vector<Detection> &de
 
   std::vector<Track> out;
   out.reserve(tracks_.size());
-  for (const auto &t : tracks_) {
+  for (std::size_t i = 0; i < tracks_.size(); ++i) {
+    const auto &t = tracks_[i];
     if (t.life_state != TrackLifeState::kTracked || t.time_since_update > 0) {
+      continue;
+    }
+    bool duplicate_output = false;
+    for (std::size_t j = 0; j < tracks_.size(); ++j) {
+      if (i != j && IsDuplicateOutputTrack(t, tracks_[j])) {
+        duplicate_output = true;
+        break;
+      }
+    }
+    if (duplicate_output) {
       continue;
     }
 
@@ -1830,8 +1864,19 @@ std::vector<Track> MotTracker::UpdateNewCore(const std::vector<Detection> &detec
 
   std::vector<Track> out;
   out.reserve(tracks_.size());
-  for (const auto &t : tracks_) {
+  for (std::size_t i = 0; i < tracks_.size(); ++i) {
+    const auto &t = tracks_[i];
     if (t.life_state != TrackLifeState::kTracked || t.time_since_update > 0) {
+      continue;
+    }
+    bool duplicate_output = false;
+    for (std::size_t j = 0; j < tracks_.size(); ++j) {
+      if (i != j && IsDuplicateOutputTrack(t, tracks_[j])) {
+        duplicate_output = true;
+        break;
+      }
+    }
+    if (duplicate_output) {
       continue;
     }
 

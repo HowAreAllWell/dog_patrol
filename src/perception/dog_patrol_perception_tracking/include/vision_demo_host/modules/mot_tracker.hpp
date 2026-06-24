@@ -195,6 +195,7 @@ class MotTracker {
   float ComputeIoU(const cv::Rect2f &a, const cv::Rect2f &b) const;
   float CenterDistanceNorm(const cv::Rect2f &a, const cv::Rect2f &b) const;
   bool ShouldSuppressNewTrack(const Detection &det) const;
+  bool IsDuplicateOutputTrack(const TrackState &candidate, const TrackState &other) const;
   bool UsingTrueReid() const;
   void NormalizeAppearanceFeature(cv::Mat *feature) const;
   bool IsOcclusionCandidate(int track_idx) const;

@@ -173,6 +173,42 @@ TEST(MotTrackerConfigTest, AgedLostTrackDoesNotSuppressSeparatedHighScoreDetecti
   EXPECT_TRUE(saw_new_track);
 }
 
+TEST(MotTrackerConfigTest, DuplicateOverlappedOutputsAreHiddenDuringOcclusion) {
+  const auto yaml = WriteTrackerConfig(
+      "vision_demo_tracker_duplicate_output.yaml",
+      "track_high_thresh: 0.50\n"
+      "track_low_thresh: 0.10\n"
+      "new_track_thresh: 0.70\n"
+      "core_mode: old_minimal\n"
+      "confirm_hits: 1\n"
+      "stage1_iou_min: 0.01\n"
+      "stage1_max_cost: 0.95\n"
+      "assoc_iou_weight: 1.0\n"
+      "assoc_motion_weight: 0.0\n"
+      "assoc_app_weight: 0.0\n");
+
+  vision_demo_host::MotTracker tracker(BaseTrackerConfig(yaml));
+  std::string error;
+  ASSERT_TRUE(tracker.Initialize(&error)) << error;
+
+  const cv::Mat frame(400, 400, CV_8UC3, cv::Scalar(32, 64, 96));
+  const auto separated = tracker.Update(
+      {PersonDet(0.90F, cv::Rect2f(20, 40, 140, 220)), PersonDet(0.86F, cv::Rect2f(180, 42, 115, 218))},
+      frame);
+  ASSERT_EQ(separated.size(), 2U);
+
+  const auto closing = tracker.Update(
+      {PersonDet(0.91F, cv::Rect2f(60, 40, 140, 220)), PersonDet(0.84F, cv::Rect2f(140, 42, 115, 218))},
+      frame);
+  ASSERT_EQ(closing.size(), 2U);
+
+  const auto overlapped = tracker.Update(
+      {PersonDet(0.92F, cv::Rect2f(90, 40, 140, 220)), PersonDet(0.80F, cv::Rect2f(115, 42, 115, 218))},
+      frame);
+  ASSERT_EQ(overlapped.size(), 1U);
+  EXPECT_FLOAT_EQ(overlapped.front().confidence, 0.92F);
+}
+
 TEST(DetFilterTest, DefaultsPreserveLowScoreDetections) {
   vision_demo_host::DetFilter filter(vision_demo_host::DetFilter::Config{});
 
