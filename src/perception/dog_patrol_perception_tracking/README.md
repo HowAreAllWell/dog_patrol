@@ -1,6 +1,6 @@
 # vision_demo_host
 
-Orin 宿主机侧视觉验收 demo（round 3: BoT-SORT 最小可验证接入）。
+Orin 宿主机侧视觉验收 demo，包含检测、短期跟踪、语义身份、主目标选择、方位估计、录制和离线评估工具。
 
 ## 当前链路状态
 
@@ -13,8 +13,8 @@ Orin 宿主机侧视觉验收 demo（round 3: BoT-SORT 最小可验证接入）�
 - `bearing_estimator`：demo 近似 bearing（非标定真值）
 - `udp_json_adapter`：localhost UDP JSON
 
-未接入（本轮明确不做）：
-- 成熟 ReID 模型（当前为轻量 appearance 特征）
+未接入或未完成：
+- identity 层仍主要由 `LegacyIdentityMatcher` 承担，尚未迁移为完整的新状态机。
 - 距离/2D 相对位置
 - 控制逻辑
 
@@ -181,7 +181,7 @@ src/vision_demo_host/scripts/live_bearing_test.sh \
   --record-fps 25.0
 ```
 
-## 本轮验证重点
+## 基本验证重点
 
 - build 成功
 - 节点可加载真实 TensorRT engine
@@ -244,7 +244,7 @@ Tracker ReID 配置（`tracker.*`）：
 - `config/legacy/tracker_new_core_no_app.yaml`
 - `config/legacy/tracker_new_core_with_app.yaml`
 
-一键离线评估脚本（5段录制集，三组对照）：
+一键离线评估对照脚本：
 
 ```bash
 /path/to/my_workplace/vision_demo_ws/src/vision_demo_host/scripts/eval_tracker_core_round1.sh
@@ -252,8 +252,8 @@ Tracker ReID 配置（`tracker.*`）：
 
 ## 问题文档
 
-- 历史问题记录已归档到 `/path/to/my_workplace/vision_demo_ws/docs/archive/issues/`
-- 特定遮挡案例记录已归档到 `/path/to/my_workplace/vision_demo_ws/docs/archive/cases/`
+- 当前 tracking identity 实现状态：`/path/to/my_workplace/vision_demo_ws/docs/current_tracking_identity_state.md`
+- `orin_hik_h264_MOT` 01/02 遮挡与 ID 问题复盘：`/path/to/my_workplace/vision_demo_ws/docs/orin_hik_h264_MOT_01_02_issue_resolution.md`
 
 ## GMC Benchmark（A/B/C）
 

@@ -1,8 +1,8 @@
 # 当前 tracking identity 实现状态
 
-日期：2026-06-08
+日期：2026-06-24
 
-本文记录当前代码的真实实现状态，用于建立干净 Git baseline 前的接手说明。它不是新的架构设计文档；目标架构仍以 `docs/tracking_identity_architecture_redesign.md` 为准。
+本文记录当前代码的真实实现状态，用于接手和排查 identity 相关问题。它不是新的架构设计文档；`orin_hik_h264_MOT` 中 01/02 已修问题和后续架构风险见 `docs/orin_hik_h264_MOT_01_02_issue_resolution.md`。
 
 ## 1. 当前主链路
 
@@ -163,14 +163,7 @@ VisualizerRecorder::Render(frame, tracks, primary, identity_result)
 
 ## 5. 当前效果判断口径
 
-当前已有轻量评估摘要：
-
-```text
-docs/eval_summaries/20260607_201728_lynx_mot_04_09_global_summary.md
-docs/eval_summaries/20260607_205936_lynx_mot_04_09_phase3_fix2_global_summary.md
-```
-
-这些摘要显示部分运行中 primary switch 为 0，但 `LOCKED / OCCLUDED` 比例在不同数据集上差异较大。后续不能只看 switch 数，还需要结合：
+当前固定离线数据集为 `data/datasets/orin_hik_h264_MOT`，默认评估输出在 `data/eval_results/`。后续不能只看 primary switch 或 `LOCKED` ratio，还需要结合：
 
 - primary locked ratio；
 - occluded ratio；
@@ -181,26 +174,25 @@ docs/eval_summaries/20260607_205936_lynx_mot_04_09_phase3_fix2_global_summary.md
 - feature update 是否在遮挡/合并/低质量观测中被冻结；
 - 叠加视频中的具体错误帧。
 
-## 6. 后续继续重构前的建议检查清单
+## 6. 后续继续修改前的建议检查清单
 
 在继续改算法前，建议先完成：
 
-1. 建立干净 Git baseline。
+1. 确认当前分支是 `dev`，并保留本轮修改前的导出结果或 commit 作为对比依据。
 2. 明确下一阶段只改哪一层：MOT、IdentityManager、LegacyIdentityMatcher 迁移，还是 Primary。
-3. 选定固定离线评估数据集和指标。
-4. 保留当前 baseline 的 summary，作为对比依据。
-5. 对典型失败片段做帧级复盘，区分错误来源：
+3. 固定离线评估数据集和关键帧段。
+4. 对典型失败片段做帧级复盘，区分错误来源：
    - MOT 误关联；
    - identity 错绑；
    - primary sanity check 过严或过松；
    - detector / low-score 预过滤；
    - feature bank 污染；
    - 合并/拆分状态判断错误。
-6. 每次算法修改后至少运行相关单测，并按固定数据集做离线对比。
+5. 每次算法修改后至少运行相关单测，并按固定数据集做离线对比。
 
 ## 7. 推荐下一步
 
-建立干净 baseline 后，优先做小步重构：
+优先做小步修改和小步重构：
 
 1. 保持 `IdentityManager` 作为外部边界不变；
 2. 为 `LegacyIdentityMatcher` 当前关键行为补足文档和测试；
