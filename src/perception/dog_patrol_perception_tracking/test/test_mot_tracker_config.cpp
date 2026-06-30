@@ -159,6 +159,81 @@ TEST(MotTrackerConfigTest, FinalTracksAreMirroredAsTrackedHypotheses) {
   }
 }
 
+TEST(MotTrackerConfigTest, SuppressedNewTrackDuplicateIsRecordedAsHypothesis) {
+  const auto yaml = WriteTrackerConfig(
+      "vision_demo_tracker_suppressed_candidate.yaml",
+      "track_high_thresh: 0.50\n"
+      "track_low_thresh: 0.10\n"
+      "new_track_thresh: 0.70\n"
+      "confirm_hits: 1\n");
+
+  vision_demo_host::MotTracker tracker(BaseTrackerConfig(yaml));
+  std::string error;
+  ASSERT_TRUE(tracker.Initialize(&error)) << error;
+
+  const cv::Mat frame(220, 220, CV_8UC3, cv::Scalar(0, 0, 0));
+  const auto first = tracker.Update({PersonDet(0.90F, cv::Rect2f(40, 30, 60, 110))}, frame);
+  ASSERT_EQ(first.size(), 1U);
+  const int raw_id = first.front().id;
+
+  const auto second = tracker.Update(
+      {PersonDet(0.91F, cv::Rect2f(42, 30, 60, 110)), PersonDet(0.82F, cv::Rect2f(48, 35, 58, 105))}, frame);
+  ASSERT_EQ(second.size(), 1U);
+  EXPECT_EQ(second.front().id, raw_id);
+
+  const auto &hypotheses = tracker.LastTrackletHypotheses();
+  ASSERT_EQ(hypotheses.size(), 2U);
+  EXPECT_EQ(hypotheses[0].status, vision_demo_host::TrackletHypothesisStatus::kTracked);
+  EXPECT_EQ(hypotheses[0].raw_track_id, raw_id);
+  EXPECT_EQ(hypotheses[1].status, vision_demo_host::TrackletHypothesisStatus::kSuppressedDuplicateCandidate);
+  EXPECT_EQ(hypotheses[1].raw_track_id, -1);
+  EXPECT_EQ(hypotheses[1].class_id, vision_demo_host::ClassId::kPerson);
+  EXPECT_FLOAT_EQ(hypotheses[1].confidence, 0.82F);
+  EXPECT_EQ(hypotheses[1].bbox, cv::Rect2f(48, 35, 58, 105));
+  EXPECT_EQ(hypotheses[1].candidate_reason, "new_track_suppressed_duplicate_tracked");
+  ASSERT_TRUE(hypotheses[1].related_raw_track_id.has_value());
+  EXPECT_EQ(*hypotheses[1].related_raw_track_id, raw_id);
+}
+
+TEST(MotTrackerConfigTest, SuppressedNewTrackNearLostTrackIsRecordedAsHypothesis) {
+  const auto yaml = WriteTrackerConfig(
+      "vision_demo_tracker_suppressed_lost_candidate.yaml",
+      "track_high_thresh: 0.50\n"
+      "track_low_thresh: 0.10\n"
+      "new_track_thresh: 0.70\n"
+      "confirm_hits: 1\n"
+      "stage1_iou_min: 0.20\n"
+      "stage1_max_cost: 0.01\n"
+      "lost_recovery_max_cost: 0.01\n"
+      "assoc_iou_weight: 1.0\n"
+      "assoc_motion_weight: 0.0\n"
+      "assoc_app_weight: 0.0\n"
+      "duplicate_lost_iou: 0.50\n"
+      "duplicate_lost_center_dist_norm: 1.0\n");
+
+  vision_demo_host::MotTracker tracker(BaseTrackerConfig(yaml));
+  std::string error;
+  ASSERT_TRUE(tracker.Initialize(&error)) << error;
+
+  const cv::Mat frame(220, 220, CV_8UC3, cv::Scalar(0, 0, 0));
+  const auto first = tracker.Update({PersonDet(0.90F, cv::Rect2f(40, 30, 60, 110))}, frame);
+  ASSERT_EQ(first.size(), 1U);
+  const int raw_id = first.front().id;
+
+  const auto lost_frame = tracker.Update({}, frame);
+  ASSERT_TRUE(lost_frame.empty());
+
+  const auto suppressed = tracker.Update({PersonDet(0.92F, cv::Rect2f(42, 30, 60, 110))}, frame);
+  EXPECT_TRUE(suppressed.empty());
+
+  const auto &hypotheses = tracker.LastTrackletHypotheses();
+  ASSERT_EQ(hypotheses.size(), 1U);
+  EXPECT_EQ(hypotheses[0].status, vision_demo_host::TrackletHypothesisStatus::kSuppressedDuplicateCandidate);
+  EXPECT_EQ(hypotheses[0].candidate_reason, "new_track_suppressed_duplicate_lost");
+  ASSERT_TRUE(hypotheses[0].related_raw_track_id.has_value());
+  EXPECT_EQ(*hypotheses[0].related_raw_track_id, raw_id);
+}
+
 TEST(MotTrackerConfigTest, AgedLostTrackDoesNotSuppressSeparatedHighScoreDetectionByCenterOnly) {
   const auto yaml = WriteTrackerConfig(
       "vision_demo_tracker_lost_center_suppress.yaml",

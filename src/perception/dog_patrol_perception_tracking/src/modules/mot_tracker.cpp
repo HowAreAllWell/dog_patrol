@@ -888,7 +888,7 @@ void MotTracker::UpdateOcclusionProtection() {
 
 void MotTracker::MirrorTrackedHypotheses(const std::vector<Track> &tracks) {
   last_tracklet_hypotheses_.clear();
-  last_tracklet_hypotheses_.reserve(tracks.size());
+  last_tracklet_hypotheses_.reserve(tracks.size() + pending_suppressed_new_track_hypotheses_.size());
   for (const auto &track : tracks) {
     TrackletHypothesis hypothesis;
     hypothesis.raw_track_id = track.id;
@@ -901,6 +901,26 @@ void MotTracker::MirrorTrackedHypotheses(const std::vector<Track> &tracks) {
     hypothesis.association = track.association;
     last_tracklet_hypotheses_.push_back(hypothesis);
   }
+  last_tracklet_hypotheses_.insert(last_tracklet_hypotheses_.end(), pending_suppressed_new_track_hypotheses_.begin(),
+                                   pending_suppressed_new_track_hypotheses_.end());
+  pending_suppressed_new_track_hypotheses_.clear();
+}
+
+void MotTracker::AppendSuppressedNewTrackHypothesis(const Detection &det,
+                                                    const NewTrackSuppression &suppression) {
+  TrackletHypothesis hypothesis;
+  hypothesis.raw_track_id = -1;
+  hypothesis.class_id = det.class_id;
+  hypothesis.confidence = det.confidence;
+  hypothesis.bbox = ClampRect(det.bbox);
+  hypothesis.status = TrackletHypothesisStatus::kSuppressedDuplicateCandidate;
+  hypothesis.candidate_reason = suppression.reason;
+  if (suppression.related_raw_track_id > 0) {
+    hypothesis.related_raw_track_id = suppression.related_raw_track_id;
+  }
+  hypothesis.association.stage = "new_track_suppressed";
+  hypothesis.association.reject_reason = suppression.reason;
+  pending_suppressed_new_track_hypotheses_.push_back(hypothesis);
 }
 
 void MotTracker::MaybeOpenDiagFiles() {
@@ -1154,7 +1174,7 @@ float MotTracker::ComputeIoU(const cv::Rect2f &a, const cv::Rect2f &b) const {
   return association::BBoxIoU(a, b);
 }
 
-bool MotTracker::ShouldSuppressNewTrack(const Detection &det) const {
+MotTracker::NewTrackSuppression MotTracker::ShouldSuppressNewTrack(const Detection &det) const {
   for (const auto &track : tracks_) {
     if (track.life_state == TrackLifeState::kRemoved) {
       continue;
@@ -1178,17 +1198,25 @@ bool MotTracker::ShouldSuppressNewTrack(const Detection &det) const {
           iou < kDuplicateTrackedLowOverlapIou ? kDuplicateTrackedLowOverlapCenterDistNorm
                                                : kDuplicateTrackedCenterDistNorm;
       if (center_dist_norm <= center_suppress_thresh) {
-        return true;
+        NewTrackSuppression suppression;
+        suppression.suppressed = true;
+        suppression.reason = "new_track_suppressed_duplicate_tracked";
+        suppression.related_raw_track_id = track.id;
+        return suppression;
       }
     }
     const bool recently_lost = track.time_since_update <= kLostCenterDuplicateSuppressFrames;
     if (track.life_state == TrackLifeState::kLost &&
         (iou >= config_.duplicate_lost_iou ||
          (recently_lost && CenterDistanceNorm(duplicate_ref_bbox, det.bbox) <= config_.duplicate_lost_center_dist_norm))) {
-      return true;
+      NewTrackSuppression suppression;
+      suppression.suppressed = true;
+      suppression.reason = "new_track_suppressed_duplicate_lost";
+      suppression.related_raw_track_id = track.id;
+      return suppression;
     }
   }
-  return false;
+  return NewTrackSuppression{};
 }
 
 bool MotTracker::IsDuplicateOutputTrack(const TrackState &candidate, const TrackState &other) const {
@@ -1552,7 +1580,9 @@ std::vector<Track> MotTracker::UpdateOldMinimal(const std::vector<Detection> &de
     if (matched_high[d] || det_high[d].confidence < config_.new_track_thresh) {
       continue;
     }
-    if (ShouldSuppressNewTrack(det_high[d])) {
+    const auto suppression = ShouldSuppressNewTrack(det_high[d]);
+    if (suppression.suppressed) {
+      AppendSuppressedNewTrackHypothesis(det_high[d], suppression);
       continue;
     }
 
@@ -1842,7 +1872,9 @@ std::vector<Track> MotTracker::UpdateNewCore(const std::vector<Detection> &detec
     if (matched_high[d] || det_high[d].confidence < config_.new_track_thresh) {
       continue;
     }
-    if (ShouldSuppressNewTrack(det_high[d])) {
+    const auto suppression = ShouldSuppressNewTrack(det_high[d]);
+    if (suppression.suppressed) {
+      AppendSuppressedNewTrackHypothesis(det_high[d], suppression);
       continue;
     }
 
