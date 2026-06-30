@@ -1,7 +1,9 @@
 #include "vision_demo_host/modules/identity_manager.hpp"
 
 #include <algorithm>
+#include <sstream>
 #include <optional>
+#include <set>
 #include <unordered_map>
 #include <utility>
 
@@ -132,6 +134,19 @@ IdentityState StateFromSnapshot(const LegacyIdentityMatcher::IdentitySnapshot &s
   return IdentityState::kLost;
 }
 
+std::string JoinSemanticIds(const std::set<int> &semantic_ids) {
+  std::ostringstream oss;
+  bool first = true;
+  for (const int semantic_id : semantic_ids) {
+    if (!first) {
+      oss << "|";
+    }
+    first = false;
+    oss << semantic_id;
+  }
+  return oss.str();
+}
+
 }  // namespace
 
 class IdentityManager::Impl {
@@ -139,10 +154,23 @@ class IdentityManager::Impl {
   Impl() = default;
   explicit Impl(Config config) : config(std::move(config)), legacy_identity_matcher(ToLegacyConfig(this->config)) {}
 
+  struct MergedGroupShadowState {
+    int group_id{-1};
+    std::set<int> semantic_ids;
+    int carrier_semantic_id{-1};
+    int carrier_raw_track_id{-1};
+    int age_frames{0};
+    int last_update_frame{-1};
+    bool active{false};
+  };
+
   Config config;
   LegacyIdentityMatcher legacy_identity_matcher;
   std::vector<ScoreDebugRow> last_score_debug_rows;
   std::vector<Phase3ShadowDebugRow> last_phase3_shadow_debug_rows;
+  MergedGroupShadowState merged_group_shadow;
+  int next_merged_group_id{1};
+  int phase3_frame_index{0};
 };
 
 IdentityManager::IdentityManager() : impl_(std::make_shared<Impl>()) {}
@@ -155,6 +183,9 @@ void IdentityManager::Reset() {
   impl_->legacy_identity_matcher.Reset();
   impl_->last_score_debug_rows.clear();
   impl_->last_phase3_shadow_debug_rows.clear();
+  impl_->merged_group_shadow = Impl::MergedGroupShadowState{};
+  impl_->next_merged_group_id = 1;
+  impl_->phase3_frame_index = 0;
   raw_to_semantic_id_.clear();
 }
 
@@ -174,10 +205,12 @@ IdentityManagerResult IdentityManager::Update(const std::vector<TrackletObservat
   for (const auto &row : legacy_debug_rows) {
     impl_->last_score_debug_rows.push_back(FromLegacyDebugRow(row));
   }
+  impl_->phase3_frame_index += 1;
 
   impl_->last_phase3_shadow_debug_rows.clear();
   impl_->last_phase3_shadow_debug_rows.reserve(shadow_hypotheses.size());
-  const int current_frame_idx = impl_->last_score_debug_rows.empty() ? -1 : impl_->last_score_debug_rows.front().frame_idx;
+  const int current_frame_idx =
+      impl_->last_score_debug_rows.empty() ? impl_->phase3_frame_index : impl_->last_score_debug_rows.front().frame_idx;
   int event_idx = 0;
   for (const auto &hypothesis : shadow_hypotheses) {
     Phase3ShadowDebugRow row;
@@ -240,6 +273,66 @@ IdentityManagerResult IdentityManager::Update(const std::vector<TrackletObservat
     }
 
     result.identities.push_back(std::move(identity));
+  }
+
+  std::set<int> person_semantic_ids;
+  int carrier_semantic_id = -1;
+  int carrier_raw_track_id = -1;
+  for (const auto &identity : result.identities) {
+    if (identity.class_id != ClassId::kPerson || identity.semantic_id <= 0) {
+      continue;
+    }
+    person_semantic_ids.insert(identity.semantic_id);
+    if (carrier_semantic_id < 0 && identity.visible && identity.supporting_raw_track_id.has_value()) {
+      carrier_semantic_id = identity.semantic_id;
+      carrier_raw_track_id = *identity.supporting_raw_track_id;
+    }
+  }
+
+  const auto append_group_row = [&](const std::string &event_type, const std::string &reason) {
+    Phase3ShadowDebugRow row;
+    row.frame_idx = current_frame_idx;
+    row.event_idx = event_idx++;
+    row.event_type = event_type;
+    row.group_id = impl_->merged_group_shadow.group_id;
+    row.semantic_ids = JoinSemanticIds(impl_->merged_group_shadow.semantic_ids);
+    row.carrier_semantic_id = impl_->merged_group_shadow.carrier_semantic_id;
+    row.carrier_raw_track_id = impl_->merged_group_shadow.carrier_raw_track_id;
+    row.reason = reason;
+    row.group_age_frames = impl_->merged_group_shadow.age_frames;
+    row.group_last_update_frame = impl_->merged_group_shadow.last_update_frame;
+    impl_->last_phase3_shadow_debug_rows.push_back(std::move(row));
+  };
+
+  const bool legacy_group_mode = mode == Mode::kMerged || mode == Mode::kSplitRecovery;
+  if (legacy_group_mode) {
+    if (!impl_->merged_group_shadow.active) {
+      impl_->merged_group_shadow = Impl::MergedGroupShadowState{};
+      impl_->merged_group_shadow.group_id = impl_->next_merged_group_id++;
+      impl_->merged_group_shadow.active = true;
+      impl_->merged_group_shadow.age_frames = 1;
+      impl_->merged_group_shadow.semantic_ids = std::move(person_semantic_ids);
+      impl_->merged_group_shadow.carrier_semantic_id = carrier_semantic_id;
+      impl_->merged_group_shadow.carrier_raw_track_id = carrier_raw_track_id;
+      impl_->merged_group_shadow.last_update_frame = current_frame_idx;
+      append_group_row("merged_group_enter", mode == Mode::kMerged ? "legacy_mode_merged_enter"
+                                                                   : "legacy_mode_split_recovery_enter");
+    } else {
+      impl_->merged_group_shadow.age_frames += 1;
+      impl_->merged_group_shadow.semantic_ids.insert(person_semantic_ids.begin(), person_semantic_ids.end());
+      if (carrier_semantic_id > 0) {
+        impl_->merged_group_shadow.carrier_semantic_id = carrier_semantic_id;
+        impl_->merged_group_shadow.carrier_raw_track_id = carrier_raw_track_id;
+      }
+      impl_->merged_group_shadow.last_update_frame = current_frame_idx;
+      append_group_row("merged_group_update", mode == Mode::kMerged ? "legacy_mode_merged_hold"
+                                                                    : "legacy_mode_split_recovery_hold");
+    }
+  } else if (impl_->merged_group_shadow.active) {
+    impl_->merged_group_shadow.last_update_frame = current_frame_idx;
+    append_group_row("merged_group_end", mode == Mode::kNormalResumed ? "legacy_mode_normal_resumed"
+                                                                      : "legacy_mode_normal");
+    impl_->merged_group_shadow = Impl::MergedGroupShadowState{};
   }
 
   return result;

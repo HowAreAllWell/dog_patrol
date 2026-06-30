@@ -52,6 +52,8 @@ class IdentityManager {
     std::string reason;
     int related_raw_track_id{-1};
     std::string hypothesis_status;
+    int group_age_frames{0};
+    int group_last_update_frame{-1};
   };
 
   struct Config {

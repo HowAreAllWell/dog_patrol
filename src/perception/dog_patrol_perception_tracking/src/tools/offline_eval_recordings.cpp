@@ -1126,7 +1126,8 @@ DatasetMetrics EvaluateOne(const Options &opt, const std::filesystem::path &data
         phase3_shadow_csv << frame_for_csv << "," << row.event_idx << "," << row.event_type << ","
                           << row.group_id << "," << row.semantic_ids << "," << row.carrier_semantic_id << ","
                           << row.carrier_raw_track_id << "," << row.candidate_raw_track_id << ","
-                          << row.reason << "," << row.related_raw_track_id << "," << row.hypothesis_status << "\n";
+                          << row.reason << "," << row.related_raw_track_id << "," << row.hypothesis_status << ","
+                          << row.group_age_frames << "," << row.group_last_update_frame << "\n";
       }
     }
     if (identities_csv.is_open()) {

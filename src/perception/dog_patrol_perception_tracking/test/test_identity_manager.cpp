@@ -1,6 +1,7 @@
 #include <gtest/gtest.h>
 
 #include <algorithm>
+#include <string>
 #include <vector>
 
 #include "vision_demo_host/modules/identity_manager.hpp"
@@ -33,6 +34,15 @@ const vision_demo_host::IdentityObservation *FindIdentity(
     return identity.semantic_id == semantic_id;
   });
   return it == identities.end() ? nullptr : &(*it);
+}
+
+std::vector<std::string> EventTypes(const std::vector<vision_demo_host::IdentityManager::Phase3ShadowDebugRow> &rows) {
+  std::vector<std::string> out;
+  out.reserve(rows.size());
+  for (const auto &row : rows) {
+    out.push_back(row.event_type);
+  }
+  return out;
 }
 
 }  // namespace
@@ -160,6 +170,65 @@ TEST(IdentityManagerTest, ShadowHypothesesInputDoesNotChangeLegacyIdentityResult
   EXPECT_EQ(shadow_rows[1].reason, "duplicate_output_hidden");
   EXPECT_EQ(shadow_rows[1].related_raw_track_id, 10);
   EXPECT_EQ(shadow_rows[1].hypothesis_status, "suppressed_duplicate_candidate");
+}
+
+TEST(IdentityManagerTest, EmitsShadowMergedGroupLifecycleWithoutChangingAssignments) {
+  vision_demo_host::IdentityManager::Config cfg;
+  cfg.active_assign_max_cost = 0.90F;
+  cfg.min_assignment_margin = 0.0F;
+  cfg.merge_hold_frames = 1;
+  cfg.split_stable_frames = 1;
+  cfg.merged_requires_overlap = false;
+  vision_demo_host::IdentityManager manager(cfg);
+
+  const auto left = MakePersonTrack(10, cv::Rect2f(0, 0, 50, 50));
+  const auto right = MakePersonTrack(20, cv::Rect2f(100, 0, 50, 50), {0.0F, 1.0F, 0.0F});
+  const auto initial = manager.Update(vision_demo_host::TrackletObservationsFromTracks({left, right}), IdlePrimary());
+  ASSERT_EQ(initial.SemanticIdForRawTrack(10), 1);
+  ASSERT_EQ(initial.SemanticIdForRawTrack(20), 2);
+
+  auto carrier = MakePersonTrack(10, cv::Rect2f(20, 0, 110, 50));
+  const auto merged = manager.Update(vision_demo_host::TrackletObservationsFromTracks({carrier}), IdlePrimary());
+  EXPECT_EQ(merged.SemanticIdForRawTrack(10), 1);
+  EXPECT_EQ(manager.CurrentMode(), vision_demo_host::IdentityManager::Mode::kMerged);
+
+  const auto &enter_rows = manager.LastPhase3ShadowDebugRows();
+  ASSERT_GE(enter_rows.size(), 1U);
+  EXPECT_EQ(enter_rows[0].event_type, "merged_group_enter");
+  EXPECT_EQ(enter_rows[0].group_id, 1);
+  EXPECT_NE(enter_rows[0].semantic_ids.find("1"), std::string::npos);
+  EXPECT_NE(enter_rows[0].semantic_ids.find("2"), std::string::npos);
+  EXPECT_EQ(enter_rows[0].carrier_semantic_id, 1);
+  EXPECT_EQ(enter_rows[0].carrier_raw_track_id, 10);
+  EXPECT_EQ(enter_rows[0].candidate_raw_track_id, -1);
+  EXPECT_EQ(enter_rows[0].reason, "legacy_mode_merged_enter");
+  EXPECT_EQ(enter_rows[0].group_age_frames, 1);
+  EXPECT_EQ(enter_rows[0].group_last_update_frame, enter_rows[0].frame_idx);
+
+  carrier.bbox = cv::Rect2f(24, 0, 108, 50);
+  const auto held = manager.Update(vision_demo_host::TrackletObservationsFromTracks({carrier}), IdlePrimary());
+  EXPECT_EQ(held.SemanticIdForRawTrack(10), 1);
+  EXPECT_EQ(manager.CurrentMode(), vision_demo_host::IdentityManager::Mode::kMerged);
+
+  const auto hold_events = EventTypes(manager.LastPhase3ShadowDebugRows());
+  EXPECT_NE(std::find(hold_events.begin(), hold_events.end(), "merged_group_update"), hold_events.end());
+
+  const auto split_recovery =
+      manager.Update(vision_demo_host::TrackletObservationsFromTracks({left, right}), IdlePrimary());
+  EXPECT_EQ(split_recovery.SemanticIdForRawTrack(10), 1);
+  EXPECT_EQ(split_recovery.SemanticIdForRawTrack(20), 2);
+  EXPECT_EQ(manager.CurrentMode(), vision_demo_host::IdentityManager::Mode::kSplitRecovery);
+
+  const auto split_events = EventTypes(manager.LastPhase3ShadowDebugRows());
+  EXPECT_NE(std::find(split_events.begin(), split_events.end(), "merged_group_update"), split_events.end());
+
+  const auto separated = manager.Update(vision_demo_host::TrackletObservationsFromTracks({left, right}), IdlePrimary());
+  EXPECT_EQ(separated.SemanticIdForRawTrack(10), 1);
+  EXPECT_EQ(separated.SemanticIdForRawTrack(20), 2);
+  EXPECT_EQ(manager.CurrentMode(), vision_demo_host::IdentityManager::Mode::kNormal);
+
+  const auto end_events = EventTypes(manager.LastPhase3ShadowDebugRows());
+  EXPECT_NE(std::find(end_events.begin(), end_events.end(), "merged_group_end"), end_events.end());
 }
 
 TEST(IdentityManagerTest, DefaultMissingWindowKeepsIdentityOccludedAcrossFourSecondAbsence) {
