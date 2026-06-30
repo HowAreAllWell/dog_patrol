@@ -181,6 +181,31 @@ TEST(IdentityManagerTest, ShadowHypothesesInputDoesNotChangeLegacyIdentityResult
   EXPECT_EQ(shadow_rows[1].hypothesis_status, "suppressed_duplicate_candidate");
 }
 
+TEST(IdentityManagerTest, Phase3ShadowFrameIdxUsesZeroBasedUpdateFrameForHypothesesLinking) {
+  vision_demo_host::IdentityManager::Config cfg;
+  cfg.active_assign_max_cost = 0.90F;
+  cfg.min_assignment_margin = 0.0F;
+  vision_demo_host::IdentityManager manager(cfg);
+
+  vision_demo_host::TrackletHypothesis tracked_hypothesis;
+  tracked_hypothesis.raw_track_id = 10;
+  tracked_hypothesis.class_id = vision_demo_host::ClassId::kPerson;
+  tracked_hypothesis.confidence = 0.9F;
+  tracked_hypothesis.bbox = cv::Rect2f(0, 0, 50, 50);
+  tracked_hypothesis.status = vision_demo_host::TrackletHypothesisStatus::kTracked;
+  tracked_hypothesis.candidate_reason = "final_track_output";
+
+  const auto track = MakePersonTrack(10, cv::Rect2f(0, 0, 50, 50));
+
+  manager.Update(vision_demo_host::TrackletObservationsFromTracks({track}), {tracked_hypothesis}, IdlePrimary());
+  ASSERT_FALSE(manager.LastPhase3ShadowDebugRows().empty());
+  EXPECT_EQ(manager.LastPhase3ShadowDebugRows().front().frame_idx, 0);
+
+  manager.Update(vision_demo_host::TrackletObservationsFromTracks({track}), {tracked_hypothesis}, IdlePrimary());
+  ASSERT_FALSE(manager.LastPhase3ShadowDebugRows().empty());
+  EXPECT_EQ(manager.LastPhase3ShadowDebugRows().front().frame_idx, 1);
+}
+
 TEST(IdentityManagerTest, EmitsShadowMergedGroupLifecycleWithoutChangingAssignments) {
   vision_demo_host::IdentityManager::Config cfg;
   cfg.active_assign_max_cost = 0.90F;

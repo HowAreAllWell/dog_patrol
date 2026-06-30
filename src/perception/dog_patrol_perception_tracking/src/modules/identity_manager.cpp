@@ -231,12 +231,10 @@ IdentityManagerResult IdentityManager::Update(const std::vector<TrackletObservat
   for (const auto &row : legacy_debug_rows) {
     impl_->last_score_debug_rows.push_back(FromLegacyDebugRow(row));
   }
-  impl_->phase3_frame_index += 1;
 
   impl_->last_phase3_shadow_debug_rows.clear();
   impl_->last_phase3_shadow_debug_rows.reserve(shadow_hypotheses.size());
-  const int current_frame_idx =
-      impl_->last_score_debug_rows.empty() ? impl_->phase3_frame_index : impl_->last_score_debug_rows.front().frame_idx;
+  const int current_frame_idx = impl_->phase3_frame_index;
   int event_idx = 0;
   for (const auto &hypothesis : shadow_hypotheses) {
     Phase3ShadowDebugRow row;
@@ -453,6 +451,7 @@ IdentityManagerResult IdentityManager::Update(const std::vector<TrackletObservat
     }
   }
 
+  impl_->phase3_frame_index += 1;
   return result;
 }
 

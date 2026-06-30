@@ -33,6 +33,9 @@ TEST(OfflineEvalSchemaTest, TrackletHypothesesSchemaDocumentsReviewFields) {
       "assoc_appearance_used",
       "assoc_final_gate",
       "assoc_reject_reason",
+      "0",
+      "join key",
+      "phase3_shadow_state.csv",
   };
 
   const std::string help = vision_demo_host::tools::TrackletHypothesesCsvHelp();
@@ -81,10 +84,19 @@ TEST(OfflineEvalSchemaTest, Phase3ShadowStateHelpDocumentsShadowOnlyContract) {
       "split_candidate_update",
       "split_candidate_end",
       "tracklet_hypotheses.csv",
+      "0-based",
+      "Join candidate rows",
+      "group_last_update_frame",
+      "01:746-771",
+      "01:793-795",
+      "01:1015-1031",
+      "02:790-850",
       "shadow-only",
       "semantic id",
+      "primary",
       "overlay",
       "UDP",
+      "LegacyIdentityMatcher",
   };
 
   const std::string help = vision_demo_host::tools::Phase3ShadowStateCsvHelp();

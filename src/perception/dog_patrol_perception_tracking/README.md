@@ -473,14 +473,19 @@ ros2 run vision_demo_host offline_eval_recordings
 - `primary_raw_track_id_debug` 仅用于离线排障，不参与画面叠字语义
 - `tracklet_hypotheses.csv` 固定字段：
   - `frame_idx,hypothesis_idx,status,raw_track_id,class_id,score,x,y,w,h,reason,related_raw_track_id,assoc_stage,assoc_cost,assoc_iou,assoc_motion_dist,assoc_app_dist,assoc_appearance_used,assoc_final_gate,assoc_reject_reason`
+  - `frame_idx` 是离线视频帧号，按 0-based 计数；它也是 `phase3_shadow_state.csv` 回链本表的帧号键。
   - `status/reason` 说明 candidate 是最终 `tracked` 输出、被 new-track duplicate suppression 压制，还是 duplicate output hidden。
   - `related_raw_track_id` 用于把 suppressed/hidden candidate 关联到触发压制或隐藏关系的 raw track；无关联时为 `-1`。
   - 复盘 `orin_hik_h264_MOT/01` 时，优先筛 `frame_idx` 在 `760`、`795`、`1030` 附近的行，结合 `reason`、`related_raw_track_id` 和 association 摘要判断 candidate 为何保留、压制或隐藏。
 - `phase3_shadow_state.csv` 固定字段：
   - `frame_idx,event_idx,event_type,group_id,semantic_ids,carrier_semantic_id,carrier_raw_track_id,candidate_raw_track_id,candidate_semantic_id,candidate_score,candidate_x,candidate_y,candidate_w,candidate_h,reason,related_raw_track_id,hypothesis_status,candidate_stable_frames,group_age_frames,group_last_update_frame`
+  - `frame_idx` 与 `tracklet_hypotheses.csv` 使用同一个 0-based 离线视频帧号；`group_last_update_frame` 也使用同一规则。不要把它与 `sid_scores.csv` 中 legacy matcher 内部 1-based debug frame 混用。
   - 当前 `#7` 只输出 `event_type=hypothesis_input`，用于证明 identity 层已接收 `tracklet_hypotheses.csv` 对齐的 tracked/suppressed/hidden shadow evidence。
   - `#8` 起输出 `MergedGroup` shadow lifecycle：`merged_group_enter`、`merged_group_update`、`merged_group_end`；`group_age_frames` 和 `group_last_update_frame` 用于观察组持续时间和最后更新时间。
   - `#9` 起输出 `SplitCandidate` shadow lifecycle：`split_candidate_enter`、`split_candidate_update`、`split_candidate_end`；候选行包含 group id、candidate raw id、bbox、score、shadow-only `candidate_semantic_id` guess、`reason`、`related_raw_track_id` 和 `candidate_stable_frames`，用于回链 `tracklet_hypotheses.csv` 的 candidate evidence。
+  - 回链方法：先按相同 `frame_idx` 筛两张表，再用 `candidate_raw_track_id` 对 `raw_track_id`，并核对 `reason`、`related_raw_track_id`、bbox/score；`duplicate_output_hidden` 行必须保留 hidden candidate 事实，不表示该候选参与显示或 semantic id 分配。
+  - 离线 smoke 验收应先看 `phase3_shadow_state.csv` 的 `event_type` 分布，确认至少覆盖 `hypothesis_input`、`merged_group_enter/update/end` 和 `split_candidate_enter/update/end`；再看 `tracklet_hypotheses.csv` 的 #6 reason 分布仍只使用既有 reason 字符串。
+  - 人工抽查窗口：`orin_hik_h264_MOT/01` 的 `746-771` 看 group lifecycle，`793-795` 看 hidden split candidate，`1015-1031` 看 split recovery evidence；`760`、`795`、`1030` 附近同时回查 `tracklet_hypotheses.csv`；`orin_hik_h264_MOT/02` 的 `790-850` 用于第二段 handoff/恢复场景抽查。
   - 该 CSV 是 shadow-only debug 输出，不参与 semantic id 分配、primary、overlay、UDP 或 `LegacyIdentityMatcher` 决策。
 - `LOCKED -> LOST` 转换次数
 - `bearing_base_rad` 抖动指标：
