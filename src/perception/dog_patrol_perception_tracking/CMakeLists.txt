@@ -31,6 +31,7 @@ endif()
 set(MODULE_SOURCES
   src/modules/camera_ingest.cpp
   src/modules/preprocess_infer.cpp
+  src/modules/yolo26_output_contract.cpp
   src/modules/det_filter.cpp
   src/modules/appearance_feature_service.cpp
   src/modules/reid_embedder.cpp
@@ -138,6 +139,14 @@ if(BUILD_TESTING)
     target_include_directories(test_udp_json_adapter PRIVATE include)
     target_link_libraries(test_udp_json_adapter ${PROJECT_NAME}_modules)
     ament_target_dependencies(test_udp_json_adapter rclcpp)
+  endif()
+
+  ament_add_gtest(test_yolo26_output_contract test/test_yolo26_output_contract.cpp)
+  if(TARGET test_yolo26_output_contract)
+    target_compile_features(test_yolo26_output_contract PUBLIC cxx_std_17)
+    target_include_directories(test_yolo26_output_contract PRIVATE include)
+    target_link_libraries(test_yolo26_output_contract ${PROJECT_NAME}_modules)
+    ament_target_dependencies(test_yolo26_output_contract rclcpp)
   endif()
 endif()
 

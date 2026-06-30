@@ -4,6 +4,8 @@
 #include <cuda_runtime_api.h>
 #include <opencv2/imgproc.hpp>
 
+#include "vision_demo_host/modules/yolo26_output_contract.hpp"
+
 #include <algorithm>
 #include <cstdint>
 #include <cstring>
@@ -35,6 +37,15 @@ inline std::size_t ElementCount(const nvinfer1::Dims &dims) {
     count *= static_cast<std::size_t>(dims.d[i]);
   }
   return count;
+}
+
+std::vector<int64_t> TensorRtDimsToVector(const nvinfer1::Dims &dims) {
+  std::vector<int64_t> out;
+  out.reserve(static_cast<std::size_t>(std::max(0, dims.nbDims)));
+  for (int i = 0; i < dims.nbDims; ++i) {
+    out.push_back(static_cast<int64_t>(dims.d[i]));
+  }
+  return out;
 }
 
 inline float ClampFloat(const float v, const float low, const float high) {
@@ -208,11 +219,16 @@ struct PreprocessInfer::Impl {
     }
 
     output_dims = context->getTensorShape(output_name.c_str());
-    if (output_dims.nbDims < 2) {
-      if (error != nullptr) {
-        *error = "Unexpected output dims from TensorRT engine.";
-      }
+    Yolo26OutputContract output_contract;
+    const std::vector<int64_t> output_shape = TensorRtDimsToVector(output_dims);
+    if (!ValidateYolo26OutputShape(output_shape, &output_contract, error)) {
       return false;
+    }
+    if (output_contract.detection_count != 300U) {
+      std::cerr << "[PreprocessInfer] YOLO26 output detection count is "
+                << output_contract.detection_count
+                << " for shape " << FormatYolo26OutputShape(output_shape)
+                << "; parser will use the recorded count without detector NMS." << std::endl;
     }
 
     input_bytes = ElementCount(input_dims) * sizeof(float);
