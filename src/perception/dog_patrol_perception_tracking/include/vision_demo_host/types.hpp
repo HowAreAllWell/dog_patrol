@@ -50,6 +50,26 @@ struct Track {
   bool low_score_update{false};
 };
 
+enum class TrackletHypothesisStatus {
+  kTracked,
+  kTentative,
+  kLostPrediction,
+  kSuppressedDuplicateCandidate,
+  kSplitCandidate,
+  kLowQualityCandidate,
+};
+
+struct TrackletHypothesis {
+  int raw_track_id{-1};
+  ClassId class_id{ClassId::kUnknown};
+  float confidence{0.0F};
+  cv::Rect2f bbox;
+  TrackletHypothesisStatus status{TrackletHypothesisStatus::kTracked};
+  std::string candidate_reason;
+  std::optional<int> related_raw_track_id;
+  AssociationEvidence association;
+};
+
 struct TrackletObservation {
   int raw_track_id{-1};
   ClassId class_id{ClassId::kUnknown};

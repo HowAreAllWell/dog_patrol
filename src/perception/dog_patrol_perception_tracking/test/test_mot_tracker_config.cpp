@@ -128,6 +128,37 @@ TEST(MotTrackerConfigTest, LowScoreDetectionCanEnterStage2) {
   EXPECT_EQ(second.front().association.stage, "stage2_confirmed_low");
 }
 
+TEST(MotTrackerConfigTest, FinalTracksAreMirroredAsTrackedHypotheses) {
+  const auto yaml = WriteTrackerConfig(
+      "vision_demo_tracker_hypotheses.yaml",
+      "track_high_thresh: 0.50\n"
+      "track_low_thresh: 0.10\n"
+      "new_track_thresh: 0.70\n"
+      "confirm_hits: 1\n");
+
+  vision_demo_host::MotTracker tracker(BaseTrackerConfig(yaml));
+  std::string error;
+  ASSERT_TRUE(tracker.Initialize(&error)) << error;
+
+  const cv::Mat frame(180, 220, CV_8UC3, cv::Scalar(0, 0, 0));
+  const auto tracks = tracker.Update(
+      {PersonDet(0.90F, cv::Rect2f(20, 30, 50, 80)), PersonDet(0.85F, cv::Rect2f(130, 35, 45, 75))}, frame);
+  ASSERT_EQ(tracks.size(), 2U);
+
+  const auto &hypotheses = tracker.LastTrackletHypotheses();
+  ASSERT_EQ(hypotheses.size(), tracks.size());
+  for (std::size_t i = 0; i < tracks.size(); ++i) {
+    EXPECT_EQ(hypotheses[i].status, vision_demo_host::TrackletHypothesisStatus::kTracked);
+    EXPECT_EQ(hypotheses[i].raw_track_id, tracks[i].id);
+    EXPECT_EQ(hypotheses[i].class_id, tracks[i].class_id);
+    EXPECT_FLOAT_EQ(hypotheses[i].confidence, tracks[i].confidence);
+    EXPECT_EQ(hypotheses[i].bbox, tracks[i].bbox);
+    EXPECT_EQ(hypotheses[i].candidate_reason, "final_track_output");
+    EXPECT_FALSE(hypotheses[i].related_raw_track_id.has_value());
+    EXPECT_EQ(hypotheses[i].association.stage, tracks[i].association.stage);
+  }
+}
+
 TEST(MotTrackerConfigTest, AgedLostTrackDoesNotSuppressSeparatedHighScoreDetectionByCenterOnly) {
   const auto yaml = WriteTrackerConfig(
       "vision_demo_tracker_lost_center_suppress.yaml",

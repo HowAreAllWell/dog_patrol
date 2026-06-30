@@ -71,6 +71,7 @@ class MotTracker {
   bool Initialize(std::string *error);
   std::vector<Track> Update(const std::vector<Detection> &detections, const cv::Mat &frame);
   const Config &EffectiveConfig() const { return config_; }
+  const std::vector<TrackletHypothesis> &LastTrackletHypotheses() const { return last_tracklet_hypotheses_; }
 
  private:
   enum class TrackLifeState {
@@ -200,6 +201,7 @@ class MotTracker {
   void NormalizeAppearanceFeature(cv::Mat *feature) const;
   bool IsOcclusionCandidate(int track_idx) const;
   void UpdateOcclusionProtection();
+  void MirrorTrackedHypotheses(const std::vector<Track> &tracks);
 
   Config config_;
   int next_track_id_{1};
@@ -215,6 +217,7 @@ class MotTracker {
   bool diag_gmc_ok_{false};
   cv::Mat diag_gmc_warp_;
   std::vector<TrackDiagSnapshot> diag_snapshots_;
+  std::vector<TrackletHypothesis> last_tracklet_hypotheses_;
 };
 
 }  // namespace vision_demo_host

@@ -136,6 +136,24 @@ std::string JsonEscape(const std::string &s) {
   return oss.str();
 }
 
+std::string TrackletHypothesisStatusToCsv(const vision_demo_host::TrackletHypothesisStatus status) {
+  switch (status) {
+    case vision_demo_host::TrackletHypothesisStatus::kTracked:
+      return "tracked";
+    case vision_demo_host::TrackletHypothesisStatus::kTentative:
+      return "tentative";
+    case vision_demo_host::TrackletHypothesisStatus::kLostPrediction:
+      return "lost_prediction";
+    case vision_demo_host::TrackletHypothesisStatus::kSuppressedDuplicateCandidate:
+      return "suppressed_duplicate_candidate";
+    case vision_demo_host::TrackletHypothesisStatus::kSplitCandidate:
+      return "split_candidate";
+    case vision_demo_host::TrackletHypothesisStatus::kLowQualityCandidate:
+      return "low_quality_candidate";
+  }
+  return "unknown";
+}
+
 std::string TimestampCompactNow() {
   const auto now = std::chrono::system_clock::now();
   const std::time_t t = std::chrono::system_clock::to_time_t(now);
@@ -902,6 +920,7 @@ DatasetMetrics EvaluateOne(const Options &opt, const std::filesystem::path &data
   std::ofstream det_filtered_csv;
   std::ofstream sid_scores_csv;
   std::ofstream tracks_csv;
+  std::ofstream hypotheses_csv;
   std::ofstream identities_csv;
   if (opt.save_frame_csv) {
     frame_csv.open(result_dir / "per_frame.csv");
@@ -921,6 +940,9 @@ DatasetMetrics EvaluateOne(const Options &opt, const std::filesystem::path &data
     tracks_csv.open(result_dir / "tracks.csv");
     tracks_csv << "frame_idx,track_idx,raw_track_id,semantic_id,class_id,score,x,y,w,h,is_confirmed,time_since_update,"
                   "assoc_stage,assoc_cost,assoc_iou,assoc_motion_dist,assoc_app_dist,assoc_appearance_used,low_score_update,just_recovered,assoc_final_gate,assoc_reject_reason,occlusion_suspect\n";
+    hypotheses_csv.open(result_dir / "tracklet_hypotheses.csv");
+    hypotheses_csv << "frame_idx,hypothesis_idx,status,raw_track_id,class_id,score,x,y,w,h,reason,related_raw_track_id,"
+                      "assoc_stage,assoc_cost,assoc_iou,assoc_motion_dist,assoc_app_dist,assoc_appearance_used,assoc_final_gate,assoc_reject_reason\n";
     identities_csv.open(result_dir / "identities.csv");
     identities_csv << "frame_idx,semantic_id,identity_state,visible,supporting_raw_track_id,class_id,score,x,y,w,h,"
                       "missing_frames,primary,occlusion_suspect,low_score_update,just_recovered,assignment_stage,"
@@ -1073,6 +1095,22 @@ DatasetMetrics EvaluateOne(const Options &opt, const std::filesystem::path &data
                    << (t.low_score_update ? "1" : "0") << "," << (t.just_recovered ? "1" : "0") << ","
                    << (t.association.passed_final_cost_gate ? "1" : "0") << ","
                    << t.association.reject_reason << "," << (t.occlusion_suspect ? "1" : "0") << "\n";
+      }
+    }
+    if (hypotheses_csv.is_open()) {
+      const auto &hypotheses = tracker.LastTrackletHypotheses();
+      for (std::size_t i = 0; i < hypotheses.size(); ++i) {
+        const auto &h = hypotheses[i];
+        hypotheses_csv << frame_idx << "," << i << "," << TrackletHypothesisStatusToCsv(h.status) << ","
+                       << h.raw_track_id << "," << static_cast<int>(h.class_id) << ","
+                       << std::fixed << std::setprecision(6) << h.confidence << ","
+                       << h.bbox.x << "," << h.bbox.y << "," << h.bbox.width << "," << h.bbox.height << ","
+                       << h.candidate_reason << "," << h.related_raw_track_id.value_or(-1) << ","
+                       << h.association.stage << "," << h.association.fused_cost << "," << h.association.iou << ","
+                       << h.association.motion_dist << "," << h.association.app_dist << ","
+                       << (h.association.appearance_used ? "1" : "0") << ","
+                       << (h.association.passed_final_cost_gate ? "1" : "0") << ","
+                       << h.association.reject_reason << "\n";
       }
     }
     if (identities_csv.is_open()) {

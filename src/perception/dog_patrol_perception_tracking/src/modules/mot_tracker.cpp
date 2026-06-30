@@ -886,6 +886,23 @@ void MotTracker::UpdateOcclusionProtection() {
   }
 }
 
+void MotTracker::MirrorTrackedHypotheses(const std::vector<Track> &tracks) {
+  last_tracklet_hypotheses_.clear();
+  last_tracklet_hypotheses_.reserve(tracks.size());
+  for (const auto &track : tracks) {
+    TrackletHypothesis hypothesis;
+    hypothesis.raw_track_id = track.id;
+    hypothesis.class_id = track.class_id;
+    hypothesis.confidence = track.confidence;
+    hypothesis.bbox = track.bbox;
+    hypothesis.status = TrackletHypothesisStatus::kTracked;
+    hypothesis.candidate_reason = "final_track_output";
+    hypothesis.related_raw_track_id = std::nullopt;
+    hypothesis.association = track.association;
+    last_tracklet_hypotheses_.push_back(hypothesis);
+  }
+}
+
 void MotTracker::MaybeOpenDiagFiles() {
   if (!config_.diag_assoc_enable || diag_files_opened_) {
     return;
@@ -1595,6 +1612,7 @@ std::vector<Track> MotTracker::UpdateOldMinimal(const std::vector<Detection> &de
     out.push_back(track);
   }
 
+  MirrorTrackedHypotheses(out);
   return out;
 }
 
@@ -1896,6 +1914,7 @@ std::vector<Track> MotTracker::UpdateNewCore(const std::vector<Detection> &detec
     out.push_back(track);
   }
 
+  MirrorTrackedHypotheses(out);
   return out;
 }
 
