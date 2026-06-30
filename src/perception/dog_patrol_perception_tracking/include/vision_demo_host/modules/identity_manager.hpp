@@ -49,9 +49,13 @@ class IdentityManager {
     int carrier_semantic_id{-1};
     int carrier_raw_track_id{-1};
     int candidate_raw_track_id{-1};
+    int candidate_semantic_id{-1};
+    cv::Rect2f candidate_bbox;
+    float candidate_confidence{0.0F};
     std::string reason;
     int related_raw_track_id{-1};
     std::string hypothesis_status;
+    int candidate_stable_frames{0};
     int group_age_frames{0};
     int group_last_update_frame{-1};
   };

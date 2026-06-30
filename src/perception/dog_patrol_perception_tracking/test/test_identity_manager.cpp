@@ -45,6 +45,15 @@ std::vector<std::string> EventTypes(const std::vector<vision_demo_host::Identity
   return out;
 }
 
+const vision_demo_host::IdentityManager::Phase3ShadowDebugRow *FindEvent(
+    const std::vector<vision_demo_host::IdentityManager::Phase3ShadowDebugRow> &rows,
+    const std::string &event_type, const int candidate_raw_track_id) {
+  const auto it = std::find_if(rows.begin(), rows.end(), [&](const auto &row) {
+    return row.event_type == event_type && row.candidate_raw_track_id == candidate_raw_track_id;
+  });
+  return it == rows.end() ? nullptr : &(*it);
+}
+
 }  // namespace
 
 TEST(IdentityManagerTest, ProducesVisibleIdentityObservations) {
@@ -229,6 +238,140 @@ TEST(IdentityManagerTest, EmitsShadowMergedGroupLifecycleWithoutChangingAssignme
 
   const auto end_events = EventTypes(manager.LastPhase3ShadowDebugRows());
   EXPECT_NE(std::find(end_events.begin(), end_events.end(), "merged_group_end"), end_events.end());
+}
+
+TEST(IdentityManagerTest, EmitsShadowSplitCandidateLifecycleLinkedToMergedGroup) {
+  vision_demo_host::IdentityManager::Config cfg;
+  cfg.active_assign_max_cost = 0.90F;
+  cfg.min_assignment_margin = 0.0F;
+  cfg.merge_hold_frames = 1;
+  cfg.split_stable_frames = 1;
+  cfg.merged_requires_overlap = false;
+  vision_demo_host::IdentityManager manager(cfg);
+
+  const auto left = MakePersonTrack(10, cv::Rect2f(0, 0, 50, 50));
+  const auto right = MakePersonTrack(20, cv::Rect2f(100, 0, 50, 50), {0.0F, 1.0F, 0.0F});
+  const auto initial = manager.Update(vision_demo_host::TrackletObservationsFromTracks({left, right}), IdlePrimary());
+  ASSERT_EQ(initial.SemanticIdForRawTrack(10), 1);
+  ASSERT_EQ(initial.SemanticIdForRawTrack(20), 2);
+
+  auto carrier = MakePersonTrack(10, cv::Rect2f(20, 0, 110, 50));
+  const auto merged = manager.Update(vision_demo_host::TrackletObservationsFromTracks({carrier}), IdlePrimary());
+  ASSERT_EQ(merged.SemanticIdForRawTrack(10), 1);
+  ASSERT_EQ(manager.CurrentMode(), vision_demo_host::IdentityManager::Mode::kMerged);
+
+  vision_demo_host::TrackletHypothesis hidden_candidate;
+  hidden_candidate.raw_track_id = 30;
+  hidden_candidate.class_id = vision_demo_host::ClassId::kPerson;
+  hidden_candidate.confidence = 0.72F;
+  hidden_candidate.bbox = cv::Rect2f(82, 2, 42, 48);
+  hidden_candidate.status = vision_demo_host::TrackletHypothesisStatus::kSuppressedDuplicateCandidate;
+  hidden_candidate.candidate_reason = "duplicate_output_hidden";
+  hidden_candidate.related_raw_track_id = 10;
+
+  vision_demo_host::TrackletHypothesis suppressed_candidate;
+  suppressed_candidate.raw_track_id = 31;
+  suppressed_candidate.class_id = vision_demo_host::ClassId::kPerson;
+  suppressed_candidate.confidence = 0.68F;
+  suppressed_candidate.bbox = cv::Rect2f(78, 5, 44, 45);
+  suppressed_candidate.status = vision_demo_host::TrackletHypothesisStatus::kSuppressedDuplicateCandidate;
+  suppressed_candidate.candidate_reason = "new_track_suppressed_duplicate_tracked";
+  suppressed_candidate.related_raw_track_id = 10;
+
+  carrier.bbox = cv::Rect2f(22, 0, 108, 50);
+  const auto candidate_first = manager.Update(vision_demo_host::TrackletObservationsFromTracks({carrier}),
+                                              {hidden_candidate, suppressed_candidate}, IdlePrimary());
+  EXPECT_EQ(candidate_first.SemanticIdForRawTrack(10), 1);
+  EXPECT_EQ(manager.CurrentMode(), vision_demo_host::IdentityManager::Mode::kMerged);
+
+  const auto *first_row = FindEvent(manager.LastPhase3ShadowDebugRows(), "split_candidate_enter", 30);
+  ASSERT_NE(first_row, nullptr);
+  EXPECT_EQ(first_row->group_id, 1);
+  EXPECT_EQ(first_row->carrier_raw_track_id, 10);
+  EXPECT_EQ(first_row->candidate_raw_track_id, 30);
+  EXPECT_EQ(first_row->candidate_semantic_id, 2);
+  EXPECT_EQ(first_row->reason, "duplicate_output_hidden");
+  EXPECT_EQ(first_row->related_raw_track_id, 10);
+  EXPECT_EQ(first_row->hypothesis_status, "suppressed_duplicate_candidate");
+  EXPECT_EQ(first_row->candidate_stable_frames, 1);
+  EXPECT_FLOAT_EQ(first_row->candidate_confidence, 0.72F);
+  EXPECT_FLOAT_EQ(first_row->candidate_bbox.x, 82.0F);
+  EXPECT_FLOAT_EQ(first_row->candidate_bbox.y, 2.0F);
+  EXPECT_FLOAT_EQ(first_row->candidate_bbox.width, 42.0F);
+  EXPECT_FLOAT_EQ(first_row->candidate_bbox.height, 48.0F);
+
+  const auto *suppressed_row = FindEvent(manager.LastPhase3ShadowDebugRows(), "split_candidate_enter", 31);
+  ASSERT_NE(suppressed_row, nullptr);
+  EXPECT_EQ(suppressed_row->group_id, 1);
+  EXPECT_EQ(suppressed_row->candidate_semantic_id, 2);
+  EXPECT_EQ(suppressed_row->reason, "new_track_suppressed_duplicate_tracked");
+  EXPECT_EQ(suppressed_row->related_raw_track_id, 10);
+  EXPECT_EQ(suppressed_row->hypothesis_status, "suppressed_duplicate_candidate");
+  EXPECT_EQ(suppressed_row->candidate_stable_frames, 1);
+
+  hidden_candidate.confidence = 0.74F;
+  hidden_candidate.bbox = cv::Rect2f(84, 2, 42, 48);
+  const auto candidate_second =
+      manager.Update(vision_demo_host::TrackletObservationsFromTracks({carrier}), {hidden_candidate}, IdlePrimary());
+  EXPECT_EQ(candidate_second.SemanticIdForRawTrack(10), 1);
+  const auto *second_row = FindEvent(manager.LastPhase3ShadowDebugRows(), "split_candidate_update", 30);
+  ASSERT_NE(second_row, nullptr);
+  EXPECT_EQ(second_row->candidate_stable_frames, 2);
+
+  const auto no_candidate = manager.Update(vision_demo_host::TrackletObservationsFromTracks({carrier}), {}, IdlePrimary());
+  EXPECT_EQ(no_candidate.SemanticIdForRawTrack(10), 1);
+  const auto *end_row = FindEvent(manager.LastPhase3ShadowDebugRows(), "split_candidate_end", 30);
+  ASSERT_NE(end_row, nullptr);
+  EXPECT_EQ(end_row->group_id, 1);
+  EXPECT_EQ(end_row->candidate_stable_frames, 2);
+  EXPECT_EQ(end_row->reason, "candidate_missing");
+
+  const auto separated = manager.Update(vision_demo_host::TrackletObservationsFromTracks({left, right}), IdlePrimary());
+  EXPECT_EQ(separated.SemanticIdForRawTrack(10), 1);
+  EXPECT_EQ(separated.SemanticIdForRawTrack(20), 2);
+  EXPECT_EQ(manager.CurrentMode(), vision_demo_host::IdentityManager::Mode::kSplitRecovery);
+  EXPECT_EQ(FindEvent(manager.LastPhase3ShadowDebugRows(), "split_candidate_update", 30), nullptr);
+}
+
+TEST(IdentityManagerTest, EndsShadowSplitCandidateWhenMergedGroupEnds) {
+  vision_demo_host::IdentityManager::Config cfg;
+  cfg.active_assign_max_cost = 0.90F;
+  cfg.min_assignment_margin = 0.0F;
+  cfg.merge_hold_frames = 1;
+  cfg.split_stable_frames = 1;
+  cfg.merged_requires_overlap = false;
+  vision_demo_host::IdentityManager manager(cfg);
+
+  const auto left = MakePersonTrack(10, cv::Rect2f(0, 0, 50, 50));
+  const auto right = MakePersonTrack(20, cv::Rect2f(100, 0, 50, 50), {0.0F, 1.0F, 0.0F});
+  ASSERT_EQ(manager.Update(vision_demo_host::TrackletObservationsFromTracks({left, right}), IdlePrimary())
+                .SemanticIdForRawTrack(20),
+            2);
+
+  auto carrier = MakePersonTrack(10, cv::Rect2f(20, 0, 110, 50));
+  ASSERT_EQ(manager.Update(vision_demo_host::TrackletObservationsFromTracks({carrier}), IdlePrimary())
+                .SemanticIdForRawTrack(10),
+            1);
+  ASSERT_EQ(manager.CurrentMode(), vision_demo_host::IdentityManager::Mode::kMerged);
+
+  vision_demo_host::TrackletHypothesis tracked_candidate;
+  tracked_candidate.raw_track_id = 20;
+  tracked_candidate.class_id = vision_demo_host::ClassId::kPerson;
+  tracked_candidate.confidence = 0.88F;
+  tracked_candidate.bbox = right.bbox;
+  tracked_candidate.status = vision_demo_host::TrackletHypothesisStatus::kTracked;
+  tracked_candidate.candidate_reason = "final_track_output";
+
+  manager.Update(vision_demo_host::TrackletObservationsFromTracks({left, right}), {tracked_candidate}, IdlePrimary());
+  ASSERT_NE(FindEvent(manager.LastPhase3ShadowDebugRows(), "split_candidate_enter", 20), nullptr);
+  ASSERT_EQ(manager.CurrentMode(), vision_demo_host::IdentityManager::Mode::kSplitRecovery);
+
+  manager.Update(vision_demo_host::TrackletObservationsFromTracks({left, right}), {tracked_candidate}, IdlePrimary());
+  const auto *end_row = FindEvent(manager.LastPhase3ShadowDebugRows(), "split_candidate_end", 20);
+  ASSERT_NE(end_row, nullptr);
+  EXPECT_EQ(end_row->reason, "group_end");
+  EXPECT_EQ(end_row->candidate_stable_frames, 1);
+  EXPECT_EQ(manager.CurrentMode(), vision_demo_host::IdentityManager::Mode::kNormal);
 }
 
 TEST(IdentityManagerTest, DefaultMissingWindowKeepsIdentityOccludedAcrossFourSecondAbsence) {

@@ -48,7 +48,8 @@ TEST(OfflineEvalSchemaTest, TrackletHypothesesSchemaDocumentsReviewFields) {
 TEST(OfflineEvalSchemaTest, Phase3ShadowStateCsvHeaderIsStable) {
   const std::string expected =
       "frame_idx,event_idx,event_type,group_id,semantic_ids,carrier_semantic_id,carrier_raw_track_id,"
-      "candidate_raw_track_id,reason,related_raw_track_id,hypothesis_status,group_age_frames,"
+      "candidate_raw_track_id,candidate_semantic_id,candidate_score,candidate_x,candidate_y,candidate_w,"
+      "candidate_h,reason,related_raw_track_id,hypothesis_status,candidate_stable_frames,group_age_frames,"
       "group_last_update_frame";
 
   EXPECT_EQ(vision_demo_host::tools::Phase3ShadowStateCsvHeader(), expected);
@@ -64,11 +65,21 @@ TEST(OfflineEvalSchemaTest, Phase3ShadowStateHelpDocumentsShadowOnlyContract) {
       "carrier_semantic_id",
       "carrier_raw_track_id",
       "candidate_raw_track_id",
+      "candidate_semantic_id",
+      "candidate_score",
+      "candidate_x",
+      "candidate_y",
+      "candidate_w",
+      "candidate_h",
       "reason",
       "related_raw_track_id",
       "hypothesis_status",
+      "candidate_stable_frames",
       "group_age_frames",
       "group_last_update_frame",
+      "split_candidate_enter",
+      "split_candidate_update",
+      "split_candidate_end",
       "tracklet_hypotheses.csv",
       "shadow-only",
       "semantic id",

@@ -1,6 +1,7 @@
 #include "vision_demo_host/modules/identity_manager.hpp"
 
 #include <algorithm>
+#include <map>
 #include <sstream>
 #include <optional>
 #include <set>
@@ -147,6 +148,15 @@ std::string JoinSemanticIds(const std::set<int> &semantic_ids) {
   return oss.str();
 }
 
+bool IsSplitCandidateHypothesis(const TrackletHypothesis &hypothesis) {
+  if (hypothesis.class_id != ClassId::kPerson || hypothesis.raw_track_id <= 0) {
+    return false;
+  }
+  return hypothesis.status == TrackletHypothesisStatus::kTracked ||
+         hypothesis.status == TrackletHypothesisStatus::kSuppressedDuplicateCandidate ||
+         hypothesis.status == TrackletHypothesisStatus::kSplitCandidate;
+}
+
 }  // namespace
 
 class IdentityManager::Impl {
@@ -164,11 +174,26 @@ class IdentityManager::Impl {
     bool active{false};
   };
 
+  struct SplitCandidateShadowState {
+    int group_id{-1};
+    int candidate_raw_track_id{-1};
+    int candidate_semantic_id{-1};
+    cv::Rect2f bbox;
+    float confidence{0.0F};
+    std::string reason;
+    int related_raw_track_id{-1};
+    std::string hypothesis_status;
+    int stable_frames{0};
+    int last_update_frame{-1};
+    bool seen_this_frame{false};
+  };
+
   Config config;
   LegacyIdentityMatcher legacy_identity_matcher;
   std::vector<ScoreDebugRow> last_score_debug_rows;
   std::vector<Phase3ShadowDebugRow> last_phase3_shadow_debug_rows;
   MergedGroupShadowState merged_group_shadow;
+  std::map<int, SplitCandidateShadowState> split_candidate_shadow_by_raw_id;
   int next_merged_group_id{1};
   int phase3_frame_index{0};
 };
@@ -184,6 +209,7 @@ void IdentityManager::Reset() {
   impl_->last_score_debug_rows.clear();
   impl_->last_phase3_shadow_debug_rows.clear();
   impl_->merged_group_shadow = Impl::MergedGroupShadowState{};
+  impl_->split_candidate_shadow_by_raw_id.clear();
   impl_->next_merged_group_id = 1;
   impl_->phase3_frame_index = 0;
   raw_to_semantic_id_.clear();
@@ -218,6 +244,8 @@ IdentityManagerResult IdentityManager::Update(const std::vector<TrackletObservat
     row.event_idx = event_idx++;
     row.event_type = "hypothesis_input";
     row.candidate_raw_track_id = hypothesis.raw_track_id;
+    row.candidate_bbox = hypothesis.bbox;
+    row.candidate_confidence = hypothesis.confidence;
     row.reason = hypothesis.candidate_reason;
     row.related_raw_track_id = hypothesis.related_raw_track_id.value_or(-1);
     row.hypothesis_status = TrackletHypothesisStatusToDebugString(hypothesis.status);
@@ -304,6 +332,30 @@ IdentityManagerResult IdentityManager::Update(const std::vector<TrackletObservat
     impl_->last_phase3_shadow_debug_rows.push_back(std::move(row));
   };
 
+  const auto append_split_candidate_row = [&](const std::string &event_type,
+                                              const Impl::SplitCandidateShadowState &candidate,
+                                              const std::string &reason_override = {}) {
+    Phase3ShadowDebugRow row;
+    row.frame_idx = current_frame_idx;
+    row.event_idx = event_idx++;
+    row.event_type = event_type;
+    row.group_id = candidate.group_id;
+    row.semantic_ids = JoinSemanticIds(impl_->merged_group_shadow.semantic_ids);
+    row.carrier_semantic_id = impl_->merged_group_shadow.carrier_semantic_id;
+    row.carrier_raw_track_id = impl_->merged_group_shadow.carrier_raw_track_id;
+    row.candidate_raw_track_id = candidate.candidate_raw_track_id;
+    row.candidate_semantic_id = candidate.candidate_semantic_id;
+    row.candidate_bbox = candidate.bbox;
+    row.candidate_confidence = candidate.confidence;
+    row.reason = reason_override.empty() ? candidate.reason : reason_override;
+    row.related_raw_track_id = candidate.related_raw_track_id;
+    row.hypothesis_status = candidate.hypothesis_status;
+    row.candidate_stable_frames = candidate.stable_frames;
+    row.group_age_frames = impl_->merged_group_shadow.age_frames;
+    row.group_last_update_frame = impl_->merged_group_shadow.last_update_frame;
+    impl_->last_phase3_shadow_debug_rows.push_back(std::move(row));
+  };
+
   const bool legacy_group_mode = mode == Mode::kMerged || mode == Mode::kSplitRecovery;
   if (legacy_group_mode) {
     if (!impl_->merged_group_shadow.active) {
@@ -330,9 +382,75 @@ IdentityManagerResult IdentityManager::Update(const std::vector<TrackletObservat
     }
   } else if (impl_->merged_group_shadow.active) {
     impl_->merged_group_shadow.last_update_frame = current_frame_idx;
+    for (auto &entry : impl_->split_candidate_shadow_by_raw_id) {
+      append_split_candidate_row("split_candidate_end", entry.second, "group_end");
+    }
+    impl_->split_candidate_shadow_by_raw_id.clear();
     append_group_row("merged_group_end", mode == Mode::kNormalResumed ? "legacy_mode_normal_resumed"
                                                                       : "legacy_mode_normal");
     impl_->merged_group_shadow = Impl::MergedGroupShadowState{};
+  }
+
+  if (impl_->merged_group_shadow.active) {
+    for (auto &entry : impl_->split_candidate_shadow_by_raw_id) {
+      entry.second.seen_this_frame = false;
+    }
+
+    for (const auto &hypothesis : shadow_hypotheses) {
+      if (!IsSplitCandidateHypothesis(hypothesis)) {
+        continue;
+      }
+
+      const int related_raw_track_id = hypothesis.related_raw_track_id.value_or(-1);
+      const bool linked_to_carrier = related_raw_track_id == impl_->merged_group_shadow.carrier_raw_track_id;
+      const bool is_carrier_raw = hypothesis.raw_track_id == impl_->merged_group_shadow.carrier_raw_track_id;
+      if (is_carrier_raw) {
+        continue;
+      }
+      const bool known_group_raw =
+          raw_to_semantic_id_.find(hypothesis.raw_track_id) != raw_to_semantic_id_.end() &&
+          impl_->merged_group_shadow.semantic_ids.count(raw_to_semantic_id_[hypothesis.raw_track_id]) > 0;
+      if (!linked_to_carrier && !known_group_raw) {
+        continue;
+      }
+
+      auto &candidate = impl_->split_candidate_shadow_by_raw_id[hypothesis.raw_track_id];
+      const bool first_seen = candidate.stable_frames == 0 || candidate.group_id != impl_->merged_group_shadow.group_id;
+      candidate.group_id = impl_->merged_group_shadow.group_id;
+      candidate.candidate_raw_track_id = hypothesis.raw_track_id;
+      candidate.candidate_semantic_id = -1;
+      const auto semantic_it = raw_to_semantic_id_.find(hypothesis.raw_track_id);
+      if (semantic_it != raw_to_semantic_id_.end() &&
+          impl_->merged_group_shadow.semantic_ids.count(semantic_it->second) > 0) {
+        candidate.candidate_semantic_id = semantic_it->second;
+      } else {
+        for (const int semantic_id : impl_->merged_group_shadow.semantic_ids) {
+          if (semantic_id != impl_->merged_group_shadow.carrier_semantic_id) {
+            candidate.candidate_semantic_id = semantic_id;
+            break;
+          }
+        }
+      }
+      candidate.bbox = hypothesis.bbox;
+      candidate.confidence = hypothesis.confidence;
+      candidate.reason = hypothesis.candidate_reason;
+      candidate.related_raw_track_id = related_raw_track_id;
+      candidate.hypothesis_status = TrackletHypothesisStatusToDebugString(hypothesis.status);
+      candidate.stable_frames = first_seen ? 1 : candidate.stable_frames + 1;
+      candidate.last_update_frame = current_frame_idx;
+      candidate.seen_this_frame = true;
+      append_split_candidate_row(first_seen ? "split_candidate_enter" : "split_candidate_update", candidate);
+    }
+
+    for (auto it = impl_->split_candidate_shadow_by_raw_id.begin();
+         it != impl_->split_candidate_shadow_by_raw_id.end();) {
+      if (it->second.seen_this_frame) {
+        ++it;
+        continue;
+      }
+      append_split_candidate_row("split_candidate_end", it->second, "candidate_missing");
+      it = impl_->split_candidate_shadow_by_raw_id.erase(it);
+    }
   }
 
   return result;

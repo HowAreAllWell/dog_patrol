@@ -477,11 +477,11 @@ ros2 run vision_demo_host offline_eval_recordings
   - `related_raw_track_id` 用于把 suppressed/hidden candidate 关联到触发压制或隐藏关系的 raw track；无关联时为 `-1`。
   - 复盘 `orin_hik_h264_MOT/01` 时，优先筛 `frame_idx` 在 `760`、`795`、`1030` 附近的行，结合 `reason`、`related_raw_track_id` 和 association 摘要判断 candidate 为何保留、压制或隐藏。
 - `phase3_shadow_state.csv` 固定字段：
-  - `frame_idx,event_idx,event_type,group_id,semantic_ids,carrier_semantic_id,carrier_raw_track_id,candidate_raw_track_id,reason,related_raw_track_id,hypothesis_status,group_age_frames,group_last_update_frame`
+  - `frame_idx,event_idx,event_type,group_id,semantic_ids,carrier_semantic_id,carrier_raw_track_id,candidate_raw_track_id,candidate_semantic_id,candidate_score,candidate_x,candidate_y,candidate_w,candidate_h,reason,related_raw_track_id,hypothesis_status,candidate_stable_frames,group_age_frames,group_last_update_frame`
   - 当前 `#7` 只输出 `event_type=hypothesis_input`，用于证明 identity 层已接收 `tracklet_hypotheses.csv` 对齐的 tracked/suppressed/hidden shadow evidence。
   - `#8` 起输出 `MergedGroup` shadow lifecycle：`merged_group_enter`、`merged_group_update`、`merged_group_end`；`group_age_frames` 和 `group_last_update_frame` 用于观察组持续时间和最后更新时间。
+  - `#9` 起输出 `SplitCandidate` shadow lifecycle：`split_candidate_enter`、`split_candidate_update`、`split_candidate_end`；候选行包含 group id、candidate raw id、bbox、score、shadow-only `candidate_semantic_id` guess、`reason`、`related_raw_track_id` 和 `candidate_stable_frames`，用于回链 `tracklet_hypotheses.csv` 的 candidate evidence。
   - 该 CSV 是 shadow-only debug 输出，不参与 semantic id 分配、primary、overlay、UDP 或 `LegacyIdentityMatcher` 决策。
-  - `SplitCandidate` lifecycle 检测留给后续 Phase 3 slice。
 - `LOCKED -> LOST` 转换次数
 - `bearing_base_rad` 抖动指标：
   - `bearing_diff_abs_mean`
