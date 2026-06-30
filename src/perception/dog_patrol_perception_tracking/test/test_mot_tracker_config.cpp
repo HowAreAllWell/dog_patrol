@@ -352,6 +352,22 @@ TEST(MotTrackerConfigTest, DuplicateOverlappedOutputsAreHiddenDuringOcclusion) {
       frame);
   ASSERT_EQ(overlapped.size(), 1U);
   EXPECT_FLOAT_EQ(overlapped.front().confidence, 0.92F);
+
+  const auto &hypotheses = tracker.LastTrackletHypotheses();
+  ASSERT_EQ(hypotheses.size(), 2U);
+  EXPECT_EQ(hypotheses[0].status, vision_demo_host::TrackletHypothesisStatus::kTracked);
+  EXPECT_EQ(hypotheses[0].raw_track_id, overlapped.front().id);
+  EXPECT_FALSE(hypotheses[0].related_raw_track_id.has_value());
+
+  EXPECT_EQ(hypotheses[1].status, vision_demo_host::TrackletHypothesisStatus::kSuppressedDuplicateCandidate);
+  EXPECT_NE(hypotheses[1].raw_track_id, overlapped.front().id);
+  EXPECT_GT(hypotheses[1].raw_track_id, 0);
+  EXPECT_EQ(hypotheses[1].class_id, vision_demo_host::ClassId::kPerson);
+  EXPECT_FLOAT_EQ(hypotheses[1].confidence, 0.80F);
+  EXPECT_EQ(hypotheses[1].bbox, cv::Rect2f(115, 42, 115, 218));
+  EXPECT_EQ(hypotheses[1].candidate_reason, "duplicate_output_hidden");
+  ASSERT_TRUE(hypotheses[1].related_raw_track_id.has_value());
+  EXPECT_EQ(*hypotheses[1].related_raw_track_id, overlapped.front().id);
 }
 
 TEST(DetFilterTest, DefaultsPreserveLowScoreDetections) {

@@ -169,6 +169,11 @@ class MotTracker {
     std::string reason;
     int related_raw_track_id{-1};
   };
+  struct DuplicateOutputSuppression {
+    bool suppressed{false};
+    std::string reason;
+    int related_raw_track_id{-1};
+  };
   AssocTerms ComputeAssociationTerms(const TrackState &track, const Detection &det, const cv::Mat &det_feat,
                                      bool enable_appearance, float iou_min) const;
   float AssociationCost(const TrackState &track, const Detection &det, const cv::Mat &det_feat,
@@ -202,11 +207,13 @@ class MotTracker {
   float CenterDistanceNorm(const cv::Rect2f &a, const cv::Rect2f &b) const;
   NewTrackSuppression ShouldSuppressNewTrack(const Detection &det) const;
   bool IsDuplicateOutputTrack(const TrackState &candidate, const TrackState &other) const;
+  DuplicateOutputSuppression FindDuplicateOutputSuppression(std::size_t candidate_index) const;
   bool UsingTrueReid() const;
   void NormalizeAppearanceFeature(cv::Mat *feature) const;
   bool IsOcclusionCandidate(int track_idx) const;
   void UpdateOcclusionProtection();
   void AppendSuppressedNewTrackHypothesis(const Detection &det, const NewTrackSuppression &suppression);
+  void AppendDuplicateOutputHypothesis(const TrackState &track, const DuplicateOutputSuppression &suppression);
   void MirrorTrackedHypotheses(const std::vector<Track> &tracks);
 
   Config config_;
@@ -225,6 +232,7 @@ class MotTracker {
   std::vector<TrackDiagSnapshot> diag_snapshots_;
   std::vector<TrackletHypothesis> last_tracklet_hypotheses_;
   std::vector<TrackletHypothesis> pending_suppressed_new_track_hypotheses_;
+  std::vector<TrackletHypothesis> pending_duplicate_output_hypotheses_;
 };
 
 }  // namespace vision_demo_host

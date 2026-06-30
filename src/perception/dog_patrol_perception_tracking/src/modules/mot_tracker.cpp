@@ -888,7 +888,8 @@ void MotTracker::UpdateOcclusionProtection() {
 
 void MotTracker::MirrorTrackedHypotheses(const std::vector<Track> &tracks) {
   last_tracklet_hypotheses_.clear();
-  last_tracklet_hypotheses_.reserve(tracks.size() + pending_suppressed_new_track_hypotheses_.size());
+  last_tracklet_hypotheses_.reserve(tracks.size() + pending_suppressed_new_track_hypotheses_.size() +
+                                    pending_duplicate_output_hypotheses_.size());
   for (const auto &track : tracks) {
     TrackletHypothesis hypothesis;
     hypothesis.raw_track_id = track.id;
@@ -903,7 +904,10 @@ void MotTracker::MirrorTrackedHypotheses(const std::vector<Track> &tracks) {
   }
   last_tracklet_hypotheses_.insert(last_tracklet_hypotheses_.end(), pending_suppressed_new_track_hypotheses_.begin(),
                                    pending_suppressed_new_track_hypotheses_.end());
+  last_tracklet_hypotheses_.insert(last_tracklet_hypotheses_.end(), pending_duplicate_output_hypotheses_.begin(),
+                                   pending_duplicate_output_hypotheses_.end());
   pending_suppressed_new_track_hypotheses_.clear();
+  pending_duplicate_output_hypotheses_.clear();
 }
 
 void MotTracker::AppendSuppressedNewTrackHypothesis(const Detection &det,
@@ -921,6 +925,23 @@ void MotTracker::AppendSuppressedNewTrackHypothesis(const Detection &det,
   hypothesis.association.stage = "new_track_suppressed";
   hypothesis.association.reject_reason = suppression.reason;
   pending_suppressed_new_track_hypotheses_.push_back(hypothesis);
+}
+
+void MotTracker::AppendDuplicateOutputHypothesis(const TrackState &track,
+                                                 const DuplicateOutputSuppression &suppression) {
+  TrackletHypothesis hypothesis;
+  hypothesis.raw_track_id = track.id;
+  hypothesis.class_id = track.class_id;
+  hypothesis.confidence = track.score;
+  hypothesis.bbox = ClampRect(track.bbox);
+  hypothesis.status = TrackletHypothesisStatus::kSuppressedDuplicateCandidate;
+  hypothesis.candidate_reason = suppression.reason;
+  if (suppression.related_raw_track_id > 0) {
+    hypothesis.related_raw_track_id = suppression.related_raw_track_id;
+  }
+  hypothesis.association = track.last_association;
+  hypothesis.association.reject_reason = suppression.reason;
+  pending_duplicate_output_hypotheses_.push_back(hypothesis);
 }
 
 void MotTracker::MaybeOpenDiagFiles() {
@@ -1237,6 +1258,27 @@ bool MotTracker::IsDuplicateOutputTrack(const TrackState &candidate, const Track
   const float iou = ComputeIoU(candidate.bbox, other.bbox);
   const float center_dist_norm = CenterDistanceNorm(candidate.bbox, other.bbox);
   return iou >= kDuplicateOutputIou && center_dist_norm <= kDuplicateOutputCenterDistNorm;
+}
+
+MotTracker::DuplicateOutputSuppression MotTracker::FindDuplicateOutputSuppression(
+    const std::size_t candidate_index) const {
+  if (candidate_index >= tracks_.size()) {
+    return DuplicateOutputSuppression{};
+  }
+  const auto &candidate = tracks_[candidate_index];
+  for (std::size_t j = 0; j < tracks_.size(); ++j) {
+    if (candidate_index == j) {
+      continue;
+    }
+    if (IsDuplicateOutputTrack(candidate, tracks_[j])) {
+      DuplicateOutputSuppression suppression;
+      suppression.suppressed = true;
+      suppression.reason = "duplicate_output_hidden";
+      suppression.related_raw_track_id = tracks_[j].id;
+      return suppression;
+    }
+  }
+  return DuplicateOutputSuppression{};
 }
 
 std::vector<std::pair<int, int>> MotTracker::MatchByHungarian(const std::vector<int> &track_indices,
@@ -1615,14 +1657,9 @@ std::vector<Track> MotTracker::UpdateOldMinimal(const std::vector<Detection> &de
     if (t.life_state != TrackLifeState::kTracked || t.time_since_update > 0) {
       continue;
     }
-    bool duplicate_output = false;
-    for (std::size_t j = 0; j < tracks_.size(); ++j) {
-      if (i != j && IsDuplicateOutputTrack(t, tracks_[j])) {
-        duplicate_output = true;
-        break;
-      }
-    }
-    if (duplicate_output) {
+    const auto duplicate_output = FindDuplicateOutputSuppression(i);
+    if (duplicate_output.suppressed) {
+      AppendDuplicateOutputHypothesis(t, duplicate_output);
       continue;
     }
 
@@ -1919,14 +1956,9 @@ std::vector<Track> MotTracker::UpdateNewCore(const std::vector<Detection> &detec
     if (t.life_state != TrackLifeState::kTracked || t.time_since_update > 0) {
       continue;
     }
-    bool duplicate_output = false;
-    for (std::size_t j = 0; j < tracks_.size(); ++j) {
-      if (i != j && IsDuplicateOutputTrack(t, tracks_[j])) {
-        duplicate_output = true;
-        break;
-      }
-    }
-    if (duplicate_output) {
+    const auto duplicate_output = FindDuplicateOutputSuppression(i);
+    if (duplicate_output.suppressed) {
+      AppendDuplicateOutputHypothesis(t, duplicate_output);
       continue;
     }
 
