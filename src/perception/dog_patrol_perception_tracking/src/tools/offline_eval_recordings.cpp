@@ -218,7 +218,8 @@ void PrintUsage() {
       << "  --sid-reid-input-width <n>             (default: 128)\n"
       << "  --sid-reid-input-height <n>            (default: 256)\n"
       << "  --help\n\n"
-      << vision_demo_host::tools::TrackletHypothesesCsvHelp();
+      << vision_demo_host::tools::TrackletHypothesesCsvHelp() << "\n"
+      << vision_demo_host::tools::Phase3ShadowStateCsvHelp();
 }
 
 bool ParseBool(const std::string &v, bool *out) {
@@ -923,6 +924,7 @@ DatasetMetrics EvaluateOne(const Options &opt, const std::filesystem::path &data
   std::ofstream sid_scores_csv;
   std::ofstream tracks_csv;
   std::ofstream hypotheses_csv;
+  std::ofstream phase3_shadow_csv;
   std::ofstream identities_csv;
   if (opt.save_frame_csv) {
     frame_csv.open(result_dir / "per_frame.csv");
@@ -944,6 +946,8 @@ DatasetMetrics EvaluateOne(const Options &opt, const std::filesystem::path &data
                   "assoc_stage,assoc_cost,assoc_iou,assoc_motion_dist,assoc_app_dist,assoc_appearance_used,low_score_update,just_recovered,assoc_final_gate,assoc_reject_reason,occlusion_suspect\n";
     hypotheses_csv.open(result_dir / "tracklet_hypotheses.csv");
     hypotheses_csv << vision_demo_host::tools::TrackletHypothesesCsvHeader() << "\n";
+    phase3_shadow_csv.open(result_dir / "phase3_shadow_state.csv");
+    phase3_shadow_csv << vision_demo_host::tools::Phase3ShadowStateCsvHeader() << "\n";
     identities_csv.open(result_dir / "identities.csv");
     identities_csv << "frame_idx,semantic_id,identity_state,visible,supporting_raw_track_id,class_id,score,x,y,w,h,"
                       "missing_frames,primary,occlusion_suspect,low_score_update,just_recovered,assignment_stage,"
@@ -971,8 +975,9 @@ DatasetMetrics EvaluateOne(const Options &opt, const std::filesystem::path &data
     const auto filtered = det_filter.Filter(detections);
     const auto tracks = tracker.Update(filtered, frame);
     const auto primary_prev = primary_mgr.GetState();
-    const auto identity_result =
-        identity_manager.Update(vision_demo_host::TrackletObservationsFromTracks(tracks), primary_prev, &frame);
+    const auto &tracklet_hypotheses = tracker.LastTrackletHypotheses();
+    const auto identity_result = identity_manager.Update(
+        vision_demo_host::TrackletObservationsFromTracks(tracks), tracklet_hypotheses, primary_prev, &frame);
     const auto primary = primary_mgr.Update(identity_result.identities);
 
     vision_demo_host::BearingOutput bo{};
@@ -1099,9 +1104,8 @@ DatasetMetrics EvaluateOne(const Options &opt, const std::filesystem::path &data
       }
     }
     if (hypotheses_csv.is_open()) {
-      const auto &hypotheses = tracker.LastTrackletHypotheses();
-      for (std::size_t i = 0; i < hypotheses.size(); ++i) {
-        const auto &h = hypotheses[i];
+      for (std::size_t i = 0; i < tracklet_hypotheses.size(); ++i) {
+        const auto &h = tracklet_hypotheses[i];
         hypotheses_csv << frame_idx << "," << i << "," << TrackletHypothesisStatusToCsv(h.status) << ","
                        << h.raw_track_id << "," << static_cast<int>(h.class_id) << ","
                        << std::fixed << std::setprecision(6) << h.confidence << ","
@@ -1112,6 +1116,17 @@ DatasetMetrics EvaluateOne(const Options &opt, const std::filesystem::path &data
                        << (h.association.appearance_used ? "1" : "0") << ","
                        << (h.association.passed_final_cost_gate ? "1" : "0") << ","
                        << h.association.reject_reason << "\n";
+      }
+    }
+    if (phase3_shadow_csv.is_open()) {
+      const auto &rows = identity_manager.LastPhase3ShadowDebugRows();
+      for (std::size_t i = 0; i < rows.size(); ++i) {
+        const auto &row = rows[i];
+        const int frame_for_csv = row.frame_idx >= 0 ? row.frame_idx : static_cast<int>(frame_idx);
+        phase3_shadow_csv << frame_for_csv << "," << row.event_idx << "," << row.event_type << ","
+                          << row.group_id << "," << row.semantic_ids << "," << row.carrier_semantic_id << ","
+                          << row.carrier_raw_track_id << "," << row.candidate_raw_track_id << ","
+                          << row.reason << "," << row.related_raw_track_id << "," << row.hypothesis_status << "\n";
       }
     }
     if (identities_csv.is_open()) {

@@ -40,6 +40,20 @@ class IdentityManager {
     bool geometry_update_allowed{false};
   };
 
+  struct Phase3ShadowDebugRow {
+    int frame_idx{-1};
+    int event_idx{-1};
+    std::string event_type;
+    int group_id{-1};
+    std::string semantic_ids;
+    int carrier_semantic_id{-1};
+    int carrier_raw_track_id{-1};
+    int candidate_raw_track_id{-1};
+    std::string reason;
+    int related_raw_track_id{-1};
+    std::string hypothesis_status;
+  };
+
   struct Config {
     int max_missing_frames{180};
     int feat_bank_size{30};
@@ -79,10 +93,15 @@ class IdentityManager {
   IdentityManagerResult Update(const std::vector<TrackletObservation> &observations,
                                const PrimaryTargetResult &primary,
                                const cv::Mat *frame = nullptr);
+  IdentityManagerResult Update(const std::vector<TrackletObservation> &observations,
+                               const std::vector<TrackletHypothesis> &shadow_hypotheses,
+                               const PrimaryTargetResult &primary,
+                               const cv::Mat *frame = nullptr);
 
   Mode CurrentMode() const;
   bool IsFeatureUpdateFrozen() const;
   const std::vector<ScoreDebugRow> &LastScoreDebugRows() const;
+  const std::vector<Phase3ShadowDebugRow> &LastPhase3ShadowDebugRows() const;
 
  private:
   static std::vector<Track> TracksFromObservations(const std::vector<TrackletObservation> &observations);

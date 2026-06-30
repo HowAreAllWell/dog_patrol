@@ -44,3 +44,37 @@ TEST(OfflineEvalSchemaTest, TrackletHypothesesSchemaDocumentsReviewFields) {
     EXPECT_NE(help.find(field), std::string::npos) << field;
   }
 }
+
+TEST(OfflineEvalSchemaTest, Phase3ShadowStateCsvHeaderIsStable) {
+  const std::string expected =
+      "frame_idx,event_idx,event_type,group_id,semantic_ids,carrier_semantic_id,carrier_raw_track_id,"
+      "candidate_raw_track_id,reason,related_raw_track_id,hypothesis_status";
+
+  EXPECT_EQ(vision_demo_host::tools::Phase3ShadowStateCsvHeader(), expected);
+}
+
+TEST(OfflineEvalSchemaTest, Phase3ShadowStateHelpDocumentsShadowOnlyContract) {
+  const std::vector<std::string> required_terms{
+      "phase3_shadow_state.csv",
+      "frame_idx",
+      "event_type",
+      "group_id",
+      "semantic_ids",
+      "carrier_semantic_id",
+      "carrier_raw_track_id",
+      "candidate_raw_track_id",
+      "reason",
+      "related_raw_track_id",
+      "hypothesis_status",
+      "tracklet_hypotheses.csv",
+      "shadow-only",
+      "semantic id",
+      "overlay",
+      "UDP",
+  };
+
+  const std::string help = vision_demo_host::tools::Phase3ShadowStateCsvHelp();
+  for (const auto &term : required_terms) {
+    EXPECT_NE(help.find(term), std::string::npos) << term;
+  }
+}

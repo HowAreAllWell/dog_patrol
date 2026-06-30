@@ -107,6 +107,61 @@ TEST(IdentityManagerTest, CarriesAssignmentEvidenceAndPrimaryFlag) {
   EXPECT_FALSE(raw_reject->accepted);
 }
 
+TEST(IdentityManagerTest, ShadowHypothesesInputDoesNotChangeLegacyIdentityResult) {
+  vision_demo_host::IdentityManager::Config cfg;
+  cfg.active_assign_max_cost = 0.90F;
+  cfg.min_assignment_margin = 0.0F;
+
+  vision_demo_host::IdentityManager baseline_manager(cfg);
+  vision_demo_host::IdentityManager shadow_manager(cfg);
+
+  const std::vector<vision_demo_host::Track> tracks{
+      MakePersonTrack(10, cv::Rect2f(0, 0, 50, 50)),
+      MakePersonTrack(20, cv::Rect2f(200, 0, 50, 50), {0.0F, 1.0F, 0.0F}),
+  };
+  const auto observations = vision_demo_host::TrackletObservationsFromTracks(tracks);
+
+  vision_demo_host::TrackletHypothesis tracked_hypothesis;
+  tracked_hypothesis.raw_track_id = 10;
+  tracked_hypothesis.class_id = vision_demo_host::ClassId::kPerson;
+  tracked_hypothesis.confidence = 0.9F;
+  tracked_hypothesis.bbox = cv::Rect2f(0, 0, 50, 50);
+  tracked_hypothesis.status = vision_demo_host::TrackletHypothesisStatus::kTracked;
+  tracked_hypothesis.candidate_reason = "final_track_output";
+
+  vision_demo_host::TrackletHypothesis hidden_hypothesis;
+  hidden_hypothesis.raw_track_id = 30;
+  hidden_hypothesis.class_id = vision_demo_host::ClassId::kPerson;
+  hidden_hypothesis.confidence = 0.7F;
+  hidden_hypothesis.bbox = cv::Rect2f(5, 0, 48, 50);
+  hidden_hypothesis.status = vision_demo_host::TrackletHypothesisStatus::kSuppressedDuplicateCandidate;
+  hidden_hypothesis.candidate_reason = "duplicate_output_hidden";
+  hidden_hypothesis.related_raw_track_id = 10;
+
+  const auto baseline_result = baseline_manager.Update(observations, IdlePrimary());
+  const auto shadow_result =
+      shadow_manager.Update(observations, {tracked_hypothesis, hidden_hypothesis}, IdlePrimary());
+
+  ASSERT_EQ(shadow_result.identities.size(), baseline_result.identities.size());
+  EXPECT_EQ(shadow_result.SemanticIdForRawTrack(10), baseline_result.SemanticIdForRawTrack(10));
+  EXPECT_EQ(shadow_result.SemanticIdForRawTrack(20), baseline_result.SemanticIdForRawTrack(20));
+  EXPECT_EQ(shadow_result.primary_semantic_id, baseline_result.primary_semantic_id);
+  EXPECT_EQ(shadow_result.feature_update_frozen, baseline_result.feature_update_frozen);
+
+  const auto &shadow_rows = shadow_manager.LastPhase3ShadowDebugRows();
+  ASSERT_EQ(shadow_rows.size(), 2U);
+  EXPECT_EQ(shadow_rows[0].event_type, "hypothesis_input");
+  EXPECT_EQ(shadow_rows[0].candidate_raw_track_id, 10);
+  EXPECT_EQ(shadow_rows[0].reason, "final_track_output");
+  EXPECT_EQ(shadow_rows[0].related_raw_track_id, -1);
+  EXPECT_EQ(shadow_rows[0].hypothesis_status, "tracked");
+  EXPECT_EQ(shadow_rows[1].event_type, "hypothesis_input");
+  EXPECT_EQ(shadow_rows[1].candidate_raw_track_id, 30);
+  EXPECT_EQ(shadow_rows[1].reason, "duplicate_output_hidden");
+  EXPECT_EQ(shadow_rows[1].related_raw_track_id, 10);
+  EXPECT_EQ(shadow_rows[1].hypothesis_status, "suppressed_duplicate_candidate");
+}
+
 TEST(IdentityManagerTest, DefaultMissingWindowKeepsIdentityOccludedAcrossFourSecondAbsence) {
   vision_demo_host::IdentityManager manager;
 

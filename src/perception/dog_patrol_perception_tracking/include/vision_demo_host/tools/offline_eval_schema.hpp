@@ -23,4 +23,21 @@ inline std::string TrackletHypothesesCsvHelp() {
       "  that caused the suppression relation.\n";
 }
 
+inline std::string Phase3ShadowStateCsvHeader() {
+  return "frame_idx,event_idx,event_type,group_id,semantic_ids,carrier_semantic_id,carrier_raw_track_id,"
+         "candidate_raw_track_id,reason,related_raw_track_id,hypothesis_status";
+}
+
+inline std::string Phase3ShadowStateCsvHelp() {
+  return
+      "Phase 3 shadow state CSV:\n"
+      "  phase3_shadow_state.csv is written when --save-tracks-csv=true.\n"
+      "  Schema: frame_idx,event_idx,event_type,group_id,semantic_ids,carrier_semantic_id,"
+      "carrier_raw_track_id,candidate_raw_track_id,reason,related_raw_track_id,hypothesis_status\n"
+      "  This file is shadow-only. It records identity-layer debug rows derived from tracklet_hypotheses.csv\n"
+      "  and does not change semantic id assignment, primary state, overlay, UDP, or LegacyIdentityMatcher output.\n"
+      "  Issue #7 only emits hypothesis_input rows as the Phase 3 input/debug path; MergedGroup and\n"
+      "  SplitCandidate detection are intentionally left to later slices.\n";
+}
+
 }  // namespace vision_demo_host::tools

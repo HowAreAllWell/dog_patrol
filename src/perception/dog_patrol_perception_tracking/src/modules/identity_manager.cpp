@@ -78,6 +78,25 @@ IdentityManager::ScoreDebugRow FromLegacyDebugRow(const LegacyIdentityMatcher::S
   return out;
 }
 
+std::string TrackletHypothesisStatusToDebugString(const TrackletHypothesisStatus status) {
+  switch (status) {
+    case TrackletHypothesisStatus::kTracked:
+      return "tracked";
+    case TrackletHypothesisStatus::kTentative:
+      return "tentative";
+    case TrackletHypothesisStatus::kLostPrediction:
+      return "lost_prediction";
+    case TrackletHypothesisStatus::kSuppressedDuplicateCandidate:
+      return "suppressed_duplicate_candidate";
+    case TrackletHypothesisStatus::kSplitCandidate:
+      return "split_candidate";
+    case TrackletHypothesisStatus::kLowQualityCandidate:
+      return "low_quality_candidate";
+    default:
+      return "unknown";
+  }
+}
+
 const IdentityManager::ScoreDebugRow *FindBestDebugRow(
     const std::vector<IdentityManager::ScoreDebugRow> &rows, const int raw_track_id, const int semantic_id) {
   const IdentityManager::ScoreDebugRow *fallback = nullptr;
@@ -123,6 +142,7 @@ class IdentityManager::Impl {
   Config config;
   LegacyIdentityMatcher legacy_identity_matcher;
   std::vector<ScoreDebugRow> last_score_debug_rows;
+  std::vector<Phase3ShadowDebugRow> last_phase3_shadow_debug_rows;
 };
 
 IdentityManager::IdentityManager() : impl_(std::make_shared<Impl>()) {}
@@ -134,10 +154,17 @@ bool IdentityManager::Initialize(std::string *error) { return impl_->legacy_iden
 void IdentityManager::Reset() {
   impl_->legacy_identity_matcher.Reset();
   impl_->last_score_debug_rows.clear();
+  impl_->last_phase3_shadow_debug_rows.clear();
   raw_to_semantic_id_.clear();
 }
 
 IdentityManagerResult IdentityManager::Update(const std::vector<TrackletObservation> &observations,
+                                              const PrimaryTargetResult &primary, const cv::Mat *frame) {
+  return Update(observations, {}, primary, frame);
+}
+
+IdentityManagerResult IdentityManager::Update(const std::vector<TrackletObservation> &observations,
+                                              const std::vector<TrackletHypothesis> &shadow_hypotheses,
                                               const PrimaryTargetResult &primary, const cv::Mat *frame) {
   const std::vector<Track> tracks = TracksFromObservations(observations);
   raw_to_semantic_id_ = impl_->legacy_identity_matcher.Update(tracks, primary, frame);
@@ -146,6 +173,22 @@ IdentityManagerResult IdentityManager::Update(const std::vector<TrackletObservat
   impl_->last_score_debug_rows.reserve(legacy_debug_rows.size());
   for (const auto &row : legacy_debug_rows) {
     impl_->last_score_debug_rows.push_back(FromLegacyDebugRow(row));
+  }
+
+  impl_->last_phase3_shadow_debug_rows.clear();
+  impl_->last_phase3_shadow_debug_rows.reserve(shadow_hypotheses.size());
+  const int current_frame_idx = impl_->last_score_debug_rows.empty() ? -1 : impl_->last_score_debug_rows.front().frame_idx;
+  int event_idx = 0;
+  for (const auto &hypothesis : shadow_hypotheses) {
+    Phase3ShadowDebugRow row;
+    row.frame_idx = current_frame_idx;
+    row.event_idx = event_idx++;
+    row.event_type = "hypothesis_input";
+    row.candidate_raw_track_id = hypothesis.raw_track_id;
+    row.reason = hypothesis.candidate_reason;
+    row.related_raw_track_id = hypothesis.related_raw_track_id.value_or(-1);
+    row.hypothesis_status = TrackletHypothesisStatusToDebugString(hypothesis.status);
+    impl_->last_phase3_shadow_debug_rows.push_back(std::move(row));
   }
 
   IdentityManagerResult result;
@@ -210,6 +253,10 @@ bool IdentityManager::IsFeatureUpdateFrozen() const { return impl_->legacy_ident
 
 const std::vector<IdentityManager::ScoreDebugRow> &IdentityManager::LastScoreDebugRows() const {
   return impl_->last_score_debug_rows;
+}
+
+const std::vector<IdentityManager::Phase3ShadowDebugRow> &IdentityManager::LastPhase3ShadowDebugRows() const {
+  return impl_->last_phase3_shadow_debug_rows;
 }
 
 std::vector<Track> IdentityManager::TracksFromObservations(const std::vector<TrackletObservation> &observations) {
