@@ -20,6 +20,7 @@
 #include "vision_demo_host/modules/preprocess_infer.hpp"
 #include "vision_demo_host/modules/primary_target_manager.hpp"
 #include "vision_demo_host/modules/udp_json_adapter.hpp"
+#include "vision_demo_host/tools/offline_eval_schema.hpp"
 #include "vision_demo_host/types.hpp"
 
 namespace {
@@ -216,7 +217,8 @@ void PrintUsage() {
       << "  --sid-reid-model-path <path>           (default: \"\")\n"
       << "  --sid-reid-input-width <n>             (default: 128)\n"
       << "  --sid-reid-input-height <n>            (default: 256)\n"
-      << "  --help\n";
+      << "  --help\n\n"
+      << vision_demo_host::tools::TrackletHypothesesCsvHelp();
 }
 
 bool ParseBool(const std::string &v, bool *out) {
@@ -941,8 +943,7 @@ DatasetMetrics EvaluateOne(const Options &opt, const std::filesystem::path &data
     tracks_csv << "frame_idx,track_idx,raw_track_id,semantic_id,class_id,score,x,y,w,h,is_confirmed,time_since_update,"
                   "assoc_stage,assoc_cost,assoc_iou,assoc_motion_dist,assoc_app_dist,assoc_appearance_used,low_score_update,just_recovered,assoc_final_gate,assoc_reject_reason,occlusion_suspect\n";
     hypotheses_csv.open(result_dir / "tracklet_hypotheses.csv");
-    hypotheses_csv << "frame_idx,hypothesis_idx,status,raw_track_id,class_id,score,x,y,w,h,reason,related_raw_track_id,"
-                      "assoc_stage,assoc_cost,assoc_iou,assoc_motion_dist,assoc_app_dist,assoc_appearance_used,assoc_final_gate,assoc_reject_reason\n";
+    hypotheses_csv << vision_demo_host::tools::TrackletHypothesesCsvHeader() << "\n";
     identities_csv.open(result_dir / "identities.csv");
     identities_csv << "frame_idx,semantic_id,identity_state,visible,supporting_raw_track_id,class_id,score,x,y,w,h,"
                       "missing_frames,primary,occlusion_suspect,low_score_update,just_recovered,assignment_stage,"

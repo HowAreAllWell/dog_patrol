@@ -148,6 +148,12 @@ if(BUILD_TESTING)
     target_link_libraries(test_yolo26_output_contract ${PROJECT_NAME}_modules)
     ament_target_dependencies(test_yolo26_output_contract rclcpp)
   endif()
+
+  ament_add_gtest(test_offline_eval_schema test/test_offline_eval_schema.cpp)
+  if(TARGET test_offline_eval_schema)
+    target_compile_features(test_offline_eval_schema PUBLIC cxx_std_17)
+    target_include_directories(test_offline_eval_schema PRIVATE include)
+  endif()
 endif()
 
 ament_package()

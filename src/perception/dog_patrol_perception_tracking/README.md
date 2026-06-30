@@ -450,6 +450,7 @@ ros2 run vision_demo_host offline_eval_recordings
   - `summary.json`
   - `summary.md`
   - `per_frame.csv`（可关闭）
+  - `tracklet_hypotheses.csv`（随 `--save-tracks-csv=true` 输出，用于 shadow candidate 验收）
 - 映射表：
   - `dataset_dir_map.csv`（`sXX` 与原始数据集目录的对应关系）
 - 总表：
@@ -469,6 +470,11 @@ ros2 run vision_demo_host offline_eval_recordings
   - `sid_mode`（`NORMAL` / `MERGED` / `SPLIT_RECOVERY`）
   - `sid_freeze`（1=语义特征更新冻结，0=可更新）
 - `primary_raw_track_id_debug` 仅用于离线排障，不参与画面叠字语义
+- `tracklet_hypotheses.csv` 固定字段：
+  - `frame_idx,hypothesis_idx,status,raw_track_id,class_id,score,x,y,w,h,reason,related_raw_track_id,assoc_stage,assoc_cost,assoc_iou,assoc_motion_dist,assoc_app_dist,assoc_appearance_used,assoc_final_gate,assoc_reject_reason`
+  - `status/reason` 说明 candidate 是最终 `tracked` 输出、被 new-track duplicate suppression 压制，还是 duplicate output hidden。
+  - `related_raw_track_id` 用于把 suppressed/hidden candidate 关联到触发压制或隐藏关系的 raw track；无关联时为 `-1`。
+  - 复盘 `orin_hik_h264_MOT/01` 时，优先筛 `frame_idx` 在 `760`、`795`、`1030` 附近的行，结合 `reason`、`related_raw_track_id` 和 association 摘要判断 candidate 为何保留、压制或隐藏。
 - `LOCKED -> LOST` 转换次数
 - `bearing_base_rad` 抖动指标：
   - `bearing_diff_abs_mean`
