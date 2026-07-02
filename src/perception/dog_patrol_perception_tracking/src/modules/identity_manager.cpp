@@ -39,6 +39,7 @@ LegacyIdentityMatcher::Config ToLegacyConfig(const IdentityManager::Config &conf
   out.merged_requires_overlap = config.merged_requires_overlap;
   out.disable_legacy_merged_split_handoff = config.enable_phase4_merged_split_handoff;
   out.disable_legacy_merged_side_recovery = config.enable_phase4_merged_side_recovery;
+  out.disable_legacy_merged_single_blob_handoff = config.enable_phase4_merged_single_blob_handoff;
   out.reid_enable = config.reid_enable;
   out.reid_backend = config.reid_backend;
   out.reid_model_path = config.reid_model_path;
@@ -500,6 +501,76 @@ IdentityManagerResult IdentityManager::Update(const std::vector<TrackletObservat
     }
   };
 
+  const auto append_phase4_single_blob_handoff_row = [&](const Phase3ShadowDebugRow &decision_row) {
+    Phase3ShadowDebugRow row = decision_row;
+    row.event_idx = event_idx++;
+    row.event_type = "phase4_merged_single_blob_handoff";
+    row.reason = "merged_single_blob_handoff";
+    impl_->last_phase3_shadow_debug_rows.push_back(std::move(row));
+  };
+
+  const auto apply_phase4_single_blob_handoff = [&]() {
+    if (!impl_->config.enable_phase4_merged_single_blob_handoff) {
+      return;
+    }
+
+    const Phase3ShadowDebugRow *continuity_decision = nullptr;
+    for (int i = 0; i < static_cast<int>(impl_->last_phase3_shadow_debug_rows.size()); ++i) {
+      const auto &row = impl_->last_phase3_shadow_debug_rows[static_cast<std::size_t>(i)];
+      if (row.event_type == "single_blob_handoff_decision" &&
+          row.reason == "single_blob_continuity_kept" &&
+          row.carrier_raw_track_id > 0 &&
+          row.carrier_semantic_id > 0 &&
+          row.candidate_semantic_id == row.carrier_semantic_id) {
+        continuity_decision = &row;
+      }
+    }
+
+    int accepted_decision_index = -1;
+    for (int i = 0; i < static_cast<int>(impl_->last_phase3_shadow_debug_rows.size()); ++i) {
+      const auto &row = impl_->last_phase3_shadow_debug_rows[static_cast<std::size_t>(i)];
+      if (row.event_type != "single_blob_handoff_decision" ||
+          (row.reason != "single_blob_handoff_accepted" &&
+           row.reason != "single_blob_handoff_eligible") ||
+          row.carrier_raw_track_id <= 0 || row.carrier_semantic_id <= 0 ||
+          row.candidate_semantic_id <= 0 ||
+          row.carrier_semantic_id == row.candidate_semantic_id) {
+        continue;
+      }
+      if (row.reason == "single_blob_handoff_eligible" && continuity_decision != nullptr) {
+        const bool handoff_margin_ok =
+            row.decision_geo_cost <= 0.75F &&
+            row.decision_final_score <= continuity_decision->decision_final_score + 0.04F &&
+            row.decision_app_cost + 0.025F <= continuity_decision->decision_app_cost;
+        if (!handoff_margin_ok) {
+          continue;
+        }
+      }
+      accepted_decision_index = i;
+      break;
+    }
+    if (accepted_decision_index < 0) {
+      return;
+    }
+    auto &accepted_decision =
+        impl_->last_phase3_shadow_debug_rows[static_cast<std::size_t>(accepted_decision_index)];
+
+    const bool applied = impl_->legacy_identity_matcher.ApplyPhase4MergedSingleBlobHandoff(
+        tracks, accepted_decision.carrier_raw_track_id, accepted_decision.carrier_semantic_id,
+        accepted_decision.candidate_semantic_id, frame);
+    if (!applied) {
+      return;
+    }
+
+    accepted_decision.reason = "single_blob_handoff_accepted";
+    accepted_decision.decision_selected = true;
+    accepted_decision.decision_accepted = true;
+    raw_to_semantic_id_[accepted_decision.carrier_raw_track_id] = accepted_decision.candidate_semantic_id;
+    refresh_legacy_debug_rows();
+    result = build_result_from_legacy();
+    append_phase4_single_blob_handoff_row(accepted_decision);
+  };
+
   const auto recovery_group = [&]() -> const Impl::MergedGroupShadowState * {
     if (impl_->merged_group_shadow.active) {
       return &impl_->merged_group_shadow;
@@ -683,6 +754,7 @@ IdentityManagerResult IdentityManager::Update(const std::vector<TrackletObservat
   }
 
   append_single_blob_decision_rows();
+  apply_phase4_single_blob_handoff();
   apply_phase4_side_recovery();
   append_side_reappearance_rows();
 

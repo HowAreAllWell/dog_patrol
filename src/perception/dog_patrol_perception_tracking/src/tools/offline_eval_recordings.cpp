@@ -72,6 +72,7 @@ struct Options {
   bool sid_merged_requires_overlap{true};
   bool sid_enable_phase4_merged_split_handoff{false};
   bool sid_enable_phase4_merged_side_recovery{false};
+  bool sid_enable_phase4_merged_single_blob_handoff{false};
   bool sid_reid_enable{true};  // compatibility input, runtime forces true.
   std::string sid_reid_backend{"light"};
   std::string sid_reid_model_path{};
@@ -216,6 +217,7 @@ void PrintUsage() {
       << "  --sid-merged-requires-overlap <true|false> (default: true)\n"
       << "  --sid-enable-phase4-merged-split-handoff <true|false> (default: false)\n"
       << "  --sid-enable-phase4-merged-side-recovery <true|false> (default: false)\n"
+      << "  --sid-enable-phase4-merged-single-blob-handoff <true|false> (default: false)\n"
       << "  --sid-reid-enable <true|false>         (compat-only; runtime forces true)\n"
       << "  --sid-reid-backend <light|osnet_onnx> (default: light)\n"
       << "  --sid-reid-model-path <path>           (default: \"\")\n"
@@ -624,6 +626,15 @@ bool ParseArgs(int argc, char **argv, Options *opt, std::string *error) {
         return false;
       }
       opt->sid_enable_phase4_merged_side_recovery = v;
+    } else if (arg == "--sid-enable-phase4-merged-single-blob-handoff") {
+      bool v = false;
+      if (!ParseBool(need(arg), &v)) {
+        if (error != nullptr) {
+          *error = "Invalid value for --sid-enable-phase4-merged-single-blob-handoff";
+        }
+        return false;
+      }
+      opt->sid_enable_phase4_merged_single_blob_handoff = v;
     } else if (arg == "--sid-reid-enable") {
       bool v = true;
       if (!ParseBool(need(arg), &v)) {
@@ -909,6 +920,7 @@ DatasetMetrics EvaluateOne(const Options &opt, const std::filesystem::path &data
   sid_cfg.merged_requires_overlap = opt.sid_merged_requires_overlap;
   sid_cfg.enable_phase4_merged_split_handoff = opt.sid_enable_phase4_merged_split_handoff;
   sid_cfg.enable_phase4_merged_side_recovery = opt.sid_enable_phase4_merged_side_recovery;
+  sid_cfg.enable_phase4_merged_single_blob_handoff = opt.sid_enable_phase4_merged_single_blob_handoff;
   if (!opt.sid_reid_enable) {
     std::cout << "[offline_eval] reid is mandatory; override --sid-reid-enable=false to true" << std::endl;
   }

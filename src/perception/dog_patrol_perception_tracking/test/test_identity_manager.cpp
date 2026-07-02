@@ -593,6 +593,121 @@ TEST(IdentityManagerTest, EmitsSingleBlobHandoffAcceptedDecisionWithoutChangingL
             rows.end());
 }
 
+TEST(IdentityManagerTest, Phase4MergedSingleBlobHandoffFlagKeepsDefaultOffAndEmitsMigratedDecision) {
+  vision_demo_host::IdentityManager::Config cfg;
+  cfg.max_missing_frames = 180;
+  cfg.active_assign_max_cost = 0.55F;
+  cfg.min_assignment_margin = 0.08F;
+  cfg.missing_assign_max_app_cost = 0.50F;
+  cfg.stable_frames_before_feature_update = 1;
+  cfg.overlap_iou_freeze = 0.10F;
+
+  const std::vector<float> primary_feature{1.0F, 0.0F};
+  const std::vector<float> secondary_feature{0.0F, 1.0F};
+
+  const auto run_sequence = [&](vision_demo_host::IdentityManager manager) {
+    EXPECT_EQ(manager.Update(vision_demo_host::TrackletObservationsFromTracks({
+                                 MakePersonTrack(1, cv::Rect2f(300, 220, 240, 620), primary_feature),
+                                 MakePersonTrack(2, cv::Rect2f(700, 160, 180, 560), secondary_feature),
+                             }),
+                             LockedPrimary(1, 1))
+                  .SemanticIdForRawTrack(1),
+              1);
+    EXPECT_EQ(manager.Update(vision_demo_host::TrackletObservationsFromTracks({
+                                 MakePersonTrack(1, cv::Rect2f(320, 220, 240, 620), primary_feature),
+                                 MakePersonTrack(2, cv::Rect2f(680, 160, 180, 560), secondary_feature),
+                             }),
+                             LockedPrimary(1, 1))
+                  .SemanticIdForRawTrack(2),
+              2);
+    manager.Update(vision_demo_host::TrackletObservationsFromTracks({
+                       MakePersonTrack(1, cv::Rect2f(560, 240, 200, 560), primary_feature),
+                       MakePersonTrack(2, cv::Rect2f(590, 170, 180, 560), secondary_feature),
+                   }),
+                   LockedPrimary(1, 1));
+    for (int i = 0; i < 18; ++i) {
+      EXPECT_EQ(manager.Update(vision_demo_host::TrackletObservationsFromTracks({
+                                   MakePersonTrack(2, cv::Rect2f(590, 170, 220, 600), secondary_feature),
+                               }),
+                               LockedPrimary(1, 1))
+                    .SemanticIdForRawTrack(2),
+                2);
+    }
+
+    const auto handoff = manager.Update(
+        vision_demo_host::TrackletObservationsFromTracks({
+            MakePersonTrack(2, cv::Rect2f(560, 240, 200, 560), primary_feature),
+        }),
+        LockedPrimary(1, 1));
+    return std::make_pair(handoff, manager);
+  };
+
+  auto [default_result, default_manager] = run_sequence(vision_demo_host::IdentityManager(cfg));
+  ASSERT_EQ(default_result.SemanticIdForRawTrack(2), 1);
+  EXPECT_NE(FindScoreStage(default_manager.LastScoreDebugRows(), 2, "merged_candidate"), nullptr);
+  EXPECT_EQ(FindScoreStage(default_manager.LastScoreDebugRows(), 2, "phase4_merged_single_blob_handoff"), nullptr);
+  EXPECT_EQ(FindEvent(default_manager.LastPhase3ShadowDebugRows(), "phase4_merged_single_blob_handoff", 2), nullptr);
+
+  cfg.enable_phase4_merged_single_blob_handoff = true;
+  auto [migrated_result, migrated_manager] = run_sequence(vision_demo_host::IdentityManager(cfg));
+  EXPECT_EQ(migrated_result.SemanticIdForRawTrack(2), default_result.SemanticIdForRawTrack(2));
+  EXPECT_FALSE(std::any_of(migrated_manager.LastScoreDebugRows().begin(),
+                           migrated_manager.LastScoreDebugRows().end(), [](const auto &row) {
+                             return row.raw_track_id == 2 && row.semantic_id == 1 &&
+                                    row.stage == "merged_candidate" && row.accepted;
+                           }));
+  EXPECT_NE(FindScoreStage(migrated_manager.LastScoreDebugRows(), 2, "phase4_merged_single_blob_handoff"), nullptr);
+
+  const auto *decision_row =
+      FindEvent(migrated_manager.LastPhase3ShadowDebugRows(), "single_blob_handoff_decision", 2);
+  ASSERT_NE(decision_row, nullptr);
+  EXPECT_EQ(decision_row->candidate_semantic_id, 1);
+  EXPECT_EQ(decision_row->reason, "single_blob_handoff_accepted");
+  EXPECT_TRUE(decision_row->decision_selected);
+  EXPECT_TRUE(decision_row->decision_accepted);
+
+  const auto *migrated_row =
+      FindEvent(migrated_manager.LastPhase3ShadowDebugRows(), "phase4_merged_single_blob_handoff", 2);
+  ASSERT_NE(migrated_row, nullptr);
+  EXPECT_EQ(migrated_row->candidate_semantic_id, 1);
+  EXPECT_EQ(migrated_row->carrier_raw_track_id, 2);
+  EXPECT_EQ(migrated_row->carrier_semantic_id, 2);
+  EXPECT_EQ(migrated_row->reason, "merged_single_blob_handoff");
+  EXPECT_TRUE(migrated_row->decision_selected);
+  EXPECT_TRUE(migrated_row->decision_accepted);
+  EXPECT_NEAR(migrated_row->decision_app_cost, decision_row->decision_app_cost, 1e-5F);
+  EXPECT_NEAR(migrated_row->decision_final_score, decision_row->decision_final_score, 1e-5F);
+}
+
+TEST(IdentityManagerTest, Phase4MergedSingleBlobHandoffFlagDoesNotAcceptRejectedDecisionRows) {
+  vision_demo_host::IdentityManager::Config cfg;
+  cfg.enable_phase4_merged_single_blob_handoff = true;
+  cfg.app_w = 0.0F;
+  cfg.geo_w = 1.0F;
+  cfg.time_w = 0.0F;
+  cfg.min_assignment_margin = 0.08F;
+  cfg.overlap_iou_freeze = 0.10F;
+  vision_demo_host::IdentityManager manager(cfg);
+
+  const auto left = MakePersonTrack(1, cv::Rect2f(0, 0, 100, 100));
+  const auto right = MakePersonTrack(2, cv::Rect2f(20, 0, 100, 100), {0.0F, 1.0F, 0.0F});
+  const auto first = manager.Update(vision_demo_host::TrackletObservationsFromTracks({left, right}), IdlePrimary());
+  ASSERT_EQ(first.SemanticIdForRawTrack(1), 1);
+  ASSERT_EQ(first.SemanticIdForRawTrack(2), 2);
+
+  const auto merged = manager.Update(
+      vision_demo_host::TrackletObservationsFromTracks({
+          MakePersonTrack(1, cv::Rect2f(11, 0, 100, 100), {0.0F, 1.0F, 0.0F}),
+      }),
+      IdlePrimary());
+
+  ASSERT_EQ(manager.CurrentMode(), vision_demo_host::IdentityManager::Mode::kMerged);
+  EXPECT_EQ(merged.SemanticIdForRawTrack(1), 1);
+  EXPECT_NE(FindEvent(manager.LastPhase3ShadowDebugRows(), "single_blob_handoff_decision", 1), nullptr);
+  EXPECT_EQ(FindEvent(manager.LastPhase3ShadowDebugRows(), "phase4_merged_single_blob_handoff", 1), nullptr);
+  EXPECT_EQ(FindScoreStage(manager.LastScoreDebugRows(), 1, "phase4_merged_single_blob_handoff"), nullptr);
+}
+
 TEST(IdentityManagerTest, EmitsSideReappearanceCandidateLinkedToMergedGroupWithoutChangingAssignments) {
   vision_demo_host::IdentityManager::Config cfg;
   cfg.max_missing_frames = 180;
