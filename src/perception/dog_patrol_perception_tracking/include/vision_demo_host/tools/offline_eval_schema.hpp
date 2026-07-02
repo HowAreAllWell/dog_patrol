@@ -51,6 +51,9 @@ inline std::string Phase3ShadowStateCsvHelp() {
       "  evidence reason and related_raw_track_id so they can be linked back to tracklet_hypotheses.csv.\n"
       "  When --sid-enable-phase4-merged-split-handoff=true is used, the migrated Phase 4 split handoff\n"
       "  emits event_type=phase4_merged_split_handoff with reason=merged_split_handoff.\n"
+      "  Side-reappearance observability emits event_type=side_reappearance_candidate with\n"
+      "  reason=side_reappearance_candidate when a side raw track is recovered by legacy merged_side_recovery;\n"
+      "  the row links the candidate raw id to the preceding group/carrier and missing semantic guess.\n"
       "  Acceptance review windows: 01:746-771 for group lifecycle, 01:793-795 for hidden split candidates,\n"
       "  01:1015-1031 for split recovery evidence, and 02:790-850 for the second dataset handoff case.\n";
 }

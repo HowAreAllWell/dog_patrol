@@ -85,6 +85,8 @@ TEST(OfflineEvalSchemaTest, Phase3ShadowStateHelpDocumentsShadowOnlyContract) {
       "split_candidate_end",
       "phase4_merged_split_handoff",
       "merged_split_handoff",
+      "side_reappearance_candidate",
+      "merged_side_recovery",
       "--sid-enable-phase4-merged-split-handoff",
       "tracklet_hypotheses.csv",
       "0-based",

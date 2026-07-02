@@ -409,6 +409,88 @@ TEST(IdentityManagerTest, EndsShadowSplitCandidateWhenMergedGroupEnds) {
   EXPECT_EQ(manager.CurrentMode(), vision_demo_host::IdentityManager::Mode::kNormal);
 }
 
+TEST(IdentityManagerTest, EmitsSideReappearanceCandidateLinkedToMergedGroupWithoutChangingAssignments) {
+  vision_demo_host::IdentityManager::Config cfg;
+  cfg.max_missing_frames = 180;
+  cfg.active_assign_max_cost = 0.55F;
+  cfg.min_assignment_margin = 0.08F;
+  cfg.missing_assign_max_app_cost = 0.50F;
+  cfg.stable_frames_before_feature_update = 1;
+  cfg.overlap_iou_freeze = 0.10F;
+  cfg.merge_hold_frames = 1;
+  cfg.split_stable_frames = 1;
+  cfg.merged_requires_overlap = false;
+  vision_demo_host::IdentityManager manager(cfg);
+
+  const std::vector<float> primary_feature{1.0F, 0.0F};
+  const std::vector<float> secondary_feature{0.0F, 1.0F};
+  const std::vector<float> side_reappear_feature{0.7F, 0.3F};
+
+  const auto first = manager.Update(
+      vision_demo_host::TrackletObservationsFromTracks({
+          MakePersonTrack(4, cv::Rect2f(330, 0, 300, 900), primary_feature),
+          MakePersonTrack(5, cv::Rect2f(610, 70, 180, 680), secondary_feature),
+      }),
+      IdlePrimary());
+  ASSERT_EQ(first.SemanticIdForRawTrack(4), 1);
+  ASSERT_EQ(first.SemanticIdForRawTrack(5), 2);
+
+  const auto overlap = manager.Update(
+      vision_demo_host::TrackletObservationsFromTracks({
+          MakePersonTrack(4, cv::Rect2f(330, 0, 310, 900), primary_feature),
+          MakePersonTrack(5, cv::Rect2f(590, 170, 125, 555), secondary_feature),
+      }),
+      IdlePrimary());
+  ASSERT_EQ(overlap.SemanticIdForRawTrack(4), 1);
+  ASSERT_EQ(overlap.SemanticIdForRawTrack(5), 2);
+
+  for (int i = 0; i < 30; ++i) {
+    const auto merged = manager.Update(
+        vision_demo_host::TrackletObservationsFromTracks({
+            MakePersonTrack(4, cv::Rect2f(315, 0, 300, 930), primary_feature),
+        }),
+        IdlePrimary());
+    ASSERT_EQ(merged.SemanticIdForRawTrack(4), 1);
+  }
+
+  vision_demo_host::TrackletHypothesis side_reappearance;
+  side_reappearance.raw_track_id = 6;
+  side_reappearance.class_id = vision_demo_host::ClassId::kPerson;
+  side_reappearance.confidence = 0.90F;
+  side_reappearance.bbox = cv::Rect2f(179, 228, 194, 514);
+  side_reappearance.status = vision_demo_host::TrackletHypothesisStatus::kTracked;
+  side_reappearance.candidate_reason = "final_track_output";
+
+  const auto recovered = manager.Update(
+      vision_demo_host::TrackletObservationsFromTracks({
+          MakePersonTrack(4, cv::Rect2f(310, 0, 298, 928), primary_feature),
+          MakePersonTrack(6, cv::Rect2f(179, 228, 194, 514), side_reappear_feature),
+      }),
+      {side_reappearance},
+      IdlePrimary());
+
+  ASSERT_EQ(recovered.SemanticIdForRawTrack(4), 1);
+  ASSERT_EQ(recovered.SemanticIdForRawTrack(6), 2);
+  EXPECT_NE(FindScoreStage(manager.LastScoreDebugRows(), 6, "merged_side_recovery"), nullptr);
+
+  const auto *row = FindEvent(manager.LastPhase3ShadowDebugRows(), "side_reappearance_candidate", 6);
+  ASSERT_NE(row, nullptr);
+  EXPECT_EQ(row->group_id, 1);
+  EXPECT_EQ(row->carrier_raw_track_id, 4);
+  EXPECT_EQ(row->carrier_semantic_id, 1);
+  EXPECT_EQ(row->candidate_raw_track_id, 6);
+  EXPECT_EQ(row->candidate_semantic_id, 2);
+  EXPECT_EQ(row->reason, "side_reappearance_candidate");
+  EXPECT_EQ(row->related_raw_track_id, 4);
+  EXPECT_EQ(row->hypothesis_status, "tracked");
+  EXPECT_EQ(row->candidate_stable_frames, 1);
+  EXPECT_FLOAT_EQ(row->candidate_confidence, 0.90F);
+  EXPECT_FLOAT_EQ(row->candidate_bbox.x, 179.0F);
+  EXPECT_FLOAT_EQ(row->candidate_bbox.y, 228.0F);
+  EXPECT_FLOAT_EQ(row->candidate_bbox.width, 194.0F);
+  EXPECT_FLOAT_EQ(row->candidate_bbox.height, 514.0F);
+}
+
 TEST(IdentityManagerTest, Phase4MergedSplitHandoffFlagKeepsDefaultOffAndEmitsMigratedDecision) {
   vision_demo_host::IdentityManager::Config cfg;
   cfg.max_missing_frames = 180;

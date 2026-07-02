@@ -205,6 +205,8 @@ class IdentityManager::Impl {
   std::vector<ScoreDebugRow> last_score_debug_rows;
   std::vector<Phase3ShadowDebugRow> last_phase3_shadow_debug_rows;
   MergedGroupShadowState merged_group_shadow;
+  MergedGroupShadowState recent_merged_group_shadow;
+  bool has_recent_merged_group_shadow{false};
   std::map<int, SplitCandidateShadowState> split_candidate_shadow_by_raw_id;
   int next_merged_group_id{1};
   int phase3_frame_index{0};
@@ -221,6 +223,8 @@ void IdentityManager::Reset() {
   impl_->last_score_debug_rows.clear();
   impl_->last_phase3_shadow_debug_rows.clear();
   impl_->merged_group_shadow = Impl::MergedGroupShadowState{};
+  impl_->recent_merged_group_shadow = Impl::MergedGroupShadowState{};
+  impl_->has_recent_merged_group_shadow = false;
   impl_->split_candidate_shadow_by_raw_id.clear();
   impl_->next_merged_group_id = 1;
   impl_->phase3_frame_index = 0;
@@ -397,6 +401,73 @@ IdentityManagerResult IdentityManager::Update(const std::vector<TrackletObservat
     impl_->last_phase3_shadow_debug_rows.push_back(std::move(row));
   };
 
+  const auto append_side_reappearance_rows = [&]() {
+    const Impl::MergedGroupShadowState *group = nullptr;
+    if (impl_->merged_group_shadow.active) {
+      group = &impl_->merged_group_shadow;
+    } else if (impl_->has_recent_merged_group_shadow &&
+               current_frame_idx - impl_->recent_merged_group_shadow.last_update_frame <= 2) {
+      group = &impl_->recent_merged_group_shadow;
+    }
+    if (group == nullptr || group->group_id <= 0) {
+      return;
+    }
+
+    for (const auto &hypothesis : shadow_hypotheses) {
+      if (hypothesis.class_id != ClassId::kPerson || hypothesis.raw_track_id <= 0) {
+        continue;
+      }
+
+      const ScoreDebugRow *side_recovery_row = nullptr;
+      for (const auto &row : impl_->last_score_debug_rows) {
+        if (row.raw_track_id == hypothesis.raw_track_id && row.stage == "merged_side_recovery" && row.accepted) {
+          side_recovery_row = &row;
+          break;
+        }
+      }
+      if (side_recovery_row == nullptr) {
+        continue;
+      }
+
+      int related_raw_track_id = group->carrier_raw_track_id;
+      int related_semantic_id = group->carrier_semantic_id;
+      for (const auto &row : impl_->last_score_debug_rows) {
+        if (row.raw_track_id == hypothesis.raw_track_id || !row.accepted ||
+            group->semantic_ids.count(row.semantic_id) == 0) {
+          continue;
+        }
+        if (row.stage == "raw_continuity" || row.stage == "assign_candidate" ||
+            row.stage == "phase4_merged_split_handoff") {
+          related_raw_track_id = row.raw_track_id;
+          related_semantic_id = row.semantic_id;
+          break;
+        }
+      }
+
+      const auto candidate_it = impl_->split_candidate_shadow_by_raw_id.find(hypothesis.raw_track_id);
+      Phase3ShadowDebugRow row;
+      row.frame_idx = current_frame_idx;
+      row.event_idx = event_idx++;
+      row.event_type = "side_reappearance_candidate";
+      row.group_id = group->group_id;
+      row.semantic_ids = JoinSemanticIds(group->semantic_ids);
+      row.carrier_semantic_id = related_semantic_id;
+      row.carrier_raw_track_id = related_raw_track_id;
+      row.candidate_raw_track_id = hypothesis.raw_track_id;
+      row.candidate_semantic_id = side_recovery_row->semantic_id;
+      row.candidate_bbox = hypothesis.bbox;
+      row.candidate_confidence = hypothesis.confidence;
+      row.reason = "side_reappearance_candidate";
+      row.related_raw_track_id = related_raw_track_id;
+      row.hypothesis_status = TrackletHypothesisStatusToDebugString(hypothesis.status);
+      row.candidate_stable_frames =
+          candidate_it == impl_->split_candidate_shadow_by_raw_id.end() ? 1 : candidate_it->second.stable_frames;
+      row.group_age_frames = group->age_frames;
+      row.group_last_update_frame = group->last_update_frame;
+      impl_->last_phase3_shadow_debug_rows.push_back(std::move(row));
+    }
+  };
+
   const bool legacy_group_mode = mode == Mode::kMerged || mode == Mode::kSplitRecovery;
   if (legacy_group_mode) {
     if (!impl_->merged_group_shadow.active) {
@@ -429,8 +500,12 @@ IdentityManagerResult IdentityManager::Update(const std::vector<TrackletObservat
     impl_->split_candidate_shadow_by_raw_id.clear();
     append_group_row("merged_group_end", mode == Mode::kNormalResumed ? "legacy_mode_normal_resumed"
                                                                       : "legacy_mode_normal");
+    impl_->recent_merged_group_shadow = impl_->merged_group_shadow;
+    impl_->has_recent_merged_group_shadow = true;
     impl_->merged_group_shadow = Impl::MergedGroupShadowState{};
   }
+
+  append_side_reappearance_rows();
 
   if (impl_->merged_group_shadow.active) {
     for (auto &entry : impl_->split_candidate_shadow_by_raw_id) {
