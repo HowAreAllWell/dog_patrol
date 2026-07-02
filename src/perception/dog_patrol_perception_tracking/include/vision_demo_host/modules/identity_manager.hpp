@@ -83,6 +83,7 @@ class IdentityManager {
     float min_assignment_margin{0.08F};
     int stable_frames_before_feature_update{3};
     bool merged_requires_overlap{true};
+    bool enable_phase4_merged_split_handoff{false};
     bool reid_enable{true};
     std::string reid_backend{"light"};
     std::string reid_model_path{};

@@ -37,6 +37,7 @@ LegacyIdentityMatcher::Config ToLegacyConfig(const IdentityManager::Config &conf
   out.min_assignment_margin = config.min_assignment_margin;
   out.stable_frames_before_feature_update = config.stable_frames_before_feature_update;
   out.merged_requires_overlap = config.merged_requires_overlap;
+  out.disable_legacy_merged_split_handoff = config.enable_phase4_merged_split_handoff;
   out.reid_enable = config.reid_enable;
   out.reid_backend = config.reid_backend;
   out.reid_model_path = config.reid_model_path;
@@ -157,6 +158,17 @@ bool IsSplitCandidateHypothesis(const TrackletHypothesis &hypothesis) {
          hypothesis.status == TrackletHypothesisStatus::kSplitCandidate;
 }
 
+bool LooksLikeMergedSplitHandoff(const cv::Rect2f &carrier_bbox, const cv::Rect2f &candidate_bbox) {
+  const float carrier_area = std::max(1.0F, carrier_bbox.area());
+  const float candidate_area = std::max(1.0F, candidate_bbox.area());
+  const float carrier_aspect = carrier_bbox.width / std::max(1.0F, carrier_bbox.height);
+  const bool candidate_is_taller_and_higher =
+      candidate_bbox.height >= carrier_bbox.height * 1.08F &&
+      candidate_bbox.y + carrier_bbox.height * 0.05F < carrier_bbox.y;
+  return carrier_aspect <= 0.40F &&
+         (carrier_area <= 0.85F * candidate_area || candidate_is_taller_and_higher);
+}
+
 }  // namespace
 
 class IdentityManager::Impl {
@@ -224,6 +236,7 @@ IdentityManagerResult IdentityManager::Update(const std::vector<TrackletObservat
                                               const std::vector<TrackletHypothesis> &shadow_hypotheses,
                                               const PrimaryTargetResult &primary, const cv::Mat *frame) {
   const std::vector<Track> tracks = TracksFromObservations(observations);
+  const auto prev_raw_to_semantic = raw_to_semantic_id_;
   raw_to_semantic_id_ = impl_->legacy_identity_matcher.Update(tracks, primary, frame);
   impl_->last_score_debug_rows.clear();
   const auto &legacy_debug_rows = impl_->legacy_identity_matcher.LastScoreDebugRows();
@@ -250,55 +263,85 @@ IdentityManagerResult IdentityManager::Update(const std::vector<TrackletObservat
     impl_->last_phase3_shadow_debug_rows.push_back(std::move(row));
   }
 
-  IdentityManagerResult result;
-  result.primary_semantic_id = impl_->legacy_identity_matcher.CurrentPrimarySemanticId();
-  result.feature_update_frozen = impl_->legacy_identity_matcher.IsFeatureUpdateFrozen();
-  const auto mode = CurrentMode();
-  const auto snapshots = impl_->legacy_identity_matcher.IdentitySnapshots();
-  result.identities.reserve(snapshots.size());
-
   std::unordered_map<int, TrackletObservation> observations_by_raw_track_id;
   observations_by_raw_track_id.reserve(observations.size());
   for (const auto &obs : observations) {
     observations_by_raw_track_id[obs.raw_track_id] = obs;
   }
 
-  const auto &debug_rows = impl_->last_score_debug_rows;
-  for (const auto &snapshot : snapshots) {
-    if (snapshot.semantic_id <= 0) {
-      continue;
+  const auto refresh_legacy_debug_rows = [&]() {
+    impl_->last_score_debug_rows.clear();
+    const auto &rows = impl_->legacy_identity_matcher.LastScoreDebugRows();
+    impl_->last_score_debug_rows.reserve(rows.size());
+    for (const auto &row : rows) {
+      impl_->last_score_debug_rows.push_back(FromLegacyDebugRow(row));
     }
+  };
 
-    IdentityObservation identity;
-    identity.semantic_id = snapshot.semantic_id;
-    identity.state = StateFromSnapshot(snapshot, mode, impl_->config.max_missing_frames);
-    identity.class_id = snapshot.class_id;
-    identity.confidence = snapshot.confidence;
-    identity.bbox = snapshot.has_reliable_geometry ? snapshot.reliable_bbox : snapshot.bbox;
-    identity.missing_frames = snapshot.missing_frames;
-    identity.visible = snapshot.seen_this_frame;
-    identity.primary = (result.primary_semantic_id > 0 && identity.semantic_id == result.primary_semantic_id);
-    if (snapshot.supporting_raw_track_id > 0) {
-      identity.supporting_raw_track_id = snapshot.supporting_raw_track_id;
-      auto obs_it = observations_by_raw_track_id.find(snapshot.supporting_raw_track_id);
-      if (obs_it != observations_by_raw_track_id.end()) {
-        const auto &obs = obs_it->second;
-        identity.supporting_tracklet = obs;
-        identity.class_id = obs.class_id;
-        identity.confidence = obs.confidence;
-        identity.bbox = obs.bbox;
-        identity.occlusion_suspect = obs.occlusion_suspect;
-        identity.low_score_update = obs.low_score_update;
-        identity.just_recovered = obs.just_recovered;
-        identity.association = obs.association;
+  const auto build_result_from_legacy = [&]() {
+    IdentityManagerResult built;
+    built.primary_semantic_id = impl_->legacy_identity_matcher.CurrentPrimarySemanticId();
+    built.feature_update_frozen = impl_->legacy_identity_matcher.IsFeatureUpdateFrozen();
+    const auto mode = CurrentMode();
+    const auto snapshots = impl_->legacy_identity_matcher.IdentitySnapshots();
+    built.identities.reserve(snapshots.size());
+    const auto &debug_rows = impl_->last_score_debug_rows;
+    for (const auto &snapshot : snapshots) {
+      if (snapshot.semantic_id <= 0) {
+        continue;
+      }
 
-        if (const auto *row = FindBestDebugRow(debug_rows, obs.raw_track_id, identity.semantic_id); row != nullptr) {
-          identity.assignment = AssignmentEvidenceFromDebug(*row);
+      IdentityObservation identity;
+      identity.semantic_id = snapshot.semantic_id;
+      identity.state = StateFromSnapshot(snapshot, mode, impl_->config.max_missing_frames);
+      identity.class_id = snapshot.class_id;
+      identity.confidence = snapshot.confidence;
+      identity.bbox = snapshot.has_reliable_geometry ? snapshot.reliable_bbox : snapshot.bbox;
+      identity.missing_frames = snapshot.missing_frames;
+      identity.visible = snapshot.seen_this_frame;
+      identity.primary = (built.primary_semantic_id > 0 && identity.semantic_id == built.primary_semantic_id);
+      if (snapshot.supporting_raw_track_id > 0) {
+        identity.supporting_raw_track_id = snapshot.supporting_raw_track_id;
+        auto obs_it = observations_by_raw_track_id.find(snapshot.supporting_raw_track_id);
+        if (obs_it != observations_by_raw_track_id.end()) {
+          const auto &obs = obs_it->second;
+          identity.supporting_tracklet = obs;
+          identity.class_id = obs.class_id;
+          identity.confidence = obs.confidence;
+          identity.bbox = obs.bbox;
+          identity.occlusion_suspect = obs.occlusion_suspect;
+          identity.low_score_update = obs.low_score_update;
+          identity.just_recovered = obs.just_recovered;
+          identity.association = obs.association;
+
+          if (const auto *row = FindBestDebugRow(debug_rows, obs.raw_track_id, identity.semantic_id); row != nullptr) {
+            identity.assignment = AssignmentEvidenceFromDebug(*row);
+          }
         }
       }
-    }
 
-    result.identities.push_back(std::move(identity));
+      built.identities.push_back(std::move(identity));
+    }
+    return built;
+  };
+
+  IdentityManagerResult result = build_result_from_legacy();
+  const auto mode = CurrentMode();
+  int phase4_continuity_raw = -1;
+  int phase4_continuity_sid = -1;
+  if (impl_->config.enable_phase4_merged_split_handoff && impl_->merged_group_shadow.active &&
+      observations_by_raw_track_id.size() >= 2) {
+    for (const auto &[raw_id, semantic_id] : prev_raw_to_semantic) {
+      if (impl_->merged_group_shadow.semantic_ids.count(semantic_id) == 0) {
+        continue;
+      }
+      if (observations_by_raw_track_id.find(raw_id) == observations_by_raw_track_id.end()) {
+        continue;
+      }
+      phase4_continuity_raw = raw_id;
+      phase4_continuity_sid = semantic_id;
+      break;
+    }
   }
 
   std::set<int> person_semantic_ids;
@@ -370,7 +413,7 @@ IdentityManagerResult IdentityManager::Update(const std::vector<TrackletObservat
     } else {
       impl_->merged_group_shadow.age_frames += 1;
       impl_->merged_group_shadow.semantic_ids.insert(person_semantic_ids.begin(), person_semantic_ids.end());
-      if (carrier_semantic_id > 0) {
+      if (carrier_semantic_id > 0 && phase4_continuity_raw <= 0) {
         impl_->merged_group_shadow.carrier_semantic_id = carrier_semantic_id;
         impl_->merged_group_shadow.carrier_raw_track_id = carrier_raw_track_id;
       }
@@ -402,13 +445,15 @@ IdentityManagerResult IdentityManager::Update(const std::vector<TrackletObservat
       const int related_raw_track_id = hypothesis.related_raw_track_id.value_or(-1);
       const bool linked_to_carrier = related_raw_track_id == impl_->merged_group_shadow.carrier_raw_track_id;
       const bool is_carrier_raw = hypothesis.raw_track_id == impl_->merged_group_shadow.carrier_raw_track_id;
-      if (is_carrier_raw) {
+      if (is_carrier_raw || hypothesis.raw_track_id == phase4_continuity_raw) {
         continue;
       }
       const bool known_group_raw =
           raw_to_semantic_id_.find(hypothesis.raw_track_id) != raw_to_semantic_id_.end() &&
           impl_->merged_group_shadow.semantic_ids.count(raw_to_semantic_id_[hypothesis.raw_track_id]) > 0;
-      if (!linked_to_carrier && !known_group_raw) {
+      const bool tracked_split_candidate =
+          hypothesis.status == TrackletHypothesisStatus::kTracked && observations_by_raw_track_id.size() >= 2;
+      if (!linked_to_carrier && !known_group_raw && !tracked_split_candidate) {
         continue;
       }
 
@@ -438,6 +483,51 @@ IdentityManagerResult IdentityManager::Update(const std::vector<TrackletObservat
       candidate.last_update_frame = current_frame_idx;
       candidate.seen_this_frame = true;
       append_split_candidate_row(first_seen ? "split_candidate_enter" : "split_candidate_update", candidate);
+    }
+
+    if (impl_->config.enable_phase4_merged_split_handoff) {
+      for (auto &entry : impl_->split_candidate_shadow_by_raw_id) {
+        auto &candidate = entry.second;
+        if (!candidate.seen_this_frame || phase4_continuity_sid <= 0) {
+          continue;
+        }
+        if (prev_raw_to_semantic.find(candidate.candidate_raw_track_id) != prev_raw_to_semantic.end()) {
+          continue;
+        }
+        const int continuity_raw = phase4_continuity_raw;
+        const int continuity_sid = phase4_continuity_sid;
+        int exposed_partial_sid = -1;
+        for (const int semantic_id : impl_->merged_group_shadow.semantic_ids) {
+          if (semantic_id != continuity_sid) {
+            exposed_partial_sid = semantic_id;
+            break;
+          }
+        }
+        if (continuity_raw <= 0 || continuity_sid <= 0 || exposed_partial_sid <= 0 ||
+            continuity_raw == candidate.candidate_raw_track_id || exposed_partial_sid == continuity_sid) {
+          continue;
+        }
+        const auto carrier_obs_it = observations_by_raw_track_id.find(continuity_raw);
+        if (carrier_obs_it == observations_by_raw_track_id.end() ||
+            !LooksLikeMergedSplitHandoff(carrier_obs_it->second.bbox, candidate.bbox)) {
+          continue;
+        }
+        const bool applied = impl_->legacy_identity_matcher.ApplyPhase4MergedSplitHandoff(
+            tracks, continuity_raw, exposed_partial_sid, candidate.candidate_raw_track_id, continuity_sid,
+            frame);
+        if (!applied) {
+          continue;
+        }
+        raw_to_semantic_id_[continuity_raw] = exposed_partial_sid;
+        raw_to_semantic_id_[candidate.candidate_raw_track_id] = continuity_sid;
+        candidate.candidate_semantic_id = continuity_sid;
+        impl_->merged_group_shadow.carrier_raw_track_id = continuity_raw;
+        impl_->merged_group_shadow.carrier_semantic_id = exposed_partial_sid;
+        refresh_legacy_debug_rows();
+        result = build_result_from_legacy();
+        append_split_candidate_row("phase4_merged_split_handoff", candidate, "merged_split_handoff");
+        break;
+      }
     }
 
     for (auto it = impl_->split_candidate_shadow_by_raw_id.begin();
