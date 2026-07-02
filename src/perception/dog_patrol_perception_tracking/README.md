@@ -222,6 +222,7 @@ src/vision_demo_host/scripts/live_bearing_test.sh \
 - `sid.merge_hold_frames`（进入 merged 后最少保持帧数）
 - `sid.app_w` / `sid.geo_w` / `sid.time_w`（语义恢复一对一分配权重）
 - `sid.enable_phase4_merged_split_handoff`（默认 `false`；Phase 4 `merged_split_handoff` 迁移 feature flag，关闭时默认行为不变）
+- `sid.enable_phase4_merged_side_recovery`（默认 `false`；Phase 4 `merged_side_recovery` 迁移 feature flag，关闭时默认行为不变）
 - `sid.reid_enable`（兼容输入；运行时强制开启语义层外观特征）
 - `sid.reid_backend`（`light` 或 `osnet_onnx`）
 - `sid.reid_model_path`（`osnet_onnx` 的 ONNX 模型路径）
@@ -485,7 +486,8 @@ ros2 run vision_demo_host offline_eval_recordings
   - `#8` 起输出 `MergedGroup` shadow lifecycle：`merged_group_enter`、`merged_group_update`、`merged_group_end`；`group_age_frames` 和 `group_last_update_frame` 用于观察组持续时间和最后更新时间。
   - `#9` 起输出 `SplitCandidate` shadow lifecycle：`split_candidate_enter`、`split_candidate_update`、`split_candidate_end`；候选行包含 group id、candidate raw id、bbox、score、shadow-only `candidate_semantic_id` guess、`reason`、`related_raw_track_id` 和 `candidate_stable_frames`，用于回链 `tracklet_hypotheses.csv` 的 candidate evidence。
   - `sid.enable_phase4_merged_split_handoff=true` / `--sid-enable-phase4-merged-split-handoff true` 时，`merged_split_handoff` 迁移路径会额外输出 `event_type=phase4_merged_split_handoff`、`reason=merged_split_handoff` 行；默认关闭时不输出该 Phase 4 行。
-  - `#13` 起输出 side reappearance shadow evidence：legacy `merged_side_recovery` 恢复的侧边再出现 raw track 会输出 `event_type=side_reappearance_candidate`、`reason=side_reappearance_candidate` 行，回链到 preceding `MergedGroup`、carrier raw id 和 missing semantic guess；该行只用于观测，不迁移 `merged_side_recovery` 决策。
+  - `sid.enable_phase4_merged_side_recovery=true` / `--sid-enable-phase4-merged-side-recovery true` 时，`merged_side_recovery` 迁移路径会额外输出 `event_type=phase4_merged_side_recovery`、`reason=merged_side_recovery` 行；默认关闭时仍使用 legacy `merged_side_recovery`。
+  - `#13` 起输出 side reappearance shadow evidence：默认 legacy 路径中，侧边再出现 raw track 会输出 `event_type=side_reappearance_candidate`、`reason=side_reappearance_candidate` 行；启用 Phase 4 side recovery 后，该行由可同样 join 的 `phase4_merged_side_recovery` 行替代。两者都回链到 preceding `MergedGroup`、carrier raw id 和 missing semantic guess。
   - 回链方法：先按相同 `frame_idx` 筛两张表，再用 `candidate_raw_track_id` 对 `raw_track_id`，并核对 `reason`、`related_raw_track_id`、bbox/score；`duplicate_output_hidden` 行必须保留 hidden candidate 事实，不表示该候选参与显示或 semantic id 分配。
   - 离线 smoke 验收应先看 `phase3_shadow_state.csv` 的 `event_type` 分布，确认至少覆盖 `hypothesis_input`、`merged_group_enter/update/end` 和 `split_candidate_enter/update/end`；再看 `tracklet_hypotheses.csv` 的 #6 reason 分布仍只使用既有 reason 字符串。
   - 人工抽查窗口：`orin_hik_h264_MOT/01` 的 `746-771` 看 group lifecycle，`793-795` 看 hidden split candidate，`1015-1031` 看 split recovery evidence；`760`、`795`、`1030` 附近同时回查 `tracklet_hypotheses.csv`；`orin_hik_h264_MOT/02` 的 `790-850` 用于第二段 handoff/恢复场景抽查。
