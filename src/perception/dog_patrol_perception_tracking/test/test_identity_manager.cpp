@@ -28,6 +28,14 @@ vision_demo_host::PrimaryTargetResult IdlePrimary() {
   return primary;
 }
 
+vision_demo_host::PrimaryTargetResult LockedPrimary(const int semantic_id, const int raw_track_id = -1) {
+  vision_demo_host::PrimaryTargetResult primary;
+  primary.state = vision_demo_host::PrimaryState::kLocked;
+  primary.primary_target_id = semantic_id;
+  primary.raw_track_id = raw_track_id;
+  return primary;
+}
+
 const vision_demo_host::IdentityObservation *FindIdentity(
     const std::vector<vision_demo_host::IdentityObservation> &identities, const int semantic_id) {
   const auto it = std::find_if(identities.begin(), identities.end(), [&](const auto &identity) {
@@ -62,6 +70,18 @@ const vision_demo_host::IdentityManager::ScoreDebugRow *FindScoreStage(
     return row.raw_track_id == raw_track_id && row.stage == stage;
   });
   return it == rows.end() ? nullptr : &(*it);
+}
+
+std::vector<const vision_demo_host::IdentityManager::Phase3ShadowDebugRow *> FindEvents(
+    const std::vector<vision_demo_host::IdentityManager::Phase3ShadowDebugRow> &rows,
+    const std::string &event_type) {
+  std::vector<const vision_demo_host::IdentityManager::Phase3ShadowDebugRow *> out;
+  for (const auto &row : rows) {
+    if (row.event_type == event_type) {
+      out.push_back(&row);
+    }
+  }
+  return out;
 }
 
 }  // namespace
@@ -407,6 +427,170 @@ TEST(IdentityManagerTest, EndsShadowSplitCandidateWhenMergedGroupEnds) {
   EXPECT_EQ(end_row->reason, "group_end");
   EXPECT_EQ(end_row->candidate_stable_frames, 1);
   EXPECT_EQ(manager.CurrentMode(), vision_demo_host::IdentityManager::Mode::kNormal);
+}
+
+TEST(IdentityManagerTest, EmitsSingleBlobContinuityAndMissingAgeDecisionRowsWithoutChangingAssignments) {
+  vision_demo_host::IdentityManager::Config cfg;
+  cfg.app_w = 0.0F;
+  cfg.geo_w = 1.0F;
+  cfg.time_w = 0.0F;
+  cfg.min_assignment_margin = 0.08F;
+  cfg.overlap_iou_freeze = 0.10F;
+  vision_demo_host::IdentityManager manager(cfg);
+
+  const auto left = MakePersonTrack(1, cv::Rect2f(0, 0, 100, 100));
+  const auto right = MakePersonTrack(2, cv::Rect2f(20, 0, 100, 100), {0.0F, 1.0F, 0.0F});
+  const auto first = manager.Update(vision_demo_host::TrackletObservationsFromTracks({left, right}), IdlePrimary());
+  ASSERT_EQ(first.SemanticIdForRawTrack(1), 1);
+  ASSERT_EQ(first.SemanticIdForRawTrack(2), 2);
+
+  const auto merged = manager.Update(
+      vision_demo_host::TrackletObservationsFromTracks({
+          MakePersonTrack(1, cv::Rect2f(11, 0, 100, 100), {0.0F, 1.0F, 0.0F}),
+      }),
+      IdlePrimary());
+
+  ASSERT_EQ(manager.CurrentMode(), vision_demo_host::IdentityManager::Mode::kMerged);
+  ASSERT_EQ(merged.SemanticIdForRawTrack(1), 1);
+
+  const auto rows = FindEvents(manager.LastPhase3ShadowDebugRows(), "single_blob_handoff_decision");
+  ASSERT_EQ(rows.size(), 2U);
+
+  const auto continuity_it = std::find_if(rows.begin(), rows.end(), [](const auto *row) {
+    return row->candidate_semantic_id == 1;
+  });
+  ASSERT_NE(continuity_it, rows.end());
+  const auto *continuity_row = *continuity_it;
+  EXPECT_EQ(continuity_row->group_id, 1);
+  EXPECT_EQ(continuity_row->carrier_raw_track_id, 1);
+  EXPECT_EQ(continuity_row->carrier_semantic_id, 1);
+  EXPECT_EQ(continuity_row->candidate_raw_track_id, 1);
+  EXPECT_EQ(continuity_row->reason, "single_blob_continuity_kept");
+  EXPECT_EQ(continuity_row->related_raw_track_id, 1);
+  EXPECT_TRUE(continuity_row->decision_selected);
+  EXPECT_TRUE(continuity_row->decision_accepted);
+  EXPECT_GT(continuity_row->decision_final_score, 0.0F);
+
+  const auto missing_age_it = std::find_if(rows.begin(), rows.end(), [](const auto *row) {
+    return row->candidate_semantic_id == 2;
+  });
+  ASSERT_NE(missing_age_it, rows.end());
+  const auto *missing_age_row = *missing_age_it;
+  EXPECT_EQ(missing_age_row->reason, "single_blob_rejected_by_missing_age");
+  EXPECT_EQ(missing_age_row->related_raw_track_id, 1);
+  EXPECT_FALSE(missing_age_row->decision_selected);
+  EXPECT_FALSE(missing_age_row->decision_accepted);
+}
+
+TEST(IdentityManagerTest, EmitsSingleBlobHandoffRejectReasonsWithoutChangingAssignments) {
+  vision_demo_host::IdentityManager::Config cfg;
+  cfg.max_missing_frames = 180;
+  cfg.active_assign_max_cost = 0.55F;
+  cfg.min_assignment_margin = 0.08F;
+  cfg.missing_assign_min_area_ratio = 0.40F;
+  cfg.missing_assign_max_app_cost = 0.50F;
+  cfg.stable_frames_before_feature_update = 1;
+  cfg.overlap_iou_freeze = 0.10F;
+  vision_demo_host::IdentityManager manager(cfg);
+
+  const auto first = manager.Update(
+      vision_demo_host::TrackletObservationsFromTracks({
+          MakePersonTrack(1, cv::Rect2f(2469, 5, 215, 1503), {1.0F, 0.0F, 0.0F}),
+      }),
+      LockedPrimary(1, 1));
+  ASSERT_EQ(first.SemanticIdForRawTrack(1), 1);
+
+  const auto second = manager.Update(
+      vision_demo_host::TrackletObservationsFromTracks({
+          MakePersonTrack(1, cv::Rect2f(2469, 5, 215, 1503), {1.0F, 0.0F, 0.0F}),
+          MakePersonTrack(2, cv::Rect2f(826, 1064, 1018, 449), {0.0F, 1.0F, 0.0F}),
+      }),
+      LockedPrimary(1, 1));
+  ASSERT_EQ(second.SemanticIdForRawTrack(1), 1);
+  ASSERT_EQ(second.SemanticIdForRawTrack(2), 2);
+
+  manager.Update(
+      vision_demo_host::TrackletObservationsFromTracks({
+          MakePersonTrack(1, cv::Rect2f(1200, 0, 500, 1000), {1.0F, 0.0F, 0.0F}),
+          MakePersonTrack(2, cv::Rect2f(1250, 0, 500, 1000), {0.0F, 1.0F, 0.0F}),
+      }),
+      LockedPrimary(1, 1));
+
+  vision_demo_host::IdentityManagerResult only_other;
+  for (int i = 0; i < 18; ++i) {
+    only_other = manager.Update(
+        vision_demo_host::TrackletObservationsFromTracks({
+            MakePersonTrack(2, cv::Rect2f(826, 1064, 1018, 449), {0.0F, 1.0F, 0.0F}),
+        }),
+        LockedPrimary(1, 1));
+    ASSERT_EQ(only_other.SemanticIdForRawTrack(2), 2);
+  }
+
+  const auto reject_rows = FindEvents(manager.LastPhase3ShadowDebugRows(), "single_blob_handoff_decision");
+  ASSERT_FALSE(reject_rows.empty());
+  EXPECT_EQ(only_other.SemanticIdForRawTrack(2), 2);
+  EXPECT_NE(std::find_if(reject_rows.begin(), reject_rows.end(), [](const auto *row) {
+              return row->candidate_semantic_id == 1 &&
+                     row->reason == "single_blob_rejected_by_appearance_or_geometry_margin";
+            }),
+            reject_rows.end());
+}
+
+TEST(IdentityManagerTest, EmitsSingleBlobHandoffAcceptedDecisionWithoutChangingLegacyBehavior) {
+  vision_demo_host::IdentityManager::Config cfg;
+  cfg.max_missing_frames = 180;
+  cfg.active_assign_max_cost = 0.55F;
+  cfg.min_assignment_margin = 0.08F;
+  cfg.missing_assign_max_app_cost = 0.50F;
+  cfg.stable_frames_before_feature_update = 1;
+  cfg.overlap_iou_freeze = 0.10F;
+  vision_demo_host::IdentityManager manager(cfg);
+
+  const std::vector<float> primary_feature{1.0F, 0.0F};
+  const std::vector<float> secondary_feature{0.0F, 1.0F};
+  ASSERT_EQ(manager.Update(vision_demo_host::TrackletObservationsFromTracks({
+                               MakePersonTrack(1, cv::Rect2f(300, 220, 240, 620), primary_feature),
+                               MakePersonTrack(2, cv::Rect2f(700, 160, 180, 560), secondary_feature),
+                           }),
+                           LockedPrimary(1, 1))
+                .SemanticIdForRawTrack(1),
+            1);
+  ASSERT_EQ(manager.Update(vision_demo_host::TrackletObservationsFromTracks({
+                               MakePersonTrack(1, cv::Rect2f(320, 220, 240, 620), primary_feature),
+                               MakePersonTrack(2, cv::Rect2f(680, 160, 180, 560), secondary_feature),
+                           }),
+                           LockedPrimary(1, 1))
+                .SemanticIdForRawTrack(2),
+            2);
+  manager.Update(vision_demo_host::TrackletObservationsFromTracks({
+                     MakePersonTrack(1, cv::Rect2f(560, 240, 200, 560), primary_feature),
+                     MakePersonTrack(2, cv::Rect2f(590, 170, 180, 560), secondary_feature),
+                 }),
+                 LockedPrimary(1, 1));
+  for (int i = 0; i < 18; ++i) {
+    ASSERT_EQ(manager.Update(vision_demo_host::TrackletObservationsFromTracks({
+                                 MakePersonTrack(2, cv::Rect2f(590, 170, 220, 600), secondary_feature),
+                             }),
+                             LockedPrimary(1, 1))
+                  .SemanticIdForRawTrack(2),
+              2);
+  }
+
+  const auto handoff = manager.Update(
+      vision_demo_host::TrackletObservationsFromTracks({
+          MakePersonTrack(2, cv::Rect2f(560, 240, 200, 560), primary_feature),
+      }),
+      LockedPrimary(1, 1));
+
+  ASSERT_EQ(manager.CurrentMode(), vision_demo_host::IdentityManager::Mode::kMerged);
+  EXPECT_EQ(handoff.SemanticIdForRawTrack(2), 1);
+  const auto rows = FindEvents(manager.LastPhase3ShadowDebugRows(), "single_blob_handoff_decision");
+  ASSERT_FALSE(rows.empty());
+  EXPECT_NE(std::find_if(rows.begin(), rows.end(), [](const auto *row) {
+              return row->candidate_semantic_id == 1 && row->reason == "single_blob_handoff_accepted" &&
+                     row->decision_selected && row->decision_accepted;
+            }),
+            rows.end());
 }
 
 TEST(IdentityManagerTest, EmitsSideReappearanceCandidateLinkedToMergedGroupWithoutChangingAssignments) {

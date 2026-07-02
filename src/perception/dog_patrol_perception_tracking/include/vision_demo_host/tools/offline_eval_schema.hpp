@@ -29,7 +29,8 @@ inline std::string Phase3ShadowStateCsvHeader() {
   return "frame_idx,event_idx,event_type,group_id,semantic_ids,carrier_semantic_id,carrier_raw_track_id,"
          "candidate_raw_track_id,candidate_semantic_id,candidate_score,candidate_x,candidate_y,candidate_w,"
          "candidate_h,reason,related_raw_track_id,hypothesis_status,candidate_stable_frames,group_age_frames,"
-         "group_last_update_frame";
+         "group_last_update_frame,decision_app_cost,decision_geo_cost,decision_time_cost,decision_final_score,"
+         "decision_margin,decision_selected,decision_accepted";
 }
 
 inline std::string Phase3ShadowStateCsvHelp() {
@@ -39,7 +40,9 @@ inline std::string Phase3ShadowStateCsvHelp() {
       "  Schema: frame_idx,event_idx,event_type,group_id,semantic_ids,carrier_semantic_id,"
       "carrier_raw_track_id,candidate_raw_track_id,candidate_semantic_id,candidate_score,candidate_x,"
       "candidate_y,candidate_w,candidate_h,reason,related_raw_track_id,hypothesis_status,"
-      "candidate_stable_frames,group_age_frames,group_last_update_frame\n"
+      "candidate_stable_frames,group_age_frames,group_last_update_frame,"
+      "decision_app_cost,decision_geo_cost,decision_time_cost,decision_final_score,decision_margin,"
+      "decision_selected,decision_accepted\n"
       "  frame_idx is the same 0-based offline video frame index used by tracklet_hypotheses.csv.\n"
       "  Join candidate rows by frame_idx plus candidate_raw_track_id/raw_track_id, reason, and\n"
       "  related_raw_track_id. group_last_update_frame uses the same frame_idx convention.\n"
@@ -49,6 +52,11 @@ inline std::string Phase3ShadowStateCsvHelp() {
       "  merged_group_update, and merged_group_end. It also emits SplitCandidate lifecycle rows:\n"
       "  split_candidate_enter, split_candidate_update, and split_candidate_end. SplitCandidate rows preserve\n"
       "  evidence reason and related_raw_track_id so they can be linked back to tracklet_hypotheses.csv.\n"
+      "  Single-blob carrier evaluation emits event_type=single_blob_handoff_decision rows with\n"
+      "  reason values such as single_blob_continuity_kept, single_blob_handoff_eligible,\n"
+      "  single_blob_rejected_by_missing_age, single_blob_rejected_by_appearance_or_geometry_margin,\n"
+      "  and single_blob_handoff_accepted. Decision cost fields mirror the legacy merged_candidate\n"
+      "  score row as shadow-only evidence and do not migrate merged single-blob handoff behavior.\n"
       "  When --sid-enable-phase4-merged-split-handoff=true is used, the migrated Phase 4 split handoff\n"
       "  emits event_type=phase4_merged_split_handoff with reason=merged_split_handoff.\n"
       "  When --sid-enable-phase4-merged-side-recovery=true is used, the migrated Phase 4 side recovery\n"

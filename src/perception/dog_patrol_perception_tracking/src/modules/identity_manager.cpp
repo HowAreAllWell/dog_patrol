@@ -431,6 +431,75 @@ IdentityManagerResult IdentityManager::Update(const std::vector<TrackletObservat
     impl_->last_phase3_shadow_debug_rows.push_back(std::move(row));
   };
 
+  const auto append_single_blob_decision_rows = [&]() {
+    if (!impl_->merged_group_shadow.active || observations_by_raw_track_id.size() != 1) {
+      return;
+    }
+
+    const auto &carrier_entry = *observations_by_raw_track_id.begin();
+    const int carrier_raw_id = carrier_entry.first;
+    const auto continuity_it = prev_raw_to_semantic.find(carrier_raw_id);
+    const int continuity_semantic_id = continuity_it == prev_raw_to_semantic.end() ? -1 : continuity_it->second;
+    if (continuity_semantic_id <= 0 ||
+        impl_->merged_group_shadow.semantic_ids.count(continuity_semantic_id) == 0) {
+      return;
+    }
+
+    std::unordered_map<int, int> missing_frames_by_semantic_id;
+    for (const auto &snapshot : impl_->legacy_identity_matcher.IdentitySnapshots()) {
+      missing_frames_by_semantic_id[snapshot.semantic_id] = snapshot.missing_frames;
+    }
+
+    for (const auto &score : impl_->last_score_debug_rows) {
+      if (score.stage != "merged_candidate" || score.raw_track_id != carrier_raw_id ||
+          impl_->merged_group_shadow.semantic_ids.count(score.semantic_id) == 0) {
+        continue;
+      }
+
+      std::string reason;
+      if (score.selected && score.accepted && score.semantic_id == continuity_semantic_id) {
+        reason = "single_blob_continuity_kept";
+      } else if (score.selected && score.accepted) {
+        reason = "single_blob_handoff_accepted";
+      } else if (!score.reject_reason.empty()) {
+        reason = "single_blob_rejected_by_appearance_or_geometry_margin";
+      } else if (score.semantic_id != continuity_semantic_id &&
+                 missing_frames_by_semantic_id[score.semantic_id] < 18) {
+        reason = "single_blob_rejected_by_missing_age";
+      } else if (score.semantic_id != continuity_semantic_id) {
+        reason = "single_blob_handoff_eligible";
+      } else {
+        reason = "single_blob_continuity_candidate";
+      }
+
+      Phase3ShadowDebugRow row;
+      row.frame_idx = current_frame_idx;
+      row.event_idx = event_idx++;
+      row.event_type = "single_blob_handoff_decision";
+      row.group_id = impl_->merged_group_shadow.group_id;
+      row.semantic_ids = JoinSemanticIds(impl_->merged_group_shadow.semantic_ids);
+      row.carrier_semantic_id = continuity_semantic_id;
+      row.carrier_raw_track_id = carrier_raw_id;
+      row.candidate_raw_track_id = carrier_raw_id;
+      row.candidate_semantic_id = score.semantic_id;
+      row.candidate_bbox = carrier_entry.second.bbox;
+      row.candidate_confidence = carrier_entry.second.confidence;
+      row.reason = reason;
+      row.related_raw_track_id = carrier_raw_id;
+      row.hypothesis_status = "single_blob_visible";
+      row.group_age_frames = impl_->merged_group_shadow.age_frames;
+      row.group_last_update_frame = impl_->merged_group_shadow.last_update_frame;
+      row.decision_app_cost = score.app_cost;
+      row.decision_geo_cost = score.geo_cost;
+      row.decision_time_cost = score.time_cost;
+      row.decision_final_score = score.final_score;
+      row.decision_margin = score.margin;
+      row.decision_selected = score.selected;
+      row.decision_accepted = score.accepted;
+      impl_->last_phase3_shadow_debug_rows.push_back(std::move(row));
+    }
+  };
+
   const auto recovery_group = [&]() -> const Impl::MergedGroupShadowState * {
     if (impl_->merged_group_shadow.active) {
       return &impl_->merged_group_shadow;
@@ -613,6 +682,7 @@ IdentityManagerResult IdentityManager::Update(const std::vector<TrackletObservat
     impl_->merged_group_shadow = Impl::MergedGroupShadowState{};
   }
 
+  append_single_blob_decision_rows();
   apply_phase4_side_recovery();
   append_side_reappearance_rows();
 

@@ -1155,7 +1155,11 @@ DatasetMetrics EvaluateOne(const Options &opt, const std::filesystem::path &data
                           << row.candidate_bbox.y << "," << row.candidate_bbox.width << ","
                           << row.candidate_bbox.height << "," << row.reason << "," << row.related_raw_track_id
                           << "," << row.hypothesis_status << "," << row.candidate_stable_frames << ","
-                          << row.group_age_frames << "," << row.group_last_update_frame << "\n";
+                          << row.group_age_frames << "," << row.group_last_update_frame << ","
+                          << row.decision_app_cost << "," << row.decision_geo_cost << ","
+                          << row.decision_time_cost << "," << row.decision_final_score << ","
+                          << row.decision_margin << "," << (row.decision_selected ? "1" : "0") << ","
+                          << (row.decision_accepted ? "1" : "0") << "\n";
       }
     }
     if (identities_csv.is_open()) {

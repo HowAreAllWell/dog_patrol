@@ -58,6 +58,13 @@ class IdentityManager {
     int candidate_stable_frames{0};
     int group_age_frames{0};
     int group_last_update_frame{-1};
+    float decision_app_cost{0.0F};
+    float decision_geo_cost{0.0F};
+    float decision_time_cost{0.0F};
+    float decision_final_score{0.0F};
+    float decision_margin{0.0F};
+    bool decision_selected{false};
+    bool decision_accepted{false};
   };
 
   struct Config {

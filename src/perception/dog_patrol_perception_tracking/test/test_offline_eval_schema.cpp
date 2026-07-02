@@ -53,7 +53,8 @@ TEST(OfflineEvalSchemaTest, Phase3ShadowStateCsvHeaderIsStable) {
       "frame_idx,event_idx,event_type,group_id,semantic_ids,carrier_semantic_id,carrier_raw_track_id,"
       "candidate_raw_track_id,candidate_semantic_id,candidate_score,candidate_x,candidate_y,candidate_w,"
       "candidate_h,reason,related_raw_track_id,hypothesis_status,candidate_stable_frames,group_age_frames,"
-      "group_last_update_frame";
+      "group_last_update_frame,decision_app_cost,decision_geo_cost,decision_time_cost,decision_final_score,"
+      "decision_margin,decision_selected,decision_accepted";
 
   EXPECT_EQ(vision_demo_host::tools::Phase3ShadowStateCsvHeader(), expected);
 }
@@ -80,6 +81,19 @@ TEST(OfflineEvalSchemaTest, Phase3ShadowStateHelpDocumentsShadowOnlyContract) {
       "candidate_stable_frames",
       "group_age_frames",
       "group_last_update_frame",
+      "decision_app_cost",
+      "decision_geo_cost",
+      "decision_time_cost",
+      "decision_final_score",
+      "decision_margin",
+      "decision_selected",
+      "decision_accepted",
+      "single_blob_handoff_decision",
+      "single_blob_continuity_kept",
+      "single_blob_handoff_eligible",
+      "single_blob_rejected_by_missing_age",
+      "single_blob_rejected_by_appearance_or_geometry_margin",
+      "single_blob_handoff_accepted",
       "split_candidate_enter",
       "split_candidate_update",
       "split_candidate_end",
