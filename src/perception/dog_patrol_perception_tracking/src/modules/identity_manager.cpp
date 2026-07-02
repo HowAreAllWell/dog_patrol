@@ -84,6 +84,23 @@ IdentityManager::ScoreDebugRow FromLegacyDebugRow(const LegacyIdentityMatcher::S
   return out;
 }
 
+IdentityManager::Phase3ShadowDebugRow FromLegacyPairwiseDebugRow(
+    const LegacyIdentityMatcher::PairwiseAssignmentDebugRow &row) {
+  IdentityManager::Phase3ShadowDebugRow out;
+  out.frame_idx = row.frame_idx - 1;
+  out.event_type = "pairwise_assignment_matrix";
+  out.reason = row.appearance_override ? "pairwise_appearance_override" : "pairwise_assignment_matrix";
+  out.pairwise_selected_pairs = row.selected_pairs;
+  out.pairwise_alternate_pairs = row.alternate_pairs;
+  out.pairwise_selected_final_cost = row.selected_final_cost;
+  out.pairwise_alternate_final_cost = row.alternate_final_cost;
+  out.pairwise_selected_app_cost = row.selected_app_cost;
+  out.pairwise_alternate_app_cost = row.alternate_app_cost;
+  out.pairwise_margin = row.margin;
+  out.pairwise_appearance_override = row.appearance_override;
+  return out;
+}
+
 std::string TrackletHypothesisStatusToDebugString(const TrackletHypothesisStatus status) {
   switch (status) {
     case TrackletHypothesisStatus::kTracked:
@@ -295,6 +312,12 @@ IdentityManagerResult IdentityManager::Update(const std::vector<TrackletObservat
     row.reason = hypothesis.candidate_reason;
     row.related_raw_track_id = hypothesis.related_raw_track_id.value_or(-1);
     row.hypothesis_status = TrackletHypothesisStatusToDebugString(hypothesis.status);
+    impl_->last_phase3_shadow_debug_rows.push_back(std::move(row));
+  }
+  for (const auto &legacy_pairwise_row : impl_->legacy_identity_matcher.LastPairwiseAssignmentDebugRows()) {
+    Phase3ShadowDebugRow row = FromLegacyPairwiseDebugRow(legacy_pairwise_row);
+    row.frame_idx = current_frame_idx;
+    row.event_idx = event_idx++;
     impl_->last_phase3_shadow_debug_rows.push_back(std::move(row));
   }
 

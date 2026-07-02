@@ -65,6 +65,14 @@ class IdentityManager {
     float decision_margin{0.0F};
     bool decision_selected{false};
     bool decision_accepted{false};
+    std::string pairwise_selected_pairs;
+    std::string pairwise_alternate_pairs;
+    float pairwise_selected_final_cost{0.0F};
+    float pairwise_alternate_final_cost{0.0F};
+    float pairwise_selected_app_cost{0.0F};
+    float pairwise_alternate_app_cost{0.0F};
+    float pairwise_margin{0.0F};
+    bool pairwise_appearance_override{false};
   };
 
   struct Config {

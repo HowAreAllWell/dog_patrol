@@ -30,7 +30,9 @@ inline std::string Phase3ShadowStateCsvHeader() {
          "candidate_raw_track_id,candidate_semantic_id,candidate_score,candidate_x,candidate_y,candidate_w,"
          "candidate_h,reason,related_raw_track_id,hypothesis_status,candidate_stable_frames,group_age_frames,"
          "group_last_update_frame,decision_app_cost,decision_geo_cost,decision_time_cost,decision_final_score,"
-         "decision_margin,decision_selected,decision_accepted";
+         "decision_margin,decision_selected,decision_accepted,pairwise_selected_pairs,pairwise_alternate_pairs,"
+         "pairwise_selected_final_cost,pairwise_alternate_final_cost,pairwise_selected_app_cost,"
+         "pairwise_alternate_app_cost,pairwise_margin,pairwise_appearance_override";
 }
 
 inline std::string Phase3ShadowStateCsvHelp() {
@@ -42,7 +44,9 @@ inline std::string Phase3ShadowStateCsvHelp() {
       "candidate_y,candidate_w,candidate_h,reason,related_raw_track_id,hypothesis_status,"
       "candidate_stable_frames,group_age_frames,group_last_update_frame,"
       "decision_app_cost,decision_geo_cost,decision_time_cost,decision_final_score,decision_margin,"
-      "decision_selected,decision_accepted\n"
+      "decision_selected,decision_accepted,pairwise_selected_pairs,pairwise_alternate_pairs,"
+      "pairwise_selected_final_cost,pairwise_alternate_final_cost,pairwise_selected_app_cost,"
+      "pairwise_alternate_app_cost,pairwise_margin,pairwise_appearance_override\n"
       "  frame_idx is the same 0-based offline video frame index used by tracklet_hypotheses.csv.\n"
       "  Join candidate rows by frame_idx plus candidate_raw_track_id/raw_track_id, reason, and\n"
       "  related_raw_track_id. group_last_update_frame uses the same frame_idx convention.\n"
@@ -68,6 +72,11 @@ inline std::string Phase3ShadowStateCsvHelp() {
       "  reason=side_reappearance_candidate when a side raw track is recovered by legacy merged_side_recovery;\n"
       "  the migrated Phase 4 row is the flag-enabled replacement. Both rows link the candidate raw id\n"
       "  to the preceding group/carrier and missing semantic guess.\n"
+      "  2x2 pairwise assignment observability emits event_type=pairwise_assignment_matrix when two\n"
+      "  candidate tracks and two missing semantic identities have a valid selected-vs-alternate matrix.\n"
+      "  pairwise_* fields record selected pairs, alternate pairs, final-cost sums, appearance-cost sums,\n"
+      "  margin, and whether the appearance override would trigger. These rows are shadow-only and do not\n"
+      "  migrate 2x2 pairwise assignment behavior.\n"
       "  Acceptance review windows: 01:746-771 for group lifecycle, 01:793-795 for hidden split candidates,\n"
       "  01:1015-1031 for split recovery evidence, and 02:790-850 for the second dataset handoff case.\n";
 }

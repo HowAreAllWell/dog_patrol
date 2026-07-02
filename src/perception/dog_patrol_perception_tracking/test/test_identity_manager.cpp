@@ -708,6 +708,51 @@ TEST(IdentityManagerTest, Phase4MergedSingleBlobHandoffFlagDoesNotAcceptRejected
   EXPECT_EQ(FindScoreStage(manager.LastScoreDebugRows(), 1, "phase4_merged_single_blob_handoff"), nullptr);
 }
 
+TEST(IdentityManagerTest, EmitsPairwiseAssignmentMatrixShadowRowsWithoutChangingAssignments) {
+  vision_demo_host::IdentityManager::Config cfg;
+  cfg.max_missing_frames = 180;
+  cfg.active_assign_max_cost = 0.55F;
+  cfg.min_assignment_margin = 0.08F;
+  cfg.stable_frames_before_feature_update = 1;
+  vision_demo_host::IdentityManager manager(cfg);
+
+  const std::vector<float> primary_feature{1.0F, 0.0F};
+  const std::vector<float> secondary_feature{0.96F, 0.28F};
+  const auto first = manager.Update(
+      vision_demo_host::TrackletObservationsFromTracks({
+          MakePersonTrack(1, cv::Rect2f(0, 0, 100, 100), primary_feature),
+          MakePersonTrack(2, cv::Rect2f(200, 0, 100, 100), secondary_feature),
+      }),
+      IdlePrimary());
+  ASSERT_EQ(first.SemanticIdForRawTrack(1), 1);
+  ASSERT_EQ(first.SemanticIdForRawTrack(2), 2);
+
+  for (int i = 0; i < 10; ++i) {
+    manager.Update({}, IdlePrimary());
+  }
+
+  const auto recovered = manager.Update(
+      vision_demo_host::TrackletObservationsFromTracks({
+          MakePersonTrack(30, cv::Rect2f(80, 0, 100, 100), secondary_feature),
+          MakePersonTrack(40, cv::Rect2f(120, 0, 100, 100), primary_feature),
+      }),
+      IdlePrimary());
+
+  EXPECT_EQ(recovered.SemanticIdForRawTrack(30), 2);
+  EXPECT_EQ(recovered.SemanticIdForRawTrack(40), 1);
+
+  const auto pairwise_rows = FindEvents(manager.LastPhase3ShadowDebugRows(), "pairwise_assignment_matrix");
+  ASSERT_EQ(pairwise_rows.size(), 1U);
+  const auto &row = *pairwise_rows.front();
+  EXPECT_EQ(row.reason, "pairwise_appearance_override");
+  EXPECT_EQ(row.pairwise_selected_pairs, "30->1|40->2");
+  EXPECT_EQ(row.pairwise_alternate_pairs, "30->2|40->1");
+  EXPECT_LT(row.pairwise_alternate_final_cost, row.pairwise_selected_final_cost + 0.08F);
+  EXPECT_LT(row.pairwise_alternate_app_cost + 0.035F, row.pairwise_selected_app_cost);
+  EXPECT_GT(row.pairwise_margin, 0.0F);
+  EXPECT_TRUE(row.pairwise_appearance_override);
+}
+
 TEST(IdentityManagerTest, EmitsSideReappearanceCandidateLinkedToMergedGroupWithoutChangingAssignments) {
   vision_demo_host::IdentityManager::Config cfg;
   cfg.max_missing_frames = 180;

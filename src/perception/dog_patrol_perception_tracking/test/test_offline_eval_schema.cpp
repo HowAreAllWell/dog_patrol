@@ -54,7 +54,9 @@ TEST(OfflineEvalSchemaTest, Phase3ShadowStateCsvHeaderIsStable) {
       "candidate_raw_track_id,candidate_semantic_id,candidate_score,candidate_x,candidate_y,candidate_w,"
       "candidate_h,reason,related_raw_track_id,hypothesis_status,candidate_stable_frames,group_age_frames,"
       "group_last_update_frame,decision_app_cost,decision_geo_cost,decision_time_cost,decision_final_score,"
-      "decision_margin,decision_selected,decision_accepted";
+      "decision_margin,decision_selected,decision_accepted,pairwise_selected_pairs,pairwise_alternate_pairs,"
+      "pairwise_selected_final_cost,pairwise_alternate_final_cost,pairwise_selected_app_cost,"
+      "pairwise_alternate_app_cost,pairwise_margin,pairwise_appearance_override";
 
   EXPECT_EQ(vision_demo_host::tools::Phase3ShadowStateCsvHeader(), expected);
 }
@@ -88,6 +90,16 @@ TEST(OfflineEvalSchemaTest, Phase3ShadowStateHelpDocumentsShadowOnlyContract) {
       "decision_margin",
       "decision_selected",
       "decision_accepted",
+      "pairwise_assignment_matrix",
+      "pairwise_selected_pairs",
+      "pairwise_alternate_pairs",
+      "pairwise_selected_final_cost",
+      "pairwise_alternate_final_cost",
+      "pairwise_selected_app_cost",
+      "pairwise_alternate_app_cost",
+      "pairwise_margin",
+      "pairwise_appearance_override",
+      "2x2 pairwise assignment",
       "single_blob_handoff_decision",
       "single_blob_continuity_kept",
       "single_blob_handoff_eligible",
