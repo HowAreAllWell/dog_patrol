@@ -70,10 +70,10 @@ struct Options {
   float sid_min_assignment_margin{0.08F};
   int sid_stable_frames_before_feature_update{3};
   bool sid_merged_requires_overlap{true};
-  bool sid_enable_phase4_merged_split_handoff{false};
-  bool sid_enable_phase4_merged_side_recovery{false};
-  bool sid_enable_phase4_merged_single_blob_handoff{false};
-  bool sid_enable_phase4_pairwise_assignment{false};
+  bool sid_enable_phase4_merged_split_handoff{true};
+  bool sid_enable_phase4_merged_side_recovery{true};
+  bool sid_enable_phase4_merged_single_blob_handoff{true};
+  bool sid_enable_phase4_pairwise_assignment{true};
   bool sid_reid_enable{true};  // compatibility input, runtime forces true.
   std::string sid_reid_backend{"light"};
   std::string sid_reid_model_path{};
@@ -216,10 +216,10 @@ void PrintUsage() {
       << "  --sid-min-assignment-margin <f>        (default: 0.08)\n"
       << "  --sid-stable-frames-before-feature-update <n> (default: 3)\n"
       << "  --sid-merged-requires-overlap <true|false> (default: true)\n"
-      << "  --sid-enable-phase4-merged-split-handoff <true|false> (default: false)\n"
-      << "  --sid-enable-phase4-merged-side-recovery <true|false> (default: false)\n"
-      << "  --sid-enable-phase4-merged-single-blob-handoff <true|false> (default: false)\n"
-      << "  --sid-enable-phase4-pairwise-assignment <true|false> (default: false)\n"
+      << "  --sid-enable-phase4-merged-split-handoff <true|false> (default: true; false rolls back to legacy)\n"
+      << "  --sid-enable-phase4-merged-side-recovery <true|false> (default: true; false rolls back to legacy)\n"
+      << "  --sid-enable-phase4-merged-single-blob-handoff <true|false> (default: true; false rolls back to legacy)\n"
+      << "  --sid-enable-phase4-pairwise-assignment <true|false> (default: true; false rolls back to legacy)\n"
       << "  --sid-reid-enable <true|false>         (compat-only; runtime forces true)\n"
       << "  --sid-reid-backend <light|osnet_onnx> (default: light)\n"
       << "  --sid-reid-model-path <path>           (default: \"\")\n"

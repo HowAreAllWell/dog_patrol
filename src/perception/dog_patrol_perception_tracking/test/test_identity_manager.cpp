@@ -593,7 +593,7 @@ TEST(IdentityManagerTest, EmitsSingleBlobHandoffAcceptedDecisionWithoutChangingL
             rows.end());
 }
 
-TEST(IdentityManagerTest, Phase4MergedSingleBlobHandoffFlagKeepsDefaultOffAndEmitsMigratedDecision) {
+TEST(IdentityManagerTest, Phase4MergedSingleBlobHandoffDefaultsOnAndFalseRollsBack) {
   vision_demo_host::IdentityManager::Config cfg;
   cfg.max_missing_frames = 180;
   cfg.active_assign_max_cost = 0.55F;
@@ -642,15 +642,17 @@ TEST(IdentityManagerTest, Phase4MergedSingleBlobHandoffFlagKeepsDefaultOffAndEmi
     return std::make_pair(handoff, manager);
   };
 
-  auto [default_result, default_manager] = run_sequence(vision_demo_host::IdentityManager(cfg));
-  ASSERT_EQ(default_result.SemanticIdForRawTrack(2), 1);
-  EXPECT_NE(FindScoreStage(default_manager.LastScoreDebugRows(), 2, "merged_candidate"), nullptr);
-  EXPECT_EQ(FindScoreStage(default_manager.LastScoreDebugRows(), 2, "phase4_merged_single_blob_handoff"), nullptr);
-  EXPECT_EQ(FindEvent(default_manager.LastPhase3ShadowDebugRows(), "phase4_merged_single_blob_handoff", 2), nullptr);
-
-  cfg.enable_phase4_merged_single_blob_handoff = true;
   auto [migrated_result, migrated_manager] = run_sequence(vision_demo_host::IdentityManager(cfg));
-  EXPECT_EQ(migrated_result.SemanticIdForRawTrack(2), default_result.SemanticIdForRawTrack(2));
+  ASSERT_EQ(migrated_result.SemanticIdForRawTrack(2), 1);
+  EXPECT_NE(FindScoreStage(migrated_manager.LastScoreDebugRows(), 2, "phase4_merged_single_blob_handoff"), nullptr);
+
+  cfg.enable_phase4_merged_single_blob_handoff = false;
+  auto [legacy_result, legacy_manager] = run_sequence(vision_demo_host::IdentityManager(cfg));
+  EXPECT_EQ(legacy_result.SemanticIdForRawTrack(2), migrated_result.SemanticIdForRawTrack(2));
+  EXPECT_NE(FindScoreStage(legacy_manager.LastScoreDebugRows(), 2, "merged_candidate"), nullptr);
+  EXPECT_EQ(FindScoreStage(legacy_manager.LastScoreDebugRows(), 2, "phase4_merged_single_blob_handoff"), nullptr);
+  EXPECT_EQ(FindEvent(legacy_manager.LastPhase3ShadowDebugRows(), "phase4_merged_single_blob_handoff", 2), nullptr);
+
   EXPECT_FALSE(std::any_of(migrated_manager.LastScoreDebugRows().begin(),
                            migrated_manager.LastScoreDebugRows().end(), [](const auto &row) {
                              return row.raw_track_id == 2 && row.semantic_id == 1 &&
@@ -753,17 +755,17 @@ TEST(IdentityManagerTest, EmitsPairwiseAssignmentMatrixShadowRowsWithoutChanging
   EXPECT_TRUE(row.pairwise_appearance_override);
 }
 
-TEST(IdentityManagerTest, Phase4PairwiseAssignmentMatchesLegacyOverrideBehindFlag) {
+TEST(IdentityManagerTest, Phase4PairwiseAssignmentDefaultsOnAndFalseRollsBack) {
   vision_demo_host::IdentityManager::Config cfg;
   cfg.max_missing_frames = 180;
   cfg.active_assign_max_cost = 0.55F;
   cfg.min_assignment_margin = 0.08F;
   cfg.stable_frames_before_feature_update = 1;
 
-  vision_demo_host::IdentityManager default_manager(cfg);
-  vision_demo_host::IdentityManager::Config migrated_cfg = cfg;
-  migrated_cfg.enable_phase4_pairwise_assignment = true;
-  vision_demo_host::IdentityManager migrated_manager(migrated_cfg);
+  vision_demo_host::IdentityManager migrated_manager(cfg);
+  vision_demo_host::IdentityManager::Config legacy_cfg = cfg;
+  legacy_cfg.enable_phase4_pairwise_assignment = false;
+  vision_demo_host::IdentityManager legacy_manager(legacy_cfg);
 
   const std::vector<float> primary_feature{1.0F, 0.0F};
   const std::vector<float> secondary_feature{0.96F, 0.28F};
@@ -781,18 +783,18 @@ TEST(IdentityManagerTest, Phase4PairwiseAssignmentMatchesLegacyOverrideBehindFla
     }
   };
 
-  initialize(&default_manager);
-  const auto default_recovered = default_manager.Update(
+  initialize(&legacy_manager);
+  const auto legacy_recovered = legacy_manager.Update(
       vision_demo_host::TrackletObservationsFromTracks({
           MakePersonTrack(30, cv::Rect2f(80, 0, 100, 100), secondary_feature),
           MakePersonTrack(40, cv::Rect2f(120, 0, 100, 100), primary_feature),
       }),
       IdlePrimary());
-  EXPECT_EQ(default_recovered.SemanticIdForRawTrack(30), 2);
-  EXPECT_EQ(default_recovered.SemanticIdForRawTrack(40), 1);
-  EXPECT_NE(FindScoreStage(default_manager.LastScoreDebugRows(), 30, "assign_candidate"), nullptr);
-  EXPECT_EQ(FindScoreStage(default_manager.LastScoreDebugRows(), 30, "phase4_pairwise_assignment"), nullptr);
-  EXPECT_EQ(FindEvent(default_manager.LastPhase3ShadowDebugRows(), "phase4_pairwise_assignment", 30), nullptr);
+  EXPECT_EQ(legacy_recovered.SemanticIdForRawTrack(30), 2);
+  EXPECT_EQ(legacy_recovered.SemanticIdForRawTrack(40), 1);
+  EXPECT_NE(FindScoreStage(legacy_manager.LastScoreDebugRows(), 30, "assign_candidate"), nullptr);
+  EXPECT_EQ(FindScoreStage(legacy_manager.LastScoreDebugRows(), 30, "phase4_pairwise_assignment"), nullptr);
+  EXPECT_EQ(FindEvent(legacy_manager.LastPhase3ShadowDebugRows(), "phase4_pairwise_assignment", 30), nullptr);
 
   initialize(&migrated_manager);
   const auto migrated_recovered = migrated_manager.Update(
@@ -803,6 +805,8 @@ TEST(IdentityManagerTest, Phase4PairwiseAssignmentMatchesLegacyOverrideBehindFla
       IdlePrimary());
   EXPECT_EQ(migrated_recovered.SemanticIdForRawTrack(30), 2);
   EXPECT_EQ(migrated_recovered.SemanticIdForRawTrack(40), 1);
+  EXPECT_EQ(migrated_recovered.SemanticIdForRawTrack(30), legacy_recovered.SemanticIdForRawTrack(30));
+  EXPECT_EQ(migrated_recovered.SemanticIdForRawTrack(40), legacy_recovered.SemanticIdForRawTrack(40));
 
   const auto pairwise_rows = FindEvents(migrated_manager.LastPhase3ShadowDebugRows(), "pairwise_assignment_matrix");
   ASSERT_EQ(pairwise_rows.size(), 1U);
@@ -827,6 +831,7 @@ TEST(IdentityManagerTest, Phase4PairwiseAssignmentMatchesLegacyOverrideBehindFla
 
 TEST(IdentityManagerTest, EmitsSideReappearanceCandidateLinkedToMergedGroupWithoutChangingAssignments) {
   vision_demo_host::IdentityManager::Config cfg;
+  cfg.enable_phase4_merged_side_recovery = false;
   cfg.max_missing_frames = 180;
   cfg.active_assign_max_cost = 0.55F;
   cfg.min_assignment_margin = 0.08F;
@@ -907,7 +912,7 @@ TEST(IdentityManagerTest, EmitsSideReappearanceCandidateLinkedToMergedGroupWitho
   EXPECT_FLOAT_EQ(row->candidate_bbox.height, 514.0F);
 }
 
-TEST(IdentityManagerTest, Phase4MergedSideRecoveryFlagKeepsDefaultOffAndEmitsMigratedDecision) {
+TEST(IdentityManagerTest, Phase4MergedSideRecoveryDefaultsOnAndFalseRollsBack) {
   vision_demo_host::IdentityManager::Config cfg;
   cfg.max_missing_frames = 180;
   cfg.active_assign_max_cost = 0.55F;
@@ -1007,16 +1012,9 @@ TEST(IdentityManagerTest, Phase4MergedSideRecoveryFlagKeepsDefaultOffAndEmitsMig
     return std::make_pair(recovered, manager);
   };
 
-  auto [default_result, default_manager] = run_sequence(vision_demo_host::IdentityManager(cfg));
-  ASSERT_EQ(default_result.SemanticIdForRawTrack(4), 1);
-  ASSERT_EQ(default_result.SemanticIdForRawTrack(6), 2);
-  EXPECT_NE(FindScoreStage(default_manager.LastScoreDebugRows(), 6, "merged_side_recovery"), nullptr);
-  EXPECT_EQ(FindEvent(default_manager.LastPhase3ShadowDebugRows(), "phase4_merged_side_recovery", 6), nullptr);
-
-  cfg.enable_phase4_merged_side_recovery = true;
   auto [migrated_result, migrated_manager] = run_sequence(vision_demo_host::IdentityManager(cfg));
-  EXPECT_EQ(migrated_result.SemanticIdForRawTrack(4), default_result.SemanticIdForRawTrack(4));
-  EXPECT_EQ(migrated_result.SemanticIdForRawTrack(6), default_result.SemanticIdForRawTrack(6));
+  ASSERT_EQ(migrated_result.SemanticIdForRawTrack(4), 1);
+  ASSERT_EQ(migrated_result.SemanticIdForRawTrack(6), 2);
   EXPECT_EQ(FindScoreStage(migrated_manager.LastScoreDebugRows(), 6, "merged_side_recovery"), nullptr);
 
   const auto *migrated_row =
@@ -1032,6 +1030,13 @@ TEST(IdentityManagerTest, Phase4MergedSideRecoveryFlagKeepsDefaultOffAndEmitsMig
   EXPECT_EQ(migrated_row->hypothesis_status, "tracked");
   EXPECT_EQ(migrated_row->candidate_stable_frames, 1);
 
+  cfg.enable_phase4_merged_side_recovery = false;
+  auto [legacy_result, legacy_manager] = run_sequence(vision_demo_host::IdentityManager(cfg));
+  EXPECT_EQ(legacy_result.SemanticIdForRawTrack(4), migrated_result.SemanticIdForRawTrack(4));
+  EXPECT_EQ(legacy_result.SemanticIdForRawTrack(6), migrated_result.SemanticIdForRawTrack(6));
+  EXPECT_NE(FindScoreStage(legacy_manager.LastScoreDebugRows(), 6, "merged_side_recovery"), nullptr);
+  EXPECT_EQ(FindEvent(legacy_manager.LastPhase3ShadowDebugRows(), "phase4_merged_side_recovery", 6), nullptr);
+
   auto [no_shadow_result, no_shadow_manager] =
       run_sequence_without_shadow_candidate(vision_demo_host::IdentityManager(cfg));
   (void)no_shadow_result;
@@ -1039,7 +1044,7 @@ TEST(IdentityManagerTest, Phase4MergedSideRecoveryFlagKeepsDefaultOffAndEmitsMig
   EXPECT_EQ(FindScoreStage(no_shadow_manager.LastScoreDebugRows(), 6, "phase4_merged_side_recovery"), nullptr);
 }
 
-TEST(IdentityManagerTest, Phase4MergedSplitHandoffFlagKeepsDefaultOffAndEmitsMigratedDecision) {
+TEST(IdentityManagerTest, Phase4MergedSplitHandoffDefaultsOnAndFalseRollsBack) {
   vision_demo_host::IdentityManager::Config cfg;
   cfg.max_missing_frames = 180;
   cfg.active_assign_max_cost = 0.55F;
@@ -1135,16 +1140,9 @@ TEST(IdentityManagerTest, Phase4MergedSplitHandoffFlagKeepsDefaultOffAndEmitsMig
     return std::make_pair(split, manager);
   };
 
-  auto [default_result, default_manager] = run_sequence(vision_demo_host::IdentityManager(cfg));
-  ASSERT_EQ(default_result.SemanticIdForRawTrack(2), 1);
-  ASSERT_EQ(default_result.SemanticIdForRawTrack(7), 2);
-  EXPECT_NE(FindScoreStage(default_manager.LastScoreDebugRows(), 2, "merged_split_handoff"), nullptr);
-  EXPECT_EQ(FindEvent(default_manager.LastPhase3ShadowDebugRows(), "phase4_merged_split_handoff", 7), nullptr);
-
-  cfg.enable_phase4_merged_split_handoff = true;
   auto [migrated_result, migrated_manager] = run_sequence(vision_demo_host::IdentityManager(cfg));
-  EXPECT_EQ(migrated_result.SemanticIdForRawTrack(2), default_result.SemanticIdForRawTrack(2));
-  EXPECT_EQ(migrated_result.SemanticIdForRawTrack(7), default_result.SemanticIdForRawTrack(7));
+  ASSERT_EQ(migrated_result.SemanticIdForRawTrack(2), 1);
+  ASSERT_EQ(migrated_result.SemanticIdForRawTrack(7), 2);
   EXPECT_EQ(FindScoreStage(migrated_manager.LastScoreDebugRows(), 2, "merged_split_handoff"), nullptr);
 
   const auto *migrated_row =
@@ -1156,6 +1154,13 @@ TEST(IdentityManagerTest, Phase4MergedSplitHandoffFlagKeepsDefaultOffAndEmitsMig
   EXPECT_EQ(migrated_row->reason, "merged_split_handoff");
   EXPECT_EQ(migrated_row->hypothesis_status, "tracked");
   EXPECT_EQ(migrated_row->candidate_stable_frames, 1);
+
+  cfg.enable_phase4_merged_split_handoff = false;
+  auto [legacy_result, legacy_manager] = run_sequence(vision_demo_host::IdentityManager(cfg));
+  EXPECT_EQ(legacy_result.SemanticIdForRawTrack(2), migrated_result.SemanticIdForRawTrack(2));
+  EXPECT_EQ(legacy_result.SemanticIdForRawTrack(7), migrated_result.SemanticIdForRawTrack(7));
+  EXPECT_NE(FindScoreStage(legacy_manager.LastScoreDebugRows(), 2, "merged_split_handoff"), nullptr);
+  EXPECT_EQ(FindEvent(legacy_manager.LastPhase3ShadowDebugRows(), "phase4_merged_split_handoff", 7), nullptr);
 
   auto [no_shadow_result, no_shadow_manager] =
       run_sequence_without_shadow_candidate(vision_demo_host::IdentityManager(cfg));

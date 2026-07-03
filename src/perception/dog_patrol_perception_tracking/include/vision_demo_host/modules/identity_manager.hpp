@@ -98,10 +98,10 @@ class IdentityManager {
     float min_assignment_margin{0.08F};
     int stable_frames_before_feature_update{3};
     bool merged_requires_overlap{true};
-    bool enable_phase4_merged_split_handoff{false};
-    bool enable_phase4_merged_side_recovery{false};
-    bool enable_phase4_merged_single_blob_handoff{false};
-    bool enable_phase4_pairwise_assignment{false};
+    bool enable_phase4_merged_split_handoff{true};
+    bool enable_phase4_merged_side_recovery{true};
+    bool enable_phase4_merged_single_blob_handoff{true};
+    bool enable_phase4_pairwise_assignment{true};
     bool reid_enable{true};
     std::string reid_backend{"light"};
     std::string reid_model_path{};

@@ -155,10 +155,10 @@ class VisionDemoNode : public rclcpp::Node {
     this->declare_parameter<double>("sid.min_assignment_margin", 0.08);
     this->declare_parameter<int>("sid.stable_frames_before_feature_update", 3);
     this->declare_parameter<bool>("sid.merged_requires_overlap", true);
-    this->declare_parameter<bool>("sid.enable_phase4_merged_split_handoff", false);
-    this->declare_parameter<bool>("sid.enable_phase4_merged_side_recovery", false);
-    this->declare_parameter<bool>("sid.enable_phase4_merged_single_blob_handoff", false);
-    this->declare_parameter<bool>("sid.enable_phase4_pairwise_assignment", false);
+    this->declare_parameter<bool>("sid.enable_phase4_merged_split_handoff", true);
+    this->declare_parameter<bool>("sid.enable_phase4_merged_side_recovery", true);
+    this->declare_parameter<bool>("sid.enable_phase4_merged_single_blob_handoff", true);
+    this->declare_parameter<bool>("sid.enable_phase4_pairwise_assignment", true);
     this->declare_parameter<bool>("sid.reid_enable", true);
     this->declare_parameter<std::string>("sid.reid_backend", "light");
     this->declare_parameter<std::string>("sid.reid_model_path", "");

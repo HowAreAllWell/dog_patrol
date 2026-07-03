@@ -221,10 +221,10 @@ src/vision_demo_host/scripts/live_bearing_test.sh \
 - `sid.split_stable_frames`（分离恢复后稳定多少帧再恢复更新）
 - `sid.merge_hold_frames`（进入 merged 后最少保持帧数）
 - `sid.app_w` / `sid.geo_w` / `sid.time_w`（语义恢复一对一分配权重）
-- `sid.enable_phase4_merged_split_handoff`（默认 `false`；Phase 4 `merged_split_handoff` 迁移 feature flag，关闭时默认行为不变）
-- `sid.enable_phase4_merged_side_recovery`（默认 `false`；Phase 4 `merged_side_recovery` 迁移 feature flag，关闭时默认行为不变）
-- `sid.enable_phase4_merged_single_blob_handoff`（默认 `false`；Phase 4 merged single-blob handoff 迁移 feature flag，关闭时默认行为不变）
-- `sid.enable_phase4_pairwise_assignment`（默认 `false`；Phase 4 `2x2 pairwise assignment` 迁移 feature flag，关闭时默认行为不变）
+- `sid.enable_phase4_merged_split_handoff`（默认 `true`；Phase 4 `merged_split_handoff` 迁移路径，显式设为 `false` 可回退 legacy）
+- `sid.enable_phase4_merged_side_recovery`（默认 `true`；Phase 4 `merged_side_recovery` 迁移路径，显式设为 `false` 可回退 legacy）
+- `sid.enable_phase4_merged_single_blob_handoff`（默认 `true`；Phase 4 merged single-blob handoff 迁移路径，显式设为 `false` 可回退 legacy）
+- `sid.enable_phase4_pairwise_assignment`（默认 `true`；Phase 4 `2x2 pairwise assignment` 迁移路径，显式设为 `false` 可回退 legacy）
 - `sid.reid_enable`（兼容输入；运行时强制开启语义层外观特征）
 - `sid.reid_backend`（`light` 或 `osnet_onnx`）
 - `sid.reid_model_path`（`osnet_onnx` 的 ONNX 模型路径）
@@ -489,11 +489,11 @@ ros2 run vision_demo_host offline_eval_recordings
   - `#9` 起输出 `SplitCandidate` shadow lifecycle：`split_candidate_enter`、`split_candidate_update`、`split_candidate_end`；候选行包含 group id、candidate raw id、bbox、score、shadow-only `candidate_semantic_id` guess、`reason`、`related_raw_track_id` 和 `candidate_stable_frames`，用于回链 `tracklet_hypotheses.csv` 的 candidate evidence。
   - `#14` 起输出 single-blob handoff decision shadow rows：`event_type=single_blob_handoff_decision`，`reason` 可为 `single_blob_continuity_kept`、`single_blob_handoff_eligible`、`single_blob_rejected_by_missing_age`、`single_blob_rejected_by_appearance_or_geometry_margin`、`single_blob_handoff_accepted`；`decision_*` 字段来自 legacy `merged_candidate` score row，用于解释 single visible blob 为何保持 continuity、可 handoff、被拒绝或已被 legacy 接受。该行只补观测，不迁移 merged single-blob handoff 行为。
   - `#15` 起输出 2x2 pairwise assignment matrix shadow rows：`event_type=pairwise_assignment_matrix`；`pairwise_*` 字段记录 selected / alternate pairings、final cost sum、appearance cost sum、margin 和 appearance override 是否触发。该行只补观测，不迁移 2x2 pairwise assignment 行为。
-  - `sid.enable_phase4_merged_split_handoff=true` / `--sid-enable-phase4-merged-split-handoff true` 时，`merged_split_handoff` 迁移路径会额外输出 `event_type=phase4_merged_split_handoff`、`reason=merged_split_handoff` 行；默认关闭时不输出该 Phase 4 行。
-  - `sid.enable_phase4_merged_side_recovery=true` / `--sid-enable-phase4-merged-side-recovery true` 时，`merged_side_recovery` 迁移路径会额外输出 `event_type=phase4_merged_side_recovery`、`reason=merged_side_recovery` 行；默认关闭时仍使用 legacy `merged_side_recovery`。
-  - `sid.enable_phase4_merged_single_blob_handoff=true` / `--sid-enable-phase4-merged-single-blob-handoff true` 时，merged single-blob accepted handoff 由 `IdentityManager` / Phase 4 state 执行，并额外输出 `event_type=phase4_merged_single_blob_handoff`、`reason=merged_single_blob_handoff` 行；默认关闭时仍使用 legacy accepted 分支。
-  - `sid.enable_phase4_pairwise_assignment=true` / `--sid-enable-phase4-pairwise-assignment true` 时，2x2 pairwise appearance override 由 `IdentityManager` / Phase 4 state 执行，并额外输出 `event_type=phase4_pairwise_assignment`、`reason=pairwise_appearance_override` 行；默认关闭时仍使用 legacy pairwise override 分支。
-  - `#13` 起输出 side reappearance shadow evidence：默认 legacy 路径中，侧边再出现 raw track 会输出 `event_type=side_reappearance_candidate`、`reason=side_reappearance_candidate` 行；启用 Phase 4 side recovery 后，该行由可同样 join 的 `phase4_merged_side_recovery` 行替代。两者都回链到 preceding `MergedGroup`、carrier raw id 和 missing semantic guess。
+  - `sid.enable_phase4_merged_split_handoff=true` / `--sid-enable-phase4-merged-split-handoff true` 默认启用，`merged_split_handoff` 迁移路径会额外输出 `event_type=phase4_merged_split_handoff`、`reason=merged_split_handoff` 行；显式设为 `false` 时回退 legacy 路径且不输出该 Phase 4 行。
+  - `sid.enable_phase4_merged_side_recovery=true` / `--sid-enable-phase4-merged-side-recovery true` 默认启用，`merged_side_recovery` 迁移路径会额外输出 `event_type=phase4_merged_side_recovery`、`reason=merged_side_recovery` 行；显式设为 `false` 时回退 legacy `merged_side_recovery`。
+  - `sid.enable_phase4_merged_single_blob_handoff=true` / `--sid-enable-phase4-merged-single-blob-handoff true` 默认启用，merged single-blob accepted handoff 由 `IdentityManager` / Phase 4 state 执行，并额外输出 `event_type=phase4_merged_single_blob_handoff`、`reason=merged_single_blob_handoff` 行；显式设为 `false` 时回退 legacy accepted 分支。
+  - `sid.enable_phase4_pairwise_assignment=true` / `--sid-enable-phase4-pairwise-assignment true` 默认启用，2x2 pairwise appearance override 由 `IdentityManager` / Phase 4 state 执行，并额外输出 `event_type=phase4_pairwise_assignment`、`reason=pairwise_appearance_override` 行；显式设为 `false` 时回退 legacy pairwise override 分支。
+  - `#13` 起输出 side reappearance shadow evidence：legacy rollback 路径中，侧边再出现 raw track 会输出 `event_type=side_reappearance_candidate`、`reason=side_reappearance_candidate` 行；默认 Phase 4 side recovery 路径中，该行由可同样 join 的 `phase4_merged_side_recovery` 行替代。两者都回链到 preceding `MergedGroup`、carrier raw id 和 missing semantic guess。
   - 回链方法：先按相同 `frame_idx` 筛两张表，再用 `candidate_raw_track_id` 对 `raw_track_id`，并核对 `reason`、`related_raw_track_id`、bbox/score；`duplicate_output_hidden` 行必须保留 hidden candidate 事实，不表示该候选参与显示或 semantic id 分配。
   - 离线 smoke 验收应先看 `phase3_shadow_state.csv` 的 `event_type` 分布，确认至少覆盖 `hypothesis_input`、`merged_group_enter/update/end` 和 `split_candidate_enter/update/end`；再看 `tracklet_hypotheses.csv` 的 #6 reason 分布仍只使用既有 reason 字符串。
   - 人工抽查窗口：`orin_hik_h264_MOT/01` 的 `746-771` 看 group lifecycle，`793-795` 看 hidden split candidate，`1015-1031` 看 split recovery evidence；`760`、`795`、`1030` 附近同时回查 `tracklet_hypotheses.csv`；`orin_hik_h264_MOT/02` 的 `790-850` 用于第二段 handoff/恢复场景抽查。
