@@ -198,7 +198,7 @@ TEST(IdentityManagerTest, ShadowHypothesesInputDoesNotChangeLegacyIdentityResult
   EXPECT_EQ(shadow_result.feature_update_frozen, baseline_result.feature_update_frozen);
 
   const auto &shadow_rows = shadow_manager.LastPhase3ShadowDebugRows();
-  ASSERT_EQ(shadow_rows.size(), 2U);
+  ASSERT_GE(shadow_rows.size(), 2U);
   EXPECT_EQ(shadow_rows[0].event_type, "hypothesis_input");
   EXPECT_EQ(shadow_rows[0].candidate_raw_track_id, 10);
   EXPECT_EQ(shadow_rows[0].reason, "final_track_output");
@@ -209,6 +209,183 @@ TEST(IdentityManagerTest, ShadowHypothesesInputDoesNotChangeLegacyIdentityResult
   EXPECT_EQ(shadow_rows[1].reason, "duplicate_output_hidden");
   EXPECT_EQ(shadow_rows[1].related_raw_track_id, 10);
   EXPECT_EQ(shadow_rows[1].hypothesis_status, "suppressed_duplicate_candidate");
+}
+
+TEST(IdentityManagerTest, EmitsPhase5NewBirthCandidateHiddenRowsWithoutAllocatingSemanticIds) {
+  vision_demo_host::IdentityManager::Config cfg;
+  cfg.app_w = 1.0F;
+  cfg.geo_w = 0.0F;
+  cfg.time_w = 0.0F;
+  cfg.active_assign_max_cost = 0.90F;
+  cfg.min_assignment_margin = 0.20F;
+  cfg.max_missing_frames = 100;
+  vision_demo_host::IdentityManager ambiguous_manager(cfg);
+
+  const auto initial = ambiguous_manager.Update(
+      vision_demo_host::TrackletObservationsFromTracks(
+          {MakePersonTrack(10, cv::Rect2f(0, 0, 50, 50), {}),
+           MakePersonTrack(20, cv::Rect2f(200, 0, 50, 50), {})}),
+      IdlePrimary());
+  ASSERT_EQ(initial.SemanticIdForRawTrack(10), 1);
+  ASSERT_EQ(initial.SemanticIdForRawTrack(20), 2);
+
+  for (int i = 0; i < 10; ++i) {
+    ambiguous_manager.Update({}, IdlePrimary());
+  }
+
+  const auto ambiguous = ambiguous_manager.Update(
+      vision_demo_host::TrackletObservationsFromTracks(
+          {MakePersonTrack(30, cv::Rect2f(100, 0, 50, 50), {})}),
+      IdlePrimary());
+  EXPECT_EQ(ambiguous.SemanticIdForRawTrack(30), -1);
+
+  const auto *ambiguous_row =
+      FindEvent(ambiguous_manager.LastPhase3ShadowDebugRows(), "new_birth_candidate_hidden", 30);
+  ASSERT_NE(ambiguous_row, nullptr);
+  EXPECT_EQ(ambiguous_row->candidate_semantic_id, -1);
+  EXPECT_EQ(ambiguous_row->reason, "ambiguous_recovery_pending");
+  EXPECT_EQ(ambiguous_row->hypothesis_status, "pending_recovery");
+  EXPECT_FALSE(ambiguous_row->decision_accepted);
+  EXPECT_FALSE(ambiguous_row->decision_selected);
+  EXPECT_FLOAT_EQ(ambiguous_row->candidate_bbox.x, 100.0F);
+  EXPECT_FLOAT_EQ(ambiguous_row->candidate_bbox.width, 50.0F);
+
+  vision_demo_host::IdentityManager duplicate_manager;
+  const auto duplicate_initial = duplicate_manager.Update(
+      vision_demo_host::TrackletObservationsFromTracks(
+          {MakePersonTrack(1, cv::Rect2f(0, 0, 500, 1500)),
+           MakePersonTrack(10, cv::Rect2f(824, 1067, 1013, 447), {0.0F, 1.0F, 0.0F})}),
+      IdlePrimary());
+  ASSERT_EQ(duplicate_initial.SemanticIdForRawTrack(1), 1);
+  ASSERT_EQ(duplicate_initial.SemanticIdForRawTrack(10), 2);
+
+  const auto duplicate = duplicate_manager.Update(
+      vision_demo_host::TrackletObservationsFromTracks(
+          {MakePersonTrack(1, cv::Rect2f(0, 0, 500, 1500)),
+           MakePersonTrack(10, cv::Rect2f(824, 1067, 1013, 447), {0.0F, 1.0F, 0.0F}),
+           MakePersonTrack(13, cv::Rect2f(1331, 1065, 506, 451), {0.0F, 0.9F, 0.1F})}),
+      IdlePrimary());
+  EXPECT_EQ(duplicate.SemanticIdForRawTrack(13), -1);
+
+  const auto *duplicate_row =
+      FindEvent(duplicate_manager.LastPhase3ShadowDebugRows(), "new_birth_candidate_hidden", 13);
+  ASSERT_NE(duplicate_row, nullptr);
+  EXPECT_EQ(duplicate_row->candidate_semantic_id, -1);
+  EXPECT_EQ(duplicate_row->reason, "duplicate_split_hidden");
+  EXPECT_EQ(duplicate_row->hypothesis_status, "hidden_duplicate_split");
+  EXPECT_FALSE(duplicate_row->decision_accepted);
+
+  vision_demo_host::IdentityManager fragment_manager;
+  const auto fragment_initial = fragment_manager.Update(
+      vision_demo_host::TrackletObservationsFromTracks(
+          {MakePersonTrack(14, cv::Rect2f(2300, 180, 300, 1210))}),
+      IdlePrimary());
+  ASSERT_EQ(fragment_initial.SemanticIdForRawTrack(14), 1);
+
+  const auto fragments = fragment_manager.Update(
+      vision_demo_host::TrackletObservationsFromTracks(
+          {MakePersonTrack(14, cv::Rect2f(2300, 180, 300, 1210)),
+           MakePersonTrack(9, cv::Rect2f(340, 541, 142, 762)),
+           MakePersonTrack(15, cv::Rect2f(1589, 1278, 447, 240))}),
+      IdlePrimary());
+  EXPECT_EQ(fragments.SemanticIdForRawTrack(9), -1);
+  EXPECT_EQ(fragments.SemanticIdForRawTrack(15), -1);
+
+  const auto *skinny_row =
+      FindEvent(fragment_manager.LastPhase3ShadowDebugRows(), "new_birth_candidate_hidden", 9);
+  ASSERT_NE(skinny_row, nullptr);
+  EXPECT_EQ(skinny_row->reason, "skinny_partial_hidden");
+  EXPECT_EQ(skinny_row->hypothesis_status, "hidden_partial_fragment");
+  EXPECT_EQ(skinny_row->candidate_semantic_id, -1);
+
+  const auto *wide_row =
+      FindEvent(fragment_manager.LastPhase3ShadowDebugRows(), "new_birth_candidate_hidden", 15);
+  ASSERT_NE(wide_row, nullptr);
+  EXPECT_EQ(wide_row->reason, "wide_fragment_hidden");
+  EXPECT_EQ(wide_row->hypothesis_status, "hidden_partial_fragment");
+  EXPECT_EQ(wide_row->candidate_semantic_id, -1);
+}
+
+TEST(IdentityManagerTest, EmitsPhase5NewBirthCandidateAllocationRowsWithoutChangingSemanticOrder) {
+  vision_demo_host::IdentityManager manager;
+
+  const auto initial = manager.Update(
+      vision_demo_host::TrackletObservationsFromTracks(
+          {MakePersonTrack(1, cv::Rect2f(0, 0, 500, 1500)),
+           MakePersonTrack(2, cv::Rect2f(824, 1067, 1013, 447), {0.0F, 1.0F, 0.0F})}),
+      IdlePrimary());
+  ASSERT_EQ(initial.SemanticIdForRawTrack(1), 1);
+  ASSERT_EQ(initial.SemanticIdForRawTrack(2), 2);
+
+  const auto small_hidden = manager.Update(
+      vision_demo_host::TrackletObservationsFromTracks(
+          {MakePersonTrack(1, cv::Rect2f(0, 0, 500, 1500)),
+           MakePersonTrack(2, cv::Rect2f(824, 1067, 1013, 447), {0.0F, 1.0F, 0.0F}),
+           MakePersonTrack(8, cv::Rect2f(1664, 805, 50, 170), {0.0F, 0.0F, 1.0F})}),
+      IdlePrimary());
+  EXPECT_EQ(small_hidden.SemanticIdForRawTrack(8), -1);
+
+  const auto *pending_row =
+      FindEvent(manager.LastPhase3ShadowDebugRows(), "new_birth_candidate_pending", 8);
+  ASSERT_NE(pending_row, nullptr);
+  EXPECT_EQ(pending_row->reason, "small_new_person_pending");
+  EXPECT_EQ(pending_row->hypothesis_status, "pending_stability");
+  EXPECT_EQ(pending_row->candidate_stable_frames, 1);
+  EXPECT_FALSE(pending_row->decision_accepted);
+
+  const auto small_promoted = manager.Update(
+      vision_demo_host::TrackletObservationsFromTracks(
+          {MakePersonTrack(1, cv::Rect2f(0, 0, 500, 1500)),
+           MakePersonTrack(2, cv::Rect2f(824, 1067, 1013, 447), {0.0F, 1.0F, 0.0F}),
+           MakePersonTrack(8, cv::Rect2f(1666, 805, 50, 170), {0.0F, 0.0F, 1.0F})}),
+      IdlePrimary());
+  EXPECT_EQ(small_promoted.SemanticIdForRawTrack(8), 3);
+
+  const auto *promotion_row =
+      FindEvent(manager.LastPhase3ShadowDebugRows(), "new_birth_candidate_allocated", 8);
+  ASSERT_NE(promotion_row, nullptr);
+  EXPECT_EQ(promotion_row->candidate_semantic_id, 3);
+  EXPECT_EQ(promotion_row->reason, "small_stable_new_person_promoted");
+  EXPECT_EQ(promotion_row->hypothesis_status, "allocated");
+  EXPECT_EQ(promotion_row->candidate_stable_frames, 2);
+  EXPECT_TRUE(promotion_row->decision_selected);
+  EXPECT_TRUE(promotion_row->decision_accepted);
+
+  const auto reflection_hidden = manager.Update(
+      vision_demo_host::TrackletObservationsFromTracks(
+          {MakePersonTrack(1, cv::Rect2f(0, 0, 500, 1500)),
+           MakePersonTrack(2, cv::Rect2f(824, 1067, 1013, 447), {0.0F, 1.0F, 0.0F}),
+           MakePersonTrack(8, cv::Rect2f(1666, 805, 50, 170), {0.0F, 0.0F, 1.0F}),
+           MakePersonTrack(9, cv::Rect2f(340, 541, 142, 762))}),
+      IdlePrimary());
+  EXPECT_EQ(reflection_hidden.SemanticIdForRawTrack(9), -1);
+
+  const auto duplicate_hidden = manager.Update(
+      vision_demo_host::TrackletObservationsFromTracks(
+          {MakePersonTrack(1, cv::Rect2f(0, 0, 500, 1500)),
+           MakePersonTrack(2, cv::Rect2f(824, 1067, 1013, 447), {0.0F, 1.0F, 0.0F}),
+           MakePersonTrack(8, cv::Rect2f(1666, 805, 50, 170), {0.0F, 0.0F, 1.0F}),
+           MakePersonTrack(13, cv::Rect2f(1331, 1065, 506, 451), {0.0F, 0.9F, 0.1F})}),
+      IdlePrimary());
+  EXPECT_EQ(duplicate_hidden.SemanticIdForRawTrack(13), -1);
+
+  const auto newcomer = manager.Update(
+      vision_demo_host::TrackletObservationsFromTracks(
+          {MakePersonTrack(1, cv::Rect2f(0, 0, 500, 1500)),
+           MakePersonTrack(2, cv::Rect2f(824, 1067, 1013, 447), {0.0F, 1.0F, 0.0F}),
+           MakePersonTrack(8, cv::Rect2f(1666, 805, 50, 170), {0.0F, 0.0F, 1.0F}),
+           MakePersonTrack(14, cv::Rect2f(2509, 150, 178, 1270), {0.5F, 0.5F, 0.707F})}),
+      IdlePrimary());
+  EXPECT_EQ(newcomer.SemanticIdForRawTrack(14), 4);
+
+  const auto *allocation_row =
+      FindEvent(manager.LastPhase3ShadowDebugRows(), "new_birth_candidate_allocated", 14);
+  ASSERT_NE(allocation_row, nullptr);
+  EXPECT_EQ(allocation_row->candidate_semantic_id, 4);
+  EXPECT_EQ(allocation_row->reason, "new_semantic_allocated");
+  EXPECT_EQ(allocation_row->hypothesis_status, "allocated");
+  EXPECT_TRUE(allocation_row->decision_selected);
+  EXPECT_TRUE(allocation_row->decision_accepted);
 }
 
 TEST(IdentityManagerTest, Phase3ShadowFrameIdxUsesZeroBasedUpdateFrameForHypothesesLinking) {

@@ -269,6 +269,13 @@ class IdentityManager::Impl {
     bool seen_this_frame{false};
   };
 
+  struct NewBirthCandidateShadowState {
+    cv::Rect2f bbox;
+    float confidence{0.0F};
+    int stable_frames{0};
+    int last_update_frame{-1};
+  };
+
   Config config;
   LegacyIdentityMatcher legacy_identity_matcher;
   std::vector<ScoreDebugRow> last_score_debug_rows;
@@ -277,6 +284,7 @@ class IdentityManager::Impl {
   MergedGroupShadowState recent_merged_group_shadow;
   bool has_recent_merged_group_shadow{false};
   std::map<int, SplitCandidateShadowState> split_candidate_shadow_by_raw_id;
+  std::map<int, NewBirthCandidateShadowState> new_birth_candidate_shadow_by_raw_id;
   int next_merged_group_id{1};
   int phase3_frame_index{0};
 };
@@ -295,6 +303,7 @@ void IdentityManager::Reset() {
   impl_->recent_merged_group_shadow = Impl::MergedGroupShadowState{};
   impl_->has_recent_merged_group_shadow = false;
   impl_->split_candidate_shadow_by_raw_id.clear();
+  impl_->new_birth_candidate_shadow_by_raw_id.clear();
   impl_->next_merged_group_id = 1;
   impl_->phase3_frame_index = 0;
   raw_to_semantic_id_.clear();
@@ -498,6 +507,117 @@ IdentityManagerResult IdentityManager::Update(const std::vector<TrackletObservat
     row.group_age_frames = impl_->merged_group_shadow.age_frames;
     row.group_last_update_frame = impl_->merged_group_shadow.last_update_frame;
     impl_->last_phase3_shadow_debug_rows.push_back(std::move(row));
+  };
+
+  const auto new_birth_hidden_status = [](const std::string &reason) {
+    if (reason == "ambiguous_recovery_pending") {
+      return "pending_recovery";
+    }
+    if (reason == "duplicate_split_hidden") {
+      return "hidden_duplicate_split";
+    }
+    if (reason == "skinny_partial_hidden" || reason == "wide_fragment_hidden") {
+      return "hidden_partial_fragment";
+    }
+    return "hidden";
+  };
+
+  const auto append_new_birth_candidate_row = [&](const ScoreDebugRow &score,
+                                                  const TrackletObservation *observation,
+                                                  const std::string &event_type,
+                                                  const std::string &reason,
+                                                  const std::string &status,
+                                                  const int stable_frames) {
+    Phase3ShadowDebugRow row;
+    row.frame_idx = current_frame_idx;
+    row.event_idx = event_idx++;
+    row.event_type = event_type;
+    row.candidate_raw_track_id = score.raw_track_id;
+    row.candidate_semantic_id = score.semantic_id;
+    if (observation != nullptr) {
+      row.candidate_bbox = observation->bbox;
+      row.candidate_confidence = observation->confidence;
+    }
+    row.reason = reason;
+    row.hypothesis_status = status;
+    row.candidate_stable_frames = stable_frames;
+    row.decision_app_cost = score.app_cost;
+    row.decision_geo_cost = score.geo_cost;
+    row.decision_time_cost = score.time_cost;
+    row.decision_final_score = score.final_score;
+    row.decision_margin = score.margin;
+    row.decision_selected = score.selected;
+    row.decision_accepted = score.accepted;
+    impl_->last_phase3_shadow_debug_rows.push_back(std::move(row));
+  };
+
+  const auto append_phase5_new_birth_candidate_rows = [&]() {
+    std::set<int> scored_new_birth_raw_ids;
+    for (const auto &score : impl_->last_score_debug_rows) {
+      if (score.stage != "birth_candidate" && score.stage != "new_semantic") {
+        continue;
+      }
+      if (score.raw_track_id <= 0) {
+        continue;
+      }
+      scored_new_birth_raw_ids.insert(score.raw_track_id);
+      const auto obs_it = observations_by_raw_track_id.find(score.raw_track_id);
+      const TrackletObservation *observation =
+          obs_it == observations_by_raw_track_id.end() ? nullptr : &obs_it->second;
+      const auto pending_it = impl_->new_birth_candidate_shadow_by_raw_id.find(score.raw_track_id);
+      const int stable_frames = pending_it == impl_->new_birth_candidate_shadow_by_raw_id.end()
+                                    ? 0
+                                    : pending_it->second.stable_frames + 1;
+      if (score.stage == "birth_candidate") {
+        append_new_birth_candidate_row(score, observation, "new_birth_candidate_hidden",
+                                       score.reject_reason.empty() ? "birth_candidate_hidden"
+                                                                   : score.reject_reason,
+                                       new_birth_hidden_status(score.reject_reason), 0);
+        impl_->new_birth_candidate_shadow_by_raw_id.erase(score.raw_track_id);
+        continue;
+      }
+      if (score.stage == "new_semantic" && score.accepted) {
+        append_new_birth_candidate_row(score, observation, "new_birth_candidate_allocated",
+                                       pending_it == impl_->new_birth_candidate_shadow_by_raw_id.end()
+                                           ? "new_semantic_allocated"
+                                           : "small_stable_new_person_promoted",
+                                       "allocated", stable_frames);
+        impl_->new_birth_candidate_shadow_by_raw_id.erase(score.raw_track_id);
+      }
+    }
+
+    for (const auto &obs : observations) {
+      if (obs.class_id != ClassId::kPerson || obs.raw_track_id <= 0 ||
+          raw_to_semantic_id_.find(obs.raw_track_id) != raw_to_semantic_id_.end() ||
+          scored_new_birth_raw_ids.count(obs.raw_track_id) > 0) {
+        continue;
+      }
+
+      auto &candidate = impl_->new_birth_candidate_shadow_by_raw_id[obs.raw_track_id];
+      if (candidate.last_update_frame != current_frame_idx - 1) {
+        candidate.stable_frames = 0;
+      }
+      candidate.stable_frames += 1;
+      candidate.bbox = obs.bbox;
+      candidate.confidence = obs.confidence;
+      candidate.last_update_frame = current_frame_idx;
+
+      ScoreDebugRow pending_score;
+      pending_score.raw_track_id = obs.raw_track_id;
+      pending_score.semantic_id = -1;
+      append_new_birth_candidate_row(pending_score, &obs, "new_birth_candidate_pending",
+                                     "small_new_person_pending", "pending_stability",
+                                     candidate.stable_frames);
+    }
+
+    for (auto it = impl_->new_birth_candidate_shadow_by_raw_id.begin();
+         it != impl_->new_birth_candidate_shadow_by_raw_id.end();) {
+      if (it->second.last_update_frame == current_frame_idx) {
+        ++it;
+        continue;
+      }
+      it = impl_->new_birth_candidate_shadow_by_raw_id.erase(it);
+    }
   };
 
   const auto append_split_candidate_row = [&](const std::string &event_type,
@@ -958,6 +1078,8 @@ IdentityManagerResult IdentityManager::Update(const std::vector<TrackletObservat
       it = impl_->split_candidate_shadow_by_raw_id.erase(it);
     }
   }
+
+  append_phase5_new_birth_candidate_rows();
 
   impl_->phase3_frame_index += 1;
   return result;
