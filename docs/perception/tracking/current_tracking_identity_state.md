@@ -80,11 +80,12 @@ VisualizerRecorder::Render(frame, tracks, primary, identity_result)
 - `ReliableGeometryCost` 已作为 identity 层可单测 read/prediction/cost helper 抽取，legacy matcher 在 scoring 和 missing gate 时把现有 reliable geometry state 传入该 helper。
 - `AssignmentCost` 已作为 identity 层内部可单测 cost composition helper 抽取，legacy matcher 在 scoring 时委托它组合 appearance / geometry / time / weighted final cost。
 - `ActiveAssignmentSolver` 已作为 identity 层内部可单测 active assignment solving helper 抽取，legacy matcher 把已准备好的 active assignment matrix / candidate metadata 交给 helper 执行 Hungarian selection、assignment margin、active max-cost reject、margin reject / cushion 和 2x2 pairwise appearance override 决策。
+- `InactiveRecoverySolver` 已作为 identity 层内部可单测 inactive recovery selection helper 抽取，legacy matcher 把已准备好的 inactive recovery candidate score / threshold / gate evidence 交给 helper 执行 accepted / rejected candidate classification、best-sim recovery selection、Hungarian recovery selection 和 margin 计算。
 - `LegacyIdentityRecordLifecycle` 已作为 identity 层内部可单测 lifecycle helper 抽取，legacy matcher 在 observation apply、seen/missing aging、occlusion protection、single-blob carrier handoff missing 和 snapshot projection 时委托该 helper。
 - 输出 `phase3_shadow_state.csv` 使用的 shadow-only debug rows，包括 hypothesis input、MergedGroup、SplitCandidate、single-blob handoff decision、pairwise matrix、Phase 4 handoff evidence 和 Phase 5 `NewBirthCandidate` lifecycle evidence。
 - 提供默认关闭的 `sid.enable_phase5_birth_manager` 迁移 flag；显式启用时，hidden / pending / accepted birth decision surface 由 `IdentityManager` Phase 5 helper 表达，accepted birth allocation 通过 legacy state seam 应用，并以 `stage=phase5_birth_candidate` / `stage=phase5_new_semantic` 及 `new_birth_candidate_*` rows 记录。
 
-因此，当前 identity 层接口、一部分 shadow / Phase 4/5 evidence route、update-policy 决策面、feature-bank read / appearance-cost 规则、reliable-geometry read / prediction / cost / gate 规则、assignment cost composition 规则、active assignment solving / acceptance 规则、feature bank / reliable geometry mutation 规则、legacy identity record 类型边界，以及 record lifecycle mutation 规则已经迁移；legacy record 内部也已收敛出 feature bank / reliable geometry 子状态。但底层 identity state storage ownership、feature bank / reliable geometry ownership、candidate collection、score/debug row aggregation、assignment apply、raw-to-semantic mapping、birth ownership 和部分 legacy 对照逻辑仍主要在 legacy matcher 内部。
+因此，当前 identity 层接口、一部分 shadow / Phase 4/5 evidence route、update-policy 决策面、feature-bank read / appearance-cost 规则、reliable-geometry read / prediction / cost / gate 规则、assignment cost composition 规则、active assignment solving / acceptance 规则、inactive recovery selection 规则、feature bank / reliable geometry mutation 规则、legacy identity record 类型边界，以及 record lifecycle mutation 规则已经迁移；legacy record 内部也已收敛出 feature bank / reliable geometry 子状态。但底层 identity state storage ownership、feature bank / reliable geometry ownership、candidate collection、score/debug row aggregation、assignment apply、raw-to-semantic mapping、birth ownership 和部分 legacy 对照逻辑仍主要在 legacy matcher 内部。
 
 ### 2.3 `LegacyIdentityMatcher`
 
@@ -98,7 +99,7 @@ VisualizerRecorder::Render(frame, tracks, primary, identity_result)
 - assignment cost candidate collection and debug rows；
 - active assignment matrix preparation、helper input adaptation、score/debug row aggregation 和 assignment apply；
 - `LegacyIdentityRecord` identity record storage，包括 feature bank / reliable geometry 子状态；
-- `FeatureUpdatePolicy` 输入适配、`FeatureBankCost` feature-bank read 委托、`ReliableGeometryCost` reliable-geometry read 委托、`AssignmentCost` cost composition 委托、`ActiveAssignmentSolver` active assignment solving 委托、`FeatureGeometryUpdateState` feature/reliable-geometry mutation 委托与 `LegacyIdentityRecordLifecycle` record lifecycle mutation 委托；
+- `FeatureUpdatePolicy` 输入适配、`FeatureBankCost` feature-bank read 委托、`ReliableGeometryCost` reliable-geometry read 委托、`AssignmentCost` cost composition 委托、`ActiveAssignmentSolver` active assignment solving 委托、`InactiveRecoverySolver` inactive recovery selection 委托、`FeatureGeometryUpdateState` feature/reliable-geometry mutation 委托与 `LegacyIdentityRecordLifecycle` record lifecycle mutation 委托；
 - merged / split recovery mode；
 - birth / hidden candidate gate；
 - feature update freeze；
@@ -180,13 +181,14 @@ VisualizerRecorder::Render(frame, tracks, primary, identity_result)
 19. 已将 Phase 6 non-assignment identity record lifecycle mutation 抽取为内部 `LegacyIdentityRecordLifecycle` helper，覆盖 observation apply、frame begin seen reset、unseen aging、occlusion protection、single-blob carrier handoff missing 和 snapshot projection；`LegacyIdentityMatcher` 仍持有 record container 和 assignment / birth / raw mapping ownership。
 20. 已将 Phase 6 assignment cost composition 抽取为内部 `AssignmentCost` helper，覆盖 appearance、geometry、time 和 weighted final score 组合；`LegacyIdentityMatcher` 仍持有 candidate collection、active assignment solving、assignment acceptance/rejection、pairwise override、missing gates、assignment apply 和 raw-to-semantic mapping ownership。
 21. 已将 Phase 6 active assignment solving 抽取为内部 `ActiveAssignmentSolver` helper，覆盖 Hungarian selection、assignment margins、active max-cost rejection、assignment margin rejection / cushion 和 2x2 pairwise appearance override selection；`LegacyIdentityMatcher` 仍持有 candidate collection、score/debug row aggregation、raw-to-semantic mapping、semantic-id allocation、assignment application、birth decisions、Phase 4/5 apply paths 和 identity record storage ownership。
+22. 已将 Phase 6 inactive recovery selection 抽取为内部 `InactiveRecoverySolver` helper，覆盖 inactive candidate accepted / rejected classification、recover threshold、recovery max-cost rejection、single-track best-sim recovery selection、Hungarian recovery selection 和 margin reporting；`LegacyIdentityMatcher` 仍持有 inactive identity storage、candidate collection、score/debug row aggregation、recovery application、raw-to-semantic mapping、semantic-id allocation、birth decisions 和 Phase 4/5 apply paths。
 
 ## 4. 尚未完成或需要特别注意的点
 
 1. `IdentityManager` 仍包装 `LegacyIdentityMatcher`，不是最终 identity state machine。
 2. 当前 identity state 枚举仍是 `ACTIVE / OCCLUDED / INACTIVE / LOST / MERGED / SPLIT_RECOVERY`，与设计文档中的目标状态机不完全一致。
 3. 合并、拆分、遮挡生命周期仍保留 legacy 对照口径，但 Phase 3/4 已有 shadow rows 和 default-on migrated handoff evidence。
-4. feature update policy 决策面、feature-bank read/cost helper、reliable-geometry read/cost helper、assignment cost composition helper、active assignment solving helper、feature bank / reliable geometry mutation helper、legacy identity record 类型边界和 record lifecycle mutation helper 已独立，legacy record 内也已有 feature bank / reliable geometry 子状态；但长期特征管理、feature bank ownership、reliable geometry ownership 和完整 assignment ownership 仍主要在 legacy matcher 内完成。
+4. feature update policy 决策面、feature-bank read/cost helper、reliable-geometry read/cost helper、assignment cost composition helper、active assignment solving helper、inactive recovery selection helper、feature bank / reliable geometry mutation helper、legacy identity record 类型边界和 record lifecycle mutation helper 已独立，legacy record 内也已有 feature bank / reliable geometry 子状态；但长期特征管理、feature bank ownership、reliable geometry ownership 和完整 assignment ownership 仍主要在 legacy matcher 内完成。
 5. `IdentityAssignmentEvidence` 已输出，但 Primary 当前主要使用 track / association / bbox sanity 信息，并未完整消费 identity assignment confidence。
 6. `pending_recovery_frames` 当前不是完整 pending recovery 状态机。
 7. 配置中仍存在 legacy / diagnostics 对照配置，后续需要明确保留、归档或删除。
@@ -228,6 +230,6 @@ VisualizerRecorder::Render(frame, tracks, primary, identity_result)
 优先做小步修改和小步重构：
 
 1. 保持 `IdentityManager` 作为外部边界不变；
-2. 在已抽取的 `FeatureUpdatePolicy` / `FeatureBankCost` / `ReliableGeometryCost` / `AssignmentCost` / `ActiveAssignmentSolver` / `FeatureGeometryUpdateState` / `LegacyIdentityRecordLifecycle` seam、`LegacyIdentityRecord` 类型边界和 legacy record 内嵌子状态基础上继续小步迁移 feature bank / reliable geometry / assignment ownership；
+2. 在已抽取的 `FeatureUpdatePolicy` / `FeatureBankCost` / `ReliableGeometryCost` / `AssignmentCost` / `ActiveAssignmentSolver` / `InactiveRecoverySolver` / `FeatureGeometryUpdateState` / `LegacyIdentityRecordLifecycle` seam、`LegacyIdentityRecord` 类型边界和 legacy record 内嵌子状态基础上继续小步迁移 feature bank / reliable geometry / assignment ownership；
 3. 再逐步把 legacy 内部状态迁移到目标 `IdentityManager` 状态机；
 4. 不在同一轮同时大改 MOT、Identity 和 Primary。
