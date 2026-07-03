@@ -102,6 +102,7 @@ class IdentityManager {
     bool enable_phase4_merged_side_recovery{true};
     bool enable_phase4_merged_single_blob_handoff{true};
     bool enable_phase4_pairwise_assignment{true};
+    bool enable_phase5_birth_manager{false};
     bool reid_enable{true};
     std::string reid_backend{"light"};
     std::string reid_model_path{};

@@ -41,6 +41,7 @@ LegacyIdentityMatcher::Config ToLegacyConfig(const IdentityManager::Config &conf
   out.disable_legacy_merged_side_recovery = config.enable_phase4_merged_side_recovery;
   out.disable_legacy_merged_single_blob_handoff = config.enable_phase4_merged_single_blob_handoff;
   out.disable_legacy_pairwise_assignment = config.enable_phase4_pairwise_assignment;
+  out.disable_legacy_birth_allocation = config.enable_phase5_birth_manager;
   out.reid_enable = config.reid_enable;
   out.reid_backend = config.reid_backend;
   out.reid_model_path = config.reid_model_path;
@@ -366,6 +367,28 @@ IdentityManagerResult IdentityManager::Update(const std::vector<TrackletObservat
     }
   };
 
+  const auto apply_phase5_birth_manager = [&]() {
+    if (!impl_->config.enable_phase5_birth_manager) {
+      return;
+    }
+    std::vector<int> candidate_raw_ids;
+    for (const auto &row : impl_->last_score_debug_rows) {
+      if (row.stage == "phase5_birth_candidate" && row.raw_track_id > 0 && row.selected && !row.accepted) {
+        candidate_raw_ids.push_back(row.raw_track_id);
+      }
+    }
+    for (const int raw_track_id : candidate_raw_ids) {
+      impl_->legacy_identity_matcher.ApplyPhase5BirthAllocation(tracks, raw_track_id, frame);
+    }
+    refresh_legacy_debug_rows();
+    for (const auto &row : impl_->last_score_debug_rows) {
+      if (row.stage == "phase5_new_semantic" && row.accepted &&
+          row.raw_track_id > 0 && row.semantic_id > 0) {
+        raw_to_semantic_id_[row.raw_track_id] = row.semantic_id;
+      }
+    }
+  };
+
   const auto build_result_from_legacy = [&]() {
     IdentityManagerResult built;
     built.primary_semantic_id = impl_->legacy_identity_matcher.CurrentPrimarySemanticId();
@@ -413,6 +436,7 @@ IdentityManagerResult IdentityManager::Update(const std::vector<TrackletObservat
     return built;
   };
 
+  apply_phase5_birth_manager();
   IdentityManagerResult result = build_result_from_legacy();
 
   const auto append_phase4_pairwise_rows = [&](const Phase3ShadowDebugRow &matrix_row,
@@ -554,7 +578,8 @@ IdentityManagerResult IdentityManager::Update(const std::vector<TrackletObservat
   const auto append_phase5_new_birth_candidate_rows = [&]() {
     std::set<int> scored_new_birth_raw_ids;
     for (const auto &score : impl_->last_score_debug_rows) {
-      if (score.stage != "birth_candidate" && score.stage != "new_semantic") {
+      if (score.stage != "birth_candidate" && score.stage != "new_semantic" &&
+          score.stage != "phase5_new_semantic" && score.stage != "phase5_birth_candidate") {
         continue;
       }
       if (score.raw_track_id <= 0) {
@@ -568,6 +593,11 @@ IdentityManagerResult IdentityManager::Update(const std::vector<TrackletObservat
       const int stable_frames = pending_it == impl_->new_birth_candidate_shadow_by_raw_id.end()
                                     ? 0
                                     : pending_it->second.stable_frames + 1;
+      if (score.stage == "phase5_birth_candidate" &&
+          score.reject_reason == "phase5_birth_manager_pending") {
+        scored_new_birth_raw_ids.insert(score.raw_track_id);
+        continue;
+      }
       if (score.stage == "birth_candidate") {
         append_new_birth_candidate_row(score, observation, "new_birth_candidate_hidden",
                                        score.reject_reason.empty() ? "birth_candidate_hidden"
@@ -576,11 +606,22 @@ IdentityManagerResult IdentityManager::Update(const std::vector<TrackletObservat
         impl_->new_birth_candidate_shadow_by_raw_id.erase(score.raw_track_id);
         continue;
       }
-      if (score.stage == "new_semantic" && score.accepted) {
+      if (score.stage == "phase5_birth_candidate") {
+        append_new_birth_candidate_row(score, observation, "new_birth_candidate_hidden",
+                                       score.reject_reason.empty() ? "phase5_birth_candidate_hidden"
+                                                                   : score.reject_reason,
+                                       new_birth_hidden_status(score.reject_reason), 0);
+        impl_->new_birth_candidate_shadow_by_raw_id.erase(score.raw_track_id);
+        continue;
+      }
+      if ((score.stage == "new_semantic" || score.stage == "phase5_new_semantic") && score.accepted) {
         append_new_birth_candidate_row(score, observation, "new_birth_candidate_allocated",
-                                       pending_it == impl_->new_birth_candidate_shadow_by_raw_id.end()
-                                           ? "new_semantic_allocated"
-                                           : "small_stable_new_person_promoted",
+                                       score.stage == "phase5_new_semantic" &&
+                                               pending_it == impl_->new_birth_candidate_shadow_by_raw_id.end()
+                                           ? "phase5_birth_manager_allocated"
+                                           : (pending_it == impl_->new_birth_candidate_shadow_by_raw_id.end()
+                                                  ? "new_semantic_allocated"
+                                                  : "small_stable_new_person_promoted"),
                                        "allocated", stable_frames);
         impl_->new_birth_candidate_shadow_by_raw_id.erase(score.raw_track_id);
       }

@@ -225,6 +225,7 @@ src/vision_demo_host/scripts/live_bearing_test.sh \
 - `sid.enable_phase4_merged_side_recovery`（默认 `true`；Phase 4 `merged_side_recovery` 迁移路径，显式设为 `false` 可回退 legacy）
 - `sid.enable_phase4_merged_single_blob_handoff`（默认 `true`；Phase 4 merged single-blob handoff 迁移路径，显式设为 `false` 可回退 legacy）
 - `sid.enable_phase4_pairwise_assignment`（默认 `true`；Phase 4 `2x2 pairwise assignment` 迁移路径，显式设为 `false` 可回退 legacy）
+- `sid.enable_phase5_birth_manager`（默认 `false`；Phase 5 accepted birth allocation 迁移路径，`true` 时由 `IdentityManager` Phase 5 path 应用 allocation，`false` 回退 legacy `new_semantic` allocation）
 - `sid.reid_enable`（兼容输入；运行时强制开启语义层外观特征）
 - `sid.reid_backend`（`light` 或 `osnet_onnx`）
 - `sid.reid_model_path`（`osnet_onnx` 的 ONNX 模型路径）
@@ -491,6 +492,7 @@ ros2 run vision_demo_host offline_eval_recordings
   - `#14` 起输出 single-blob handoff decision shadow rows：`event_type=single_blob_handoff_decision`，`reason` 可为 `single_blob_continuity_kept`、`single_blob_handoff_eligible`、`single_blob_rejected_by_missing_age`、`single_blob_rejected_by_appearance_or_geometry_margin`、`single_blob_handoff_accepted`；`decision_*` 字段来自 legacy `merged_candidate` score row，用于解释 single visible blob 为何保持 continuity、可 handoff、被拒绝或已被 legacy 接受。该行只补观测，不迁移 merged single-blob handoff 行为。
   - `#15` 起输出 2x2 pairwise assignment matrix shadow rows：`event_type=pairwise_assignment_matrix`；`pairwise_*` 字段记录 selected / alternate pairings、final cost sum、appearance cost sum、margin 和 appearance override 是否触发。该行只补观测，不迁移 2x2 pairwise assignment 行为。
   - `#23` 起输出 Phase 5 `NewBirthCandidate` shadow lifecycle rows：`event_type=new_birth_candidate_pending` 表示小目标新人等待稳定确认，`event_type=new_birth_candidate_hidden` 表示 legacy birth gate 隐藏或延迟分配，`event_type=new_birth_candidate_allocated` 表示 legacy `new_semantic` 已正式分配；`reason` 可为 `small_new_person_pending`、`small_stable_new_person_promoted`、`new_semantic_allocated`、`ambiguous_recovery_pending`、`duplicate_split_hidden`、`skinny_partial_hidden`、`wide_fragment_hidden`。这些行只补观测，不迁移 birth 决策。
+  - `sid.enable_phase5_birth_manager=false` / `--sid-enable-phase5-birth-manager false` 默认回退 legacy `new_semantic` allocation；设为 `true` 时 accepted birth allocation 由 `IdentityManager` Phase 5 path 应用，`sid_scores.csv` 使用 `stage=phase5_new_semantic`，对应 `new_birth_candidate_allocated` row 使用 `reason=phase5_birth_manager_allocated`。hidden / pending birth decisions 仍不分配 semantic id。
   - `sid.enable_phase4_merged_split_handoff=true` / `--sid-enable-phase4-merged-split-handoff true` 默认启用，`merged_split_handoff` 迁移路径会额外输出 `event_type=phase4_merged_split_handoff`、`reason=merged_split_handoff` 行；显式设为 `false` 时回退 legacy 路径且不输出该 Phase 4 行。
   - `sid.enable_phase4_merged_side_recovery=true` / `--sid-enable-phase4-merged-side-recovery true` 默认启用，`merged_side_recovery` 迁移路径会额外输出 `event_type=phase4_merged_side_recovery`、`reason=merged_side_recovery` 行；显式设为 `false` 时回退 legacy `merged_side_recovery`。
   - `sid.enable_phase4_merged_single_blob_handoff=true` / `--sid-enable-phase4-merged-single-blob-handoff true` 默认启用，merged single-blob accepted handoff 由 `IdentityManager` / Phase 4 state 执行，并额外输出 `event_type=phase4_merged_single_blob_handoff`、`reason=merged_single_blob_handoff` 行；显式设为 `false` 时回退 legacy accepted 分支。
@@ -504,6 +506,7 @@ ros2 run vision_demo_host offline_eval_recordings
   - 证据基线见 `docs/phase5_birth_hidden_candidate_readiness.md`。
   - `sid_scores.csv` 中 `stage=birth_candidate`、`semantic_id=-1`、`reject_reason=ambiguous_recovery_pending|duplicate_split_hidden|skinny_partial_hidden|wide_fragment_hidden` 表示 legacy birth gate 隐藏或延迟分配，不占用 semantic id。
   - `sid_scores.csv` 中 `stage=new_semantic`、`accepted=1` 表示正式分配 semantic id。
+  - `sid.enable_phase5_birth_manager=true` 时，`sid_scores.csv` 中 `stage=phase5_new_semantic`、`accepted=1` 表示 Phase 5 path 已正式分配 semantic id；默认 `false` 时仍使用 legacy `new_semantic`。
   - `phase3_shadow_state.csv` 中 `new_birth_candidate_pending|new_birth_candidate_hidden|new_birth_candidate_allocated` 为 Phase 5 shadow-only lifecycle evidence，派生自 legacy birth / new semantic 行和当前帧未映射候选；不改变 semantic id 分配。
   - `sid_scores.csv` 的 `frame_idx` 来自 legacy matcher 内部 debug frame；`tracklet_hypotheses.csv` 和 `phase3_shadow_state.csv` 使用 0-based 离线视频帧号。跨文件复盘时优先按 raw id、reason、bbox/score 和相邻窗口核对，不要只靠帧号直接等值 join。
   - 当前 `orin_hik_h264_MOT/01,02` 可提供 tracker hidden / split candidate 样本，但不覆盖全部 legacy birth hidden reason；`ambiguous_recovery_pending`、`duplicate_split_hidden`、`skinny_partial_hidden`、`wide_fragment_hidden` 仍以 `test_legacy_identity_matcher` 作为主要自动化证据。

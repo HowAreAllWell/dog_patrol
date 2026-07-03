@@ -74,6 +74,7 @@ struct Options {
   bool sid_enable_phase4_merged_side_recovery{true};
   bool sid_enable_phase4_merged_single_blob_handoff{true};
   bool sid_enable_phase4_pairwise_assignment{true};
+  bool sid_enable_phase5_birth_manager{false};
   bool sid_reid_enable{true};  // compatibility input, runtime forces true.
   std::string sid_reid_backend{"light"};
   std::string sid_reid_model_path{};
@@ -220,6 +221,7 @@ void PrintUsage() {
       << "  --sid-enable-phase4-merged-side-recovery <true|false> (default: true; false rolls back to legacy)\n"
       << "  --sid-enable-phase4-merged-single-blob-handoff <true|false> (default: true; false rolls back to legacy)\n"
       << "  --sid-enable-phase4-pairwise-assignment <true|false> (default: true; false rolls back to legacy)\n"
+      << "  --sid-enable-phase5-birth-manager <true|false> (default: false; true migrates accepted birth allocation)\n"
       << "  --sid-reid-enable <true|false>         (compat-only; runtime forces true)\n"
       << "  --sid-reid-backend <light|osnet_onnx> (default: light)\n"
       << "  --sid-reid-model-path <path>           (default: \"\")\n"
@@ -646,6 +648,15 @@ bool ParseArgs(int argc, char **argv, Options *opt, std::string *error) {
         return false;
       }
       opt->sid_enable_phase4_pairwise_assignment = v;
+    } else if (arg == "--sid-enable-phase5-birth-manager") {
+      bool v = false;
+      if (!ParseBool(need(arg), &v)) {
+        if (error != nullptr) {
+          *error = "Invalid value for --sid-enable-phase5-birth-manager";
+        }
+        return false;
+      }
+      opt->sid_enable_phase5_birth_manager = v;
     } else if (arg == "--sid-reid-enable") {
       bool v = true;
       if (!ParseBool(need(arg), &v)) {
@@ -933,6 +944,7 @@ DatasetMetrics EvaluateOne(const Options &opt, const std::filesystem::path &data
   sid_cfg.enable_phase4_merged_side_recovery = opt.sid_enable_phase4_merged_side_recovery;
   sid_cfg.enable_phase4_merged_single_blob_handoff = opt.sid_enable_phase4_merged_single_blob_handoff;
   sid_cfg.enable_phase4_pairwise_assignment = opt.sid_enable_phase4_pairwise_assignment;
+  sid_cfg.enable_phase5_birth_manager = opt.sid_enable_phase5_birth_manager;
   if (!opt.sid_reid_enable) {
     std::cout << "[offline_eval] reid is mandatory; override --sid-reid-enable=false to true" << std::endl;
   }
