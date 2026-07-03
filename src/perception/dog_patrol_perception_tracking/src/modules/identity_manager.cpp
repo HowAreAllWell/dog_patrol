@@ -83,6 +83,8 @@ IdentityManager::ScoreDebugRow FromLegacyDebugRow(const LegacyIdentityMatcher::S
   out.continuity_used = row.continuity_used;
   out.feature_update_allowed = row.feature_update_allowed;
   out.geometry_update_allowed = row.geometry_update_allowed;
+  out.feature_update_reason = row.feature_update_reason;
+  out.geometry_update_reason = row.geometry_update_reason;
   return out;
 }
 
@@ -1210,6 +1212,8 @@ IdentityAssignmentEvidence IdentityManager::AssignmentEvidenceFromDebug(const Sc
   evidence.continuity_used = row.continuity_used;
   evidence.feature_update_allowed = row.feature_update_allowed;
   evidence.geometry_update_allowed = row.geometry_update_allowed;
+  evidence.feature_update_reason = row.feature_update_reason;
+  evidence.geometry_update_reason = row.geometry_update_reason;
   evidence.stage = row.stage;
   evidence.reject_reason = row.reject_reason;
   return evidence;

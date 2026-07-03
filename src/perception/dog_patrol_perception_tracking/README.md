@@ -476,6 +476,7 @@ ros2 run vision_demo_host offline_eval_recordings
 - `per_frame.csv` 中新增：
   - `sid_mode`（`NORMAL` / `MERGED` / `SPLIT_RECOVERY`）
   - `sid_freeze`（1=语义特征更新冻结，0=可更新）
+- `sid_scores.csv` 中 `feature_update_allowed`、`geometry_update_allowed` 和 `sid_freeze` 保持既有 boolean 语义；`feature_update_reason` / `geometry_update_reason` 是 Phase 6 决策证据字段，用于解释 feature-bank / reliable-geometry update 为什么允许、等待或阻断。当前 reason 包括 `allowed_update`、`global_merge_split_freeze`、`overlapping_track_freeze`、`unreliable_low_quality_observation`、`insufficient_stable_frames`、`update_blocked_by_rejected_assignment`。
 - `primary_raw_track_id_debug` 仅用于离线排障，不参与画面叠字语义
 - `tracklet_hypotheses.csv` 固定字段：
   - `frame_idx,hypothesis_idx,status,raw_track_id,class_id,score,x,y,w,h,reason,related_raw_track_id,assoc_stage,assoc_cost,assoc_iou,assoc_motion_dist,assoc_app_dist,assoc_appearance_used,assoc_final_gate,assoc_reject_reason`

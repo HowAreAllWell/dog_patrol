@@ -997,8 +997,7 @@ DatasetMetrics EvaluateOne(const Options &opt, const std::filesystem::path &data
   }
   if (opt.save_sid_scores) {
     sid_scores_csv.open(result_dir / "sid_scores.csv");
-    sid_scores_csv
-        << "frame_idx,sid_mode,track_idx,raw_track_id,semantic_id,app_cost,geo_cost,time_cost,final_score,stage,selected,margin,accepted,reject_reason,continuity_used,feature_update_allowed,geometry_update_allowed\n";
+    sid_scores_csv << vision_demo_host::tools::SidScoresCsvHeader() << "\n";
   }
   if (opt.save_tracks_csv) {
     tracks_csv.open(result_dir / "tracks.csv");
@@ -1144,7 +1143,8 @@ DatasetMetrics EvaluateOne(const Options &opt, const std::filesystem::path &data
                        << (row.accepted ? "1" : "0") << "," << row.reject_reason << ","
                        << (row.continuity_used ? "1" : "0") << ","
                        << (row.feature_update_allowed ? "1" : "0") << ","
-                       << (row.geometry_update_allowed ? "1" : "0") << "\n";
+                       << (row.geometry_update_allowed ? "1" : "0") << ","
+                       << row.feature_update_reason << "," << row.geometry_update_reason << "\n";
       }
     }
     if (tracks_csv.is_open()) {

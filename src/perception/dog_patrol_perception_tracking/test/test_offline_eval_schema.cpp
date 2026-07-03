@@ -48,6 +48,35 @@ TEST(OfflineEvalSchemaTest, TrackletHypothesesSchemaDocumentsReviewFields) {
   }
 }
 
+TEST(OfflineEvalSchemaTest, SidScoresCsvHeaderDocumentsFeatureUpdatePolicyReasons) {
+  const std::string expected =
+      "frame_idx,sid_mode,track_idx,raw_track_id,semantic_id,app_cost,geo_cost,time_cost,final_score,"
+      "stage,selected,margin,accepted,reject_reason,continuity_used,feature_update_allowed,"
+      "geometry_update_allowed,feature_update_reason,geometry_update_reason";
+
+  EXPECT_EQ(vision_demo_host::tools::SidScoresCsvHeader(), expected);
+
+  const std::string help = vision_demo_host::tools::SidScoresCsvHelp();
+  const std::vector<std::string> required_terms{
+      "sid_scores.csv",
+      "feature_update_allowed",
+      "geometry_update_allowed",
+      "sid_freeze",
+      "feature_update_reason",
+      "geometry_update_reason",
+      "allowed_update",
+      "global_merge_split_freeze",
+      "overlapping_track_freeze",
+      "unreliable_low_quality_observation",
+      "insufficient_stable_frames",
+      "update_blocked_by_rejected_assignment",
+      "Phase 4/5",
+  };
+  for (const auto &term : required_terms) {
+    EXPECT_NE(help.find(term), std::string::npos) << term;
+  }
+}
+
 TEST(OfflineEvalSchemaTest, Phase3ShadowStateCsvHeaderIsStable) {
   const std::string expected =
       "frame_idx,event_idx,event_type,group_id,semantic_ids,carrier_semantic_id,carrier_raw_track_id,"

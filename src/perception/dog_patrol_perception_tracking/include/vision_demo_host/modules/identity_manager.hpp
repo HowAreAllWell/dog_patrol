@@ -38,6 +38,8 @@ class IdentityManager {
     bool continuity_used{false};
     bool feature_update_allowed{false};
     bool geometry_update_allowed{false};
+    std::string feature_update_reason;
+    std::string geometry_update_reason;
   };
 
   struct Phase3ShadowDebugRow {

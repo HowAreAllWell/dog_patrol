@@ -1202,6 +1202,10 @@ TEST(IdentityManagerTest, Phase4PairwiseAssignmentDefaultsOnAndFalseRollsBack) {
   EXPECT_EQ(pending_row->reject_reason, "phase4_pairwise_assignment_pending");
   EXPECT_NE(FindScoreStage(migrated_manager.LastScoreDebugRows(), 30, "phase4_pairwise_assignment"), nullptr);
   EXPECT_NE(FindScoreStage(migrated_manager.LastScoreDebugRows(), 40, "phase4_pairwise_assignment"), nullptr);
+  const auto *migrated_score = FindScoreStage(migrated_manager.LastScoreDebugRows(), 30, "phase4_pairwise_assignment");
+  ASSERT_NE(migrated_score, nullptr);
+  EXPECT_EQ(migrated_score->feature_update_reason, "overlapping_track_freeze");
+  EXPECT_EQ(migrated_score->geometry_update_reason, "overlapping_track_freeze");
 
   const auto *phase4_row = FindEvent(migrated_manager.LastPhase3ShadowDebugRows(), "phase4_pairwise_assignment", 30);
   ASSERT_NE(phase4_row, nullptr);

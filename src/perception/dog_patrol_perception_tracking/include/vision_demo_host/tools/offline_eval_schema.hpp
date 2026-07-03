@@ -25,6 +25,26 @@ inline std::string TrackletHypothesesCsvHelp() {
       "  that caused the suppression relation.\n";
 }
 
+inline std::string SidScoresCsvHeader() {
+  return "frame_idx,sid_mode,track_idx,raw_track_id,semantic_id,app_cost,geo_cost,time_cost,final_score,"
+         "stage,selected,margin,accepted,reject_reason,continuity_used,feature_update_allowed,"
+         "geometry_update_allowed,feature_update_reason,geometry_update_reason";
+}
+
+inline std::string SidScoresCsvHelp() {
+  return
+      "Identity score CSV:\n"
+      "  sid_scores.csv is written when --save-sid-scores=true.\n"
+      "  Schema: " +
+      SidScoresCsvHeader() + "\n"
+      "  feature_update_allowed, geometry_update_allowed, and sid_freeze keep their legacy boolean meanings.\n"
+      "  Phase 6 update-policy evidence appends feature_update_reason and geometry_update_reason so accepted\n"
+      "  assignment rows and migrated Phase 4/5 apply rows explain why feature-bank and reliable-geometry\n"
+      "  updates were allowed, delayed, or blocked. Reason values include allowed_update,\n"
+      "  global_merge_split_freeze, overlapping_track_freeze, unreliable_low_quality_observation,\n"
+      "  insufficient_stable_frames, and update_blocked_by_rejected_assignment.\n";
+}
+
 inline std::string Phase3ShadowStateCsvHeader() {
   return "frame_idx,event_idx,event_type,group_id,semantic_ids,carrier_semantic_id,carrier_raw_track_id,"
          "candidate_raw_track_id,candidate_semantic_id,candidate_score,candidate_x,candidate_y,candidate_w,"
