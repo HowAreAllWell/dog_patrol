@@ -76,10 +76,11 @@ VisualizerRecorder::Render(frame, tracks, primary, identity_result)
 - 暴露当前 identity mode 和 feature freeze 状态。
 - `FeatureUpdatePolicy` 已作为 identity 层可单测决策 helper 抽取，legacy matcher 负责把当前状态适配为显式 policy 输入后委托该 helper。
 - `FeatureGeometryUpdateState` 已作为 identity 层可单测 mutation helper 抽取，legacy matcher 负责把现有 identity record 适配进 helper，并写回 feature bank / reliable geometry state。
+- `FeatureBankCost` 已作为 identity 层可单测 read/cost helper 抽取，legacy matcher 在 scoring 时把现有 feature bank 传入该 helper 计算 appearance cost。
 - 输出 `phase3_shadow_state.csv` 使用的 shadow-only debug rows，包括 hypothesis input、MergedGroup、SplitCandidate、single-blob handoff decision、pairwise matrix、Phase 4 handoff evidence 和 Phase 5 `NewBirthCandidate` lifecycle evidence。
 - 提供默认关闭的 `sid.enable_phase5_birth_manager` 迁移 flag；显式启用时，hidden / pending / accepted birth decision surface 由 `IdentityManager` Phase 5 helper 表达，accepted birth allocation 通过 legacy state seam 应用，并以 `stage=phase5_birth_candidate` / `stage=phase5_new_semantic` 及 `new_birth_candidate_*` rows 记录。
 
-因此，当前 identity 层接口、一部分 shadow / Phase 4/5 evidence route、update-policy 决策面和 feature bank / reliable geometry mutation 规则已经迁移；但底层 identity state storage、appearance / geometry 读路径、feature bank / reliable geometry ownership 和部分 legacy 对照逻辑仍主要在 legacy matcher 内部。
+因此，当前 identity 层接口、一部分 shadow / Phase 4/5 evidence route、update-policy 决策面、feature-bank read / appearance-cost 规则和 feature bank / reliable geometry mutation 规则已经迁移；但底层 identity state storage、geometry 读路径、feature bank / reliable geometry ownership 和部分 legacy 对照逻辑仍主要在 legacy matcher 内部。
 
 ### 2.3 `LegacyIdentityMatcher`
 
@@ -94,7 +95,7 @@ VisualizerRecorder::Render(frame, tracks, primary, identity_result)
 - assignment max cost / margin；
 - feature bank storage；
 - reliable geometry storage；
-- `FeatureUpdatePolicy` 输入适配与 `FeatureGeometryUpdateState` legacy state 适配 / 写回；
+- `FeatureUpdatePolicy` 输入适配、`FeatureBankCost` feature-bank read 委托与 `FeatureGeometryUpdateState` legacy state 适配 / 写回；
 - merged / split recovery mode；
 - birth / hidden candidate gate；
 - feature update freeze；
@@ -169,13 +170,14 @@ VisualizerRecorder::Render(frame, tracks, primary, identity_result)
 12. 已新增默认关闭的 Phase 5 birth migration flag：`sid.enable_phase5_birth_manager`。flag-off 回退 legacy `birth_candidate` / `new_semantic`；flag-on 迁移 hidden / pending / accepted birth decision surface 到 `IdentityManager` Phase 5 path，同时保留 legacy score/debug rows 对照。
 13. 已将 Phase 6 update-policy decision calculation 抽取为 `FeatureUpdatePolicy` helper；`LegacyIdentityMatcher` 继续负责可靠观测判定、overlap/global freeze 输入适配和 rollback/debug 对照。
 14. 已将 Phase 6 feature bank / reliable geometry update-state mutation 规则抽取为 `FeatureGeometryUpdateState` helper；`LegacyIdentityMatcher` 仍持有 legacy identity record，并在 upsert 时适配 / 写回 helper state。
+15. 已将 Phase 6 feature-bank read / appearance-cost 规则抽取为 `FeatureBankCost` helper；`LegacyIdentityMatcher::ComputeCosts` 仍负责组合 appearance / geometry / time cost，并把 legacy feature bank 传入该 helper。
 
 ## 4. 尚未完成或需要特别注意的点
 
 1. `IdentityManager` 仍包装 `LegacyIdentityMatcher`，不是最终 identity state machine。
 2. 当前 identity state 枚举仍是 `ACTIVE / OCCLUDED / INACTIVE / LOST / MERGED / SPLIT_RECOVERY`，与设计文档中的目标状态机不完全一致。
 3. 合并、拆分、遮挡生命周期仍保留 legacy 对照口径，但 Phase 3/4 已有 shadow rows 和 default-on migrated handoff evidence。
-4. feature update policy 决策面和 feature bank / reliable geometry mutation helper 已独立，但长期特征管理、feature bank ownership 和 reliable geometry ownership 仍主要在 legacy matcher 内完成。
+4. feature update policy 决策面、feature-bank read/cost helper 和 feature bank / reliable geometry mutation helper 已独立，但长期特征管理、feature bank ownership 和 reliable geometry ownership 仍主要在 legacy matcher 内完成。
 5. `IdentityAssignmentEvidence` 已输出，但 Primary 当前主要使用 track / association / bbox sanity 信息，并未完整消费 identity assignment confidence。
 6. `pending_recovery_frames` 当前不是完整 pending recovery 状态机。
 7. 配置中仍存在 legacy / diagnostics 对照配置，后续需要明确保留、归档或删除。
@@ -217,6 +219,6 @@ VisualizerRecorder::Render(frame, tracks, primary, identity_result)
 优先做小步修改和小步重构：
 
 1. 保持 `IdentityManager` 作为外部边界不变；
-2. 在已抽取的 `FeatureUpdatePolicy` / `FeatureGeometryUpdateState` seam 上继续小步迁移 feature bank / reliable geometry ownership；
+2. 在已抽取的 `FeatureUpdatePolicy` / `FeatureBankCost` / `FeatureGeometryUpdateState` seam 上继续小步迁移 feature bank / reliable geometry ownership；
 3. 再逐步把 legacy 内部状态迁移到目标 `IdentityManager` 状态机；
 4. 不在同一轮同时大改 MOT、Identity 和 Primary。

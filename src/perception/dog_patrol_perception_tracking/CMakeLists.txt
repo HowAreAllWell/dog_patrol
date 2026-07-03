@@ -41,6 +41,7 @@ set(MODULE_SOURCES
   src/modules/bearing_estimator.cpp
   src/modules/udp_json_adapter.cpp
   src/modules/feature_update_policy.cpp
+  src/modules/feature_bank_cost.cpp
   src/modules/feature_geometry_update_state.cpp
   src/modules/legacy_identity_matcher.cpp
   src/modules/identity_manager.cpp
@@ -133,6 +134,14 @@ if(BUILD_TESTING)
     target_include_directories(test_feature_geometry_update_state PRIVATE include)
     target_link_libraries(test_feature_geometry_update_state ${PROJECT_NAME}_modules)
     ament_target_dependencies(test_feature_geometry_update_state rclcpp)
+  endif()
+
+  ament_add_gtest(test_feature_bank_cost test/test_feature_bank_cost.cpp)
+  if(TARGET test_feature_bank_cost)
+    target_compile_features(test_feature_bank_cost PUBLIC cxx_std_17)
+    target_include_directories(test_feature_bank_cost PRIVATE include)
+    target_link_libraries(test_feature_bank_cost ${PROJECT_NAME}_modules)
+    ament_target_dependencies(test_feature_bank_cost rclcpp)
   endif()
 
   ament_add_gtest(test_mot_tracker_config test/test_mot_tracker_config.cpp)
