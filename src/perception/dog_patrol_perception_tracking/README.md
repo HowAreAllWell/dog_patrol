@@ -456,6 +456,7 @@ ros2 run vision_demo_host offline_eval_recordings
   - `per_frame.csv`（可关闭）
   - `tracklet_hypotheses.csv`（随 `--save-tracks-csv=true` 输出，用于 shadow candidate 验收）
   - `phase3_shadow_state.csv`（随 `--save-tracks-csv=true` 输出，用于 Phase 3 identity shadow state 验收）
+  - `sid_scores.csv`（默认输出，用于 legacy identity assignment / birth gate score evidence）
 - 映射表：
   - `dataset_dir_map.csv`（`sXX` 与原始数据集目录的对应关系）
 - 总表：
@@ -498,6 +499,12 @@ ros2 run vision_demo_host offline_eval_recordings
   - 离线 smoke 验收应先看 `phase3_shadow_state.csv` 的 `event_type` 分布，确认至少覆盖 `hypothesis_input`、`merged_group_enter/update/end` 和 `split_candidate_enter/update/end`；再看 `tracklet_hypotheses.csv` 的 #6 reason 分布仍只使用既有 reason 字符串。
   - 人工抽查窗口：`orin_hik_h264_MOT/01` 的 `746-771` 看 group lifecycle，`793-795` 看 hidden split candidate，`1015-1031` 看 split recovery evidence；`760`、`795`、`1030` 附近同时回查 `tracklet_hypotheses.csv`；`orin_hik_h264_MOT/02` 的 `790-850` 用于第二段 handoff/恢复场景抽查。
   - 该 CSV 是 shadow-only debug 输出，不参与 semantic id 分配、primary、overlay、UDP 或 `LegacyIdentityMatcher` 决策。
+- Phase 5 birth / hidden candidate readiness：
+  - 证据基线见 `docs/phase5_birth_hidden_candidate_readiness.md`。
+  - `sid_scores.csv` 中 `stage=birth_candidate`、`semantic_id=-1`、`reject_reason=ambiguous_recovery_pending|duplicate_split_hidden|skinny_partial_hidden|wide_fragment_hidden` 表示 legacy birth gate 隐藏或延迟分配，不占用 semantic id。
+  - `sid_scores.csv` 中 `stage=new_semantic`、`accepted=1` 表示正式分配 semantic id。
+  - `sid_scores.csv` 的 `frame_idx` 来自 legacy matcher 内部 debug frame；`tracklet_hypotheses.csv` 和 `phase3_shadow_state.csv` 使用 0-based 离线视频帧号。跨文件复盘时优先按 raw id、reason、bbox/score 和相邻窗口核对，不要只靠帧号直接等值 join。
+  - 当前 `orin_hik_h264_MOT/01,02` 可提供 tracker hidden / split candidate 样本，但不覆盖全部 legacy birth hidden reason；`ambiguous_recovery_pending`、`duplicate_split_hidden`、`skinny_partial_hidden`、`wide_fragment_hidden` 仍以 `test_legacy_identity_matcher` 作为主要自动化证据。
 - `LOCKED -> LOST` 转换次数
 - `bearing_base_rad` 抖动指标：
   - `bearing_diff_abs_mean`

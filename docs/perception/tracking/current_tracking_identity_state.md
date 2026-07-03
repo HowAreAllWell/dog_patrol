@@ -1,8 +1,8 @@
 # 当前 tracking identity 实现状态
 
-日期：2026-06-24
+日期：2026-07-03
 
-本文记录当前代码的真实实现状态，用于接手和排查 identity 相关问题。它不是新的架构设计文档；`orin_hik_h264_MOT` 中 01/02 已修问题和后续架构风险见 `docs/orin_hik_h264_MOT_01_02_issue_resolution.md`。
+本文记录当前代码的真实实现状态，用于接手和排查 identity 相关问题。它不是新的架构设计文档；`orin_hik_h264_MOT` 中 01/02 已修问题和后续架构风险见 `docs/orin_hik_h264_MOT_01_02_issue_resolution.md`。Phase 5 birth / hidden candidate readiness 证据见 `docs/phase5_birth_hidden_candidate_readiness.md`。
 
 ## 1. 当前主链路
 
@@ -22,7 +22,8 @@ camera_ingest
 
 ```text
 tracks = MotTracker::Update(filtered_detections, frame)
-identity_result = IdentityManager::Update(TrackletObservationsFromTracks(tracks), previous_primary, frame)
+tracklet_hypotheses = MotTracker::LastTrackletHypotheses()
+identity_result = IdentityManager::Update(TrackletObservationsFromTracks(tracks), tracklet_hypotheses, previous_primary, frame)
 primary = PrimaryTargetManager::Update(identity_result.identities)
 bearing = BearingEstimator::Estimate(primary.primary_track, ...)
 UdpJsonAdapter::Send(primary, bearing, identity_result)
@@ -48,12 +49,14 @@ VisualizerRecorder::Render(frame, tracks, primary, identity_result)
 - lost recovery / low-score update 标记；
 - occlusion suspect / protection；
 - `AssociationEvidence` 输出。
+- `TrackletHypothesis` shadow 输出，包含 tracked、suppressed duplicate candidate 和 duplicate output hidden 等候选事实。
 
 输出到上层的核心结构：
 
 - `Track`
 - `TrackletObservation`
 - `AssociationEvidence`
+- `TrackletHypothesis`
 
 注意：`MotTracker` 仍存在 `old_minimal` 与 `new_core` 两类路径，当前默认目标是 `new_core`。后续不应再把长期 semantic identity 逻辑塞回 `MotTracker`。
 
@@ -65,14 +68,15 @@ VisualizerRecorder::Render(frame, tracks, primary, identity_result)
 
 当前做的事情：
 
-- 接收 `TrackletObservation`；
+- 接收 `TrackletObservation` 和可选 `TrackletHypothesis`；
 - 转回 `Track` 后调用 `LegacyIdentityMatcher::Update`；
 - 从 legacy snapshot 生成 `IdentityObservation`；
 - 暴露 `IdentityManagerResult`；
 - 转换 legacy score debug row 为 `IdentityAssignmentEvidence`；
 - 暴露当前 identity mode 和 feature freeze 状态。
+- 输出 `phase3_shadow_state.csv` 使用的 shadow-only debug rows，包括 hypothesis input、MergedGroup、SplitCandidate、single-blob handoff decision、pairwise matrix 和 Phase 4 handoff evidence。
 
-因此，当前 identity 层接口已经迁移，但核心 semantic id 分配、恢复、合并/拆分模式、feature bank 更新等逻辑仍主要在 legacy matcher 内部。
+因此，当前 identity 层接口和一部分 shadow / Phase 4 evidence route 已经迁移，但核心 semantic id birth、hidden candidate、feature bank 更新等逻辑仍主要在 legacy matcher 内部。
 
 ### 2.3 `LegacyIdentityMatcher`
 
@@ -88,6 +92,7 @@ VisualizerRecorder::Render(frame, tracks, primary, identity_result)
 - feature bank；
 - reliable geometry；
 - merged / split recovery mode；
+- birth / hidden candidate gate；
 - feature update freeze；
 - score debug rows。
 
@@ -149,17 +154,25 @@ VisualizerRecorder::Render(frame, tracks, primary, identity_result)
 5. `PrimaryTargetManager` 改为消费 `IdentityObservation`。
 6. UDP 和可视化接入 identity 状态。
 7. 增加 identity / primary / UDP 相关单元测试。
+8. 建立 `tracklet_hypotheses.csv` 和 `phase3_shadow_state.csv`，用于观察 tracker hidden / suppressed candidate、MergedGroup 和 SplitCandidate lifecycle。
+9. 已将 Phase 4 四类 handoff 行为迁移到默认开启路径，同时保留显式 `false` rollback：
+   - `sid.enable_phase4_merged_split_handoff`
+   - `sid.enable_phase4_merged_side_recovery`
+   - `sid.enable_phase4_merged_single_blob_handoff`
+   - `sid.enable_phase4_pairwise_assignment`
+10. 已补充 Phase 5 readiness 文档，固定 birth / hidden candidate 的现有证据面与下一步建议。
 
 ## 4. 尚未完成或需要特别注意的点
 
 1. `IdentityManager` 仍包装 `LegacyIdentityMatcher`，不是最终 identity state machine。
 2. 当前 identity state 枚举仍是 `ACTIVE / OCCLUDED / INACTIVE / LOST / MERGED / SPLIT_RECOVERY`，与设计文档中的目标状态机不完全一致。
-3. 合并、拆分、遮挡生命周期仍有 legacy 口径，尚未统一成清晰 identity lifecycle。
+3. 合并、拆分、遮挡生命周期仍保留 legacy 对照口径，但 Phase 3/4 已有 shadow rows 和 default-on migrated handoff evidence。
 4. feature bank 更新虽然已有更保守的 gate，但长期特征管理仍主要在 legacy matcher 内完成。
 5. `IdentityAssignmentEvidence` 已输出，但 Primary 当前主要使用 track / association / bbox sanity 信息，并未完整消费 identity assignment confidence。
 6. `pending_recovery_frames` 当前不是完整 pending recovery 状态机。
 7. 配置中仍存在 legacy / diagnostics 对照配置，后续需要明确保留、归档或删除。
 8. 当前测试通过不等于算法效果达标；离线评估和视频复盘仍是必要输入。
+9. Phase 5 birth / hidden candidate 还没有独立 `BirthManager` 或 `NewBirthCandidate` lifecycle。当前 `ambiguous_recovery_pending`、`duplicate_split_hidden`、`skinny_partial_hidden`、`wide_fragment_hidden`、small stable new-person promotion 和 `new_semantic` allocation 仍由 `LegacyIdentityMatcher` 决策。
 
 ## 5. 当前效果判断口径
 
@@ -172,6 +185,7 @@ VisualizerRecorder::Render(frame, tracks, primary, identity_result)
 - raw id 切换时 semantic id 是否保持；
 - visible primary 被拒绝的原因；
 - feature update 是否在遮挡/合并/低质量观测中被冻结；
+- hidden / suppressed candidate reason 是否符合 `tracklet_hypotheses.csv`、`phase3_shadow_state.csv` 和 `sid_scores.csv` 的证据矩阵；
 - 叠加视频中的具体错误帧。
 
 ## 6. 后续继续修改前的建议检查清单
@@ -195,6 +209,6 @@ VisualizerRecorder::Render(frame, tracks, primary, identity_result)
 优先做小步修改和小步重构：
 
 1. 保持 `IdentityManager` 作为外部边界不变；
-2. 为 `LegacyIdentityMatcher` 当前关键行为补足文档和测试；
-3. 逐步把 legacy 内部状态迁移到目标 `IdentityManager` 状态机；
+2. 先执行 Phase 5 `NewBirthCandidate` shadow lifecycle slice，补足 birth / hidden candidate 的 shadow equivalence；
+3. 再逐步把 legacy 内部状态迁移到目标 `IdentityManager` 状态机；
 4. 不在同一轮同时大改 MOT、Identity 和 Primary。
