@@ -74,10 +74,11 @@ VisualizerRecorder::Render(frame, tracks, primary, identity_result)
 - 暴露 `IdentityManagerResult`；
 - 转换 legacy score debug row 为 `IdentityAssignmentEvidence`；
 - 暴露当前 identity mode 和 feature freeze 状态。
+- `FeatureUpdatePolicy` 已作为 identity 层可单测决策 helper 抽取，legacy matcher 负责把当前状态适配为显式 policy 输入后委托该 helper。
 - 输出 `phase3_shadow_state.csv` 使用的 shadow-only debug rows，包括 hypothesis input、MergedGroup、SplitCandidate、single-blob handoff decision、pairwise matrix、Phase 4 handoff evidence 和 Phase 5 `NewBirthCandidate` lifecycle evidence。
 - 提供默认关闭的 `sid.enable_phase5_birth_manager` 迁移 flag；显式启用时，hidden / pending / accepted birth decision surface 由 `IdentityManager` Phase 5 helper 表达，accepted birth allocation 通过 legacy state seam 应用，并以 `stage=phase5_birth_candidate` / `stage=phase5_new_semantic` 及 `new_birth_candidate_*` rows 记录。
 
-因此，当前 identity 层接口和一部分 shadow / Phase 4/5 evidence route 已经迁移，但底层 identity state、feature bank 更新和部分 legacy 对照逻辑仍主要在 legacy matcher 内部。
+因此，当前 identity 层接口、一部分 shadow / Phase 4/5 evidence route 和 update-policy 决策面已经迁移，但底层 identity state、feature bank 更新、reliable geometry ownership 和部分 legacy 对照逻辑仍主要在 legacy matcher 内部。
 
 ### 2.3 `LegacyIdentityMatcher`
 
@@ -92,6 +93,7 @@ VisualizerRecorder::Render(frame, tracks, primary, identity_result)
 - assignment max cost / margin；
 - feature bank；
 - reliable geometry；
+- `FeatureUpdatePolicy` 输入适配与 feature bank / reliable geometry state mutation；
 - merged / split recovery mode；
 - birth / hidden candidate gate；
 - feature update freeze；
@@ -164,13 +166,14 @@ VisualizerRecorder::Render(frame, tracks, primary, identity_result)
 10. 已补充 Phase 5 readiness 文档，固定 birth / hidden candidate 的现有证据面与下一步建议。
 11. 已加入 Phase 5 `NewBirthCandidate` shadow-only lifecycle rows：`new_birth_candidate_pending`、`new_birth_candidate_hidden`、`new_birth_candidate_allocated`，用于观察 legacy birth / hidden / allocation 决策。
 12. 已新增默认关闭的 Phase 5 birth migration flag：`sid.enable_phase5_birth_manager`。flag-off 回退 legacy `birth_candidate` / `new_semantic`；flag-on 迁移 hidden / pending / accepted birth decision surface 到 `IdentityManager` Phase 5 path，同时保留 legacy score/debug rows 对照。
+13. 已将 Phase 6 update-policy decision calculation 抽取为 `FeatureUpdatePolicy` helper；`LegacyIdentityMatcher` 继续负责可靠观测判定、overlap/global freeze 输入适配、feature bank / reliable geometry mutation 和 rollback/debug 对照。
 
 ## 4. 尚未完成或需要特别注意的点
 
 1. `IdentityManager` 仍包装 `LegacyIdentityMatcher`，不是最终 identity state machine。
 2. 当前 identity state 枚举仍是 `ACTIVE / OCCLUDED / INACTIVE / LOST / MERGED / SPLIT_RECOVERY`，与设计文档中的目标状态机不完全一致。
 3. 合并、拆分、遮挡生命周期仍保留 legacy 对照口径，但 Phase 3/4 已有 shadow rows 和 default-on migrated handoff evidence。
-4. feature bank 更新虽然已有更保守的 gate，但长期特征管理仍主要在 legacy matcher 内完成。
+4. feature update policy 决策面已独立为 helper，但长期特征管理、feature bank ownership 和 reliable geometry ownership 仍主要在 legacy matcher 内完成。
 5. `IdentityAssignmentEvidence` 已输出，但 Primary 当前主要使用 track / association / bbox sanity 信息，并未完整消费 identity assignment confidence。
 6. `pending_recovery_frames` 当前不是完整 pending recovery 状态机。
 7. 配置中仍存在 legacy / diagnostics 对照配置，后续需要明确保留、归档或删除。
@@ -212,6 +215,6 @@ VisualizerRecorder::Render(frame, tracks, primary, identity_result)
 优先做小步修改和小步重构：
 
 1. 保持 `IdentityManager` 作为外部边界不变；
-2. 先验收 `sid.enable_phase5_birth_manager` flag-on/off 在固定离线数据上的等价性；
+2. 在已抽取的 `FeatureUpdatePolicy` seam 上继续小步迁移 feature bank / reliable geometry ownership；
 3. 再逐步把 legacy 内部状态迁移到目标 `IdentityManager` 状态机；
 4. 不在同一轮同时大改 MOT、Identity 和 Primary。

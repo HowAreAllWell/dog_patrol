@@ -40,6 +40,7 @@ set(MODULE_SOURCES
   src/modules/primary_target_manager.cpp
   src/modules/bearing_estimator.cpp
   src/modules/udp_json_adapter.cpp
+  src/modules/feature_update_policy.cpp
   src/modules/legacy_identity_matcher.cpp
   src/modules/identity_manager.cpp
   src/modules/visualizer_recorder.cpp
@@ -115,6 +116,14 @@ if(BUILD_TESTING)
     target_include_directories(test_identity_manager PRIVATE include)
     target_link_libraries(test_identity_manager ${PROJECT_NAME}_modules)
     ament_target_dependencies(test_identity_manager rclcpp)
+  endif()
+
+  ament_add_gtest(test_feature_update_policy test/test_feature_update_policy.cpp)
+  if(TARGET test_feature_update_policy)
+    target_compile_features(test_feature_update_policy PUBLIC cxx_std_17)
+    target_include_directories(test_feature_update_policy PRIVATE include)
+    target_link_libraries(test_feature_update_policy ${PROJECT_NAME}_modules)
+    ament_target_dependencies(test_feature_update_policy rclcpp)
   endif()
 
   ament_add_gtest(test_mot_tracker_config test/test_mot_tracker_config.cpp)
