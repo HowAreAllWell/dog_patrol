@@ -43,6 +43,7 @@ set(MODULE_SOURCES
   src/modules/feature_update_policy.cpp
   src/modules/feature_bank_cost.cpp
   src/modules/feature_geometry_update_state.cpp
+  src/modules/reliable_geometry_cost.cpp
   src/modules/legacy_identity_matcher.cpp
   src/modules/identity_manager.cpp
   src/modules/visualizer_recorder.cpp
@@ -142,6 +143,14 @@ if(BUILD_TESTING)
     target_include_directories(test_feature_bank_cost PRIVATE include)
     target_link_libraries(test_feature_bank_cost ${PROJECT_NAME}_modules)
     ament_target_dependencies(test_feature_bank_cost rclcpp)
+  endif()
+
+  ament_add_gtest(test_reliable_geometry_cost test/test_reliable_geometry_cost.cpp)
+  if(TARGET test_reliable_geometry_cost)
+    target_compile_features(test_reliable_geometry_cost PUBLIC cxx_std_17)
+    target_include_directories(test_reliable_geometry_cost PRIVATE include)
+    target_link_libraries(test_reliable_geometry_cost ${PROJECT_NAME}_modules)
+    ament_target_dependencies(test_reliable_geometry_cost rclcpp)
   endif()
 
   ament_add_gtest(test_mot_tracker_config test/test_mot_tracker_config.cpp)
