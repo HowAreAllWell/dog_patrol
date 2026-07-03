@@ -45,6 +45,7 @@ set(MODULE_SOURCES
   src/modules/feature_geometry_update_state.cpp
   src/modules/reliable_geometry_cost.cpp
   src/modules/assignment_cost.cpp
+  src/modules/active_assignment_solver.cpp
   src/modules/legacy_identity_matcher.cpp
   src/modules/identity_manager.cpp
   src/modules/visualizer_recorder.cpp
@@ -176,6 +177,14 @@ if(BUILD_TESTING)
     target_include_directories(test_assignment_cost PRIVATE include src/modules)
     target_link_libraries(test_assignment_cost ${PROJECT_NAME}_modules)
     ament_target_dependencies(test_assignment_cost rclcpp)
+  endif()
+
+  ament_add_gtest(test_active_assignment_solver test/test_active_assignment_solver.cpp)
+  if(TARGET test_active_assignment_solver)
+    target_compile_features(test_active_assignment_solver PUBLIC cxx_std_17)
+    target_include_directories(test_active_assignment_solver PRIVATE include src/modules)
+    target_link_libraries(test_active_assignment_solver ${PROJECT_NAME}_modules)
+    ament_target_dependencies(test_active_assignment_solver rclcpp)
   endif()
 
   ament_add_gtest(test_mot_tracker_config test/test_mot_tracker_config.cpp)
