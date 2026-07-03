@@ -78,10 +78,11 @@ VisualizerRecorder::Render(frame, tracks, primary, identity_result)
 - `FeatureGeometryUpdateState` 已作为 identity 层可单测 mutation helper 抽取，legacy matcher 的 identity record 内嵌该 helper 使用的 feature bank / reliable geometry 子状态，并在 upsert 时直接委托 helper mutation。
 - `FeatureBankCost` 已作为 identity 层可单测 read/cost helper 抽取，legacy matcher 在 scoring 时把现有 feature bank 传入该 helper 计算 appearance cost。
 - `ReliableGeometryCost` 已作为 identity 层可单测 read/prediction/cost helper 抽取，legacy matcher 在 scoring 和 missing gate 时把现有 reliable geometry state 传入该 helper。
+- `LegacyIdentityRecordLifecycle` 已作为 identity 层内部可单测 lifecycle helper 抽取，legacy matcher 在 observation apply、seen/missing aging、occlusion protection、single-blob carrier handoff missing 和 snapshot projection 时委托该 helper。
 - 输出 `phase3_shadow_state.csv` 使用的 shadow-only debug rows，包括 hypothesis input、MergedGroup、SplitCandidate、single-blob handoff decision、pairwise matrix、Phase 4 handoff evidence 和 Phase 5 `NewBirthCandidate` lifecycle evidence。
 - 提供默认关闭的 `sid.enable_phase5_birth_manager` 迁移 flag；显式启用时，hidden / pending / accepted birth decision surface 由 `IdentityManager` Phase 5 helper 表达，accepted birth allocation 通过 legacy state seam 应用，并以 `stage=phase5_birth_candidate` / `stage=phase5_new_semantic` 及 `new_birth_candidate_*` rows 记录。
 
-因此，当前 identity 层接口、一部分 shadow / Phase 4/5 evidence route、update-policy 决策面、feature-bank read / appearance-cost 规则、reliable-geometry read / prediction / cost / gate 规则、feature bank / reliable geometry mutation 规则，以及 legacy identity record 类型边界已经迁移；legacy record 内部也已收敛出 feature bank / reliable geometry 子状态。但底层 identity state storage ownership、feature bank / reliable geometry ownership 和部分 legacy 对照逻辑仍主要在 legacy matcher 内部。
+因此，当前 identity 层接口、一部分 shadow / Phase 4/5 evidence route、update-policy 决策面、feature-bank read / appearance-cost 规则、reliable-geometry read / prediction / cost / gate 规则、feature bank / reliable geometry mutation 规则、legacy identity record 类型边界，以及 record lifecycle mutation 规则已经迁移；legacy record 内部也已收敛出 feature bank / reliable geometry 子状态。但底层 identity state storage ownership、feature bank / reliable geometry ownership 和部分 legacy 对照逻辑仍主要在 legacy matcher 内部。
 
 ### 2.3 `LegacyIdentityMatcher`
 
@@ -95,7 +96,7 @@ VisualizerRecorder::Render(frame, tracks, primary, identity_result)
 - appearance / geometry / time cost；
 - assignment max cost / margin；
 - `LegacyIdentityRecord` identity record storage，包括 feature bank / reliable geometry 子状态；
-- `FeatureUpdatePolicy` 输入适配、`FeatureBankCost` feature-bank read 委托、`ReliableGeometryCost` reliable-geometry read 委托与 `FeatureGeometryUpdateState` mutation 委托；
+- `FeatureUpdatePolicy` 输入适配、`FeatureBankCost` feature-bank read 委托、`ReliableGeometryCost` reliable-geometry read 委托、`FeatureGeometryUpdateState` feature/reliable-geometry mutation 委托与 `LegacyIdentityRecordLifecycle` record lifecycle mutation 委托；
 - merged / split recovery mode；
 - birth / hidden candidate gate；
 - feature update freeze；
@@ -174,13 +175,14 @@ VisualizerRecorder::Render(frame, tracks, primary, identity_result)
 16. 已将 Phase 6 reliable-geometry read / prediction / geometry-cost / missing-gate 规则抽取为 `ReliableGeometryCost` helper；`LegacyIdentityMatcher` 仍持有 reliable geometry storage，并把 legacy identity record 的嵌入子状态适配给 helper。
 17. 已将 Phase 6 feature bank / reliable geometry scattered legacy fields 收敛为 legacy identity record 内的 `FeatureGeometryUpdateState::State` 子状态；本步只改变 legacy record 内部存储形状，未迁移完整 identity record ownership。
 18. 已将 Phase 6 legacy identity record shape 从 `LegacyIdentityMatcher` 私有嵌套结构抽为 identity 层内部 `LegacyIdentityRecord` 类型；`LegacyIdentityMatcher` 仍持有 `identities_by_semantic_id_` storage ownership。
+19. 已将 Phase 6 non-assignment identity record lifecycle mutation 抽取为内部 `LegacyIdentityRecordLifecycle` helper，覆盖 observation apply、frame begin seen reset、unseen aging、occlusion protection、single-blob carrier handoff missing 和 snapshot projection；`LegacyIdentityMatcher` 仍持有 record container 和 assignment / birth / raw mapping ownership。
 
 ## 4. 尚未完成或需要特别注意的点
 
 1. `IdentityManager` 仍包装 `LegacyIdentityMatcher`，不是最终 identity state machine。
 2. 当前 identity state 枚举仍是 `ACTIVE / OCCLUDED / INACTIVE / LOST / MERGED / SPLIT_RECOVERY`，与设计文档中的目标状态机不完全一致。
 3. 合并、拆分、遮挡生命周期仍保留 legacy 对照口径，但 Phase 3/4 已有 shadow rows 和 default-on migrated handoff evidence。
-4. feature update policy 决策面、feature-bank read/cost helper、reliable-geometry read/cost helper、feature bank / reliable geometry mutation helper 和 legacy identity record 类型边界已独立，legacy record 内也已有 feature bank / reliable geometry 子状态；但长期特征管理、feature bank ownership 和 reliable geometry ownership 仍主要在 legacy matcher 内完成。
+4. feature update policy 决策面、feature-bank read/cost helper、reliable-geometry read/cost helper、feature bank / reliable geometry mutation helper、legacy identity record 类型边界和 record lifecycle mutation helper 已独立，legacy record 内也已有 feature bank / reliable geometry 子状态；但长期特征管理、feature bank ownership 和 reliable geometry ownership 仍主要在 legacy matcher 内完成。
 5. `IdentityAssignmentEvidence` 已输出，但 Primary 当前主要使用 track / association / bbox sanity 信息，并未完整消费 identity assignment confidence。
 6. `pending_recovery_frames` 当前不是完整 pending recovery 状态机。
 7. 配置中仍存在 legacy / diagnostics 对照配置，后续需要明确保留、归档或删除。
@@ -222,6 +224,6 @@ VisualizerRecorder::Render(frame, tracks, primary, identity_result)
 优先做小步修改和小步重构：
 
 1. 保持 `IdentityManager` 作为外部边界不变；
-2. 在已抽取的 `FeatureUpdatePolicy` / `FeatureBankCost` / `ReliableGeometryCost` / `FeatureGeometryUpdateState` seam、`LegacyIdentityRecord` 类型边界和 legacy record 内嵌子状态基础上继续小步迁移 feature bank / reliable geometry ownership；
+2. 在已抽取的 `FeatureUpdatePolicy` / `FeatureBankCost` / `ReliableGeometryCost` / `FeatureGeometryUpdateState` / `LegacyIdentityRecordLifecycle` seam、`LegacyIdentityRecord` 类型边界和 legacy record 内嵌子状态基础上继续小步迁移 feature bank / reliable geometry ownership；
 3. 再逐步把 legacy 内部状态迁移到目标 `IdentityManager` 状态机；
 4. 不在同一轮同时大改 MOT、Identity 和 Primary。
