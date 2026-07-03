@@ -753,6 +753,78 @@ TEST(IdentityManagerTest, EmitsPairwiseAssignmentMatrixShadowRowsWithoutChanging
   EXPECT_TRUE(row.pairwise_appearance_override);
 }
 
+TEST(IdentityManagerTest, Phase4PairwiseAssignmentMatchesLegacyOverrideBehindFlag) {
+  vision_demo_host::IdentityManager::Config cfg;
+  cfg.max_missing_frames = 180;
+  cfg.active_assign_max_cost = 0.55F;
+  cfg.min_assignment_margin = 0.08F;
+  cfg.stable_frames_before_feature_update = 1;
+
+  vision_demo_host::IdentityManager default_manager(cfg);
+  vision_demo_host::IdentityManager::Config migrated_cfg = cfg;
+  migrated_cfg.enable_phase4_pairwise_assignment = true;
+  vision_demo_host::IdentityManager migrated_manager(migrated_cfg);
+
+  const std::vector<float> primary_feature{1.0F, 0.0F};
+  const std::vector<float> secondary_feature{0.96F, 0.28F};
+  const auto initialize = [&](vision_demo_host::IdentityManager *manager) {
+    const auto first = manager->Update(
+        vision_demo_host::TrackletObservationsFromTracks({
+            MakePersonTrack(1, cv::Rect2f(0, 0, 100, 100), primary_feature),
+            MakePersonTrack(2, cv::Rect2f(200, 0, 100, 100), secondary_feature),
+        }),
+        IdlePrimary());
+    ASSERT_EQ(first.SemanticIdForRawTrack(1), 1);
+    ASSERT_EQ(first.SemanticIdForRawTrack(2), 2);
+    for (int i = 0; i < 10; ++i) {
+      manager->Update({}, IdlePrimary());
+    }
+  };
+
+  initialize(&default_manager);
+  const auto default_recovered = default_manager.Update(
+      vision_demo_host::TrackletObservationsFromTracks({
+          MakePersonTrack(30, cv::Rect2f(80, 0, 100, 100), secondary_feature),
+          MakePersonTrack(40, cv::Rect2f(120, 0, 100, 100), primary_feature),
+      }),
+      IdlePrimary());
+  EXPECT_EQ(default_recovered.SemanticIdForRawTrack(30), 2);
+  EXPECT_EQ(default_recovered.SemanticIdForRawTrack(40), 1);
+  EXPECT_NE(FindScoreStage(default_manager.LastScoreDebugRows(), 30, "assign_candidate"), nullptr);
+  EXPECT_EQ(FindScoreStage(default_manager.LastScoreDebugRows(), 30, "phase4_pairwise_assignment"), nullptr);
+  EXPECT_EQ(FindEvent(default_manager.LastPhase3ShadowDebugRows(), "phase4_pairwise_assignment", 30), nullptr);
+
+  initialize(&migrated_manager);
+  const auto migrated_recovered = migrated_manager.Update(
+      vision_demo_host::TrackletObservationsFromTracks({
+          MakePersonTrack(30, cv::Rect2f(80, 0, 100, 100), secondary_feature),
+          MakePersonTrack(40, cv::Rect2f(120, 0, 100, 100), primary_feature),
+      }),
+      IdlePrimary());
+  EXPECT_EQ(migrated_recovered.SemanticIdForRawTrack(30), 2);
+  EXPECT_EQ(migrated_recovered.SemanticIdForRawTrack(40), 1);
+
+  const auto pairwise_rows = FindEvents(migrated_manager.LastPhase3ShadowDebugRows(), "pairwise_assignment_matrix");
+  ASSERT_EQ(pairwise_rows.size(), 1U);
+  EXPECT_EQ(pairwise_rows.front()->pairwise_selected_pairs, "30->1|40->2");
+  EXPECT_EQ(pairwise_rows.front()->pairwise_alternate_pairs, "30->2|40->1");
+  EXPECT_TRUE(pairwise_rows.front()->pairwise_appearance_override);
+  const auto *pending_row = FindScoreStage(migrated_manager.LastScoreDebugRows(), 30, "assign_candidate");
+  ASSERT_NE(pending_row, nullptr);
+  EXPECT_FALSE(pending_row->accepted);
+  EXPECT_EQ(pending_row->reject_reason, "phase4_pairwise_assignment_pending");
+  EXPECT_NE(FindScoreStage(migrated_manager.LastScoreDebugRows(), 30, "phase4_pairwise_assignment"), nullptr);
+  EXPECT_NE(FindScoreStage(migrated_manager.LastScoreDebugRows(), 40, "phase4_pairwise_assignment"), nullptr);
+
+  const auto *phase4_row = FindEvent(migrated_manager.LastPhase3ShadowDebugRows(), "phase4_pairwise_assignment", 30);
+  ASSERT_NE(phase4_row, nullptr);
+  EXPECT_EQ(phase4_row->reason, "pairwise_appearance_override");
+  EXPECT_EQ(phase4_row->candidate_semantic_id, 2);
+  EXPECT_EQ(phase4_row->related_raw_track_id, 40);
+  EXPECT_EQ(phase4_row->pairwise_selected_pairs, "30->1|40->2");
+  EXPECT_EQ(phase4_row->pairwise_alternate_pairs, "30->2|40->1");
+}
+
 TEST(IdentityManagerTest, EmitsSideReappearanceCandidateLinkedToMergedGroupWithoutChangingAssignments) {
   vision_demo_host::IdentityManager::Config cfg;
   cfg.max_missing_frames = 180;

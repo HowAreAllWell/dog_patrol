@@ -75,8 +75,10 @@ inline std::string Phase3ShadowStateCsvHelp() {
       "  2x2 pairwise assignment observability emits event_type=pairwise_assignment_matrix when two\n"
       "  candidate tracks and two missing semantic identities have a valid selected-vs-alternate matrix.\n"
       "  pairwise_* fields record selected pairs, alternate pairs, final-cost sums, appearance-cost sums,\n"
-      "  margin, and whether the appearance override would trigger. These rows are shadow-only and do not\n"
-      "  migrate 2x2 pairwise assignment behavior.\n"
+      "  margin, and whether the appearance override would trigger.\n"
+      "  When --sid-enable-phase4-pairwise-assignment=true is used, the migrated Phase 4 pairwise path\n"
+      "  emits event_type=phase4_pairwise_assignment with reason=pairwise_appearance_override and reuses\n"
+      "  the pairwise_* matrix fields. With the flag disabled these rows remain shadow-only evidence.\n"
       "  Acceptance review windows: 01:746-771 for group lifecycle, 01:793-795 for hidden split candidates,\n"
       "  01:1015-1031 for split recovery evidence, and 02:790-850 for the second dataset handoff case.\n";
 }

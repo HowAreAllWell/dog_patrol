@@ -40,6 +40,7 @@ LegacyIdentityMatcher::Config ToLegacyConfig(const IdentityManager::Config &conf
   out.disable_legacy_merged_split_handoff = config.enable_phase4_merged_split_handoff;
   out.disable_legacy_merged_side_recovery = config.enable_phase4_merged_side_recovery;
   out.disable_legacy_merged_single_blob_handoff = config.enable_phase4_merged_single_blob_handoff;
+  out.disable_legacy_pairwise_assignment = config.enable_phase4_pairwise_assignment;
   out.reid_enable = config.reid_enable;
   out.reid_backend = config.reid_backend;
   out.reid_model_path = config.reid_model_path;
@@ -98,6 +99,26 @@ IdentityManager::Phase3ShadowDebugRow FromLegacyPairwiseDebugRow(
   out.pairwise_alternate_app_cost = row.alternate_app_cost;
   out.pairwise_margin = row.margin;
   out.pairwise_appearance_override = row.appearance_override;
+  return out;
+}
+
+std::vector<std::pair<int, int>> ParsePairwisePairs(const std::string &pairs) {
+  std::vector<std::pair<int, int>> out;
+  std::stringstream ss(pairs);
+  std::string token;
+  while (std::getline(ss, token, '|')) {
+    const auto sep = token.find("->");
+    if (sep == std::string::npos) {
+      return {};
+    }
+    try {
+      const int raw_id = std::stoi(token.substr(0, sep));
+      const int semantic_id = std::stoi(token.substr(sep + 2));
+      out.emplace_back(raw_id, semantic_id);
+    } catch (...) {
+      return {};
+    }
+  }
   return out;
 }
 
@@ -384,6 +405,54 @@ IdentityManagerResult IdentityManager::Update(const std::vector<TrackletObservat
   };
 
   IdentityManagerResult result = build_result_from_legacy();
+
+  const auto append_phase4_pairwise_rows = [&](const Phase3ShadowDebugRow &matrix_row,
+                                               const std::vector<std::pair<int, int>> &pairs) {
+    for (std::size_t i = 0; i < pairs.size(); ++i) {
+      Phase3ShadowDebugRow row = matrix_row;
+      row.event_idx = event_idx++;
+      row.event_type = "phase4_pairwise_assignment";
+      row.reason = "pairwise_appearance_override";
+      row.candidate_raw_track_id = pairs[i].first;
+      row.candidate_semantic_id = pairs[i].second;
+      row.related_raw_track_id = pairs[pairs.size() - 1 - i].first;
+      impl_->last_phase3_shadow_debug_rows.push_back(std::move(row));
+    }
+  };
+
+  const auto apply_phase4_pairwise_assignment = [&]() {
+    if (!impl_->config.enable_phase4_pairwise_assignment) {
+      return;
+    }
+    for (const auto &row : impl_->last_phase3_shadow_debug_rows) {
+      if (row.event_type != "pairwise_assignment_matrix" || !row.pairwise_appearance_override) {
+        continue;
+      }
+      const auto alternate_pairs = ParsePairwisePairs(row.pairwise_alternate_pairs);
+      if (alternate_pairs.size() != 2U || alternate_pairs[0].first <= 0 || alternate_pairs[0].second <= 0 ||
+          alternate_pairs[1].first <= 0 || alternate_pairs[1].second <= 0 ||
+          alternate_pairs[0].first == alternate_pairs[1].first ||
+          alternate_pairs[0].second == alternate_pairs[1].second) {
+        continue;
+      }
+      const bool applied = impl_->legacy_identity_matcher.ApplyPhase4PairwiseAssignment(
+          tracks, alternate_pairs[0].first, alternate_pairs[0].second,
+          alternate_pairs[1].first, alternate_pairs[1].second, frame);
+      if (!applied) {
+        continue;
+      }
+      raw_to_semantic_id_[alternate_pairs[0].first] = alternate_pairs[0].second;
+      raw_to_semantic_id_[alternate_pairs[1].first] = alternate_pairs[1].second;
+      const Phase3ShadowDebugRow matrix_row = row;
+      refresh_legacy_debug_rows();
+      result = build_result_from_legacy();
+      append_phase4_pairwise_rows(matrix_row, alternate_pairs);
+      break;
+    }
+  };
+
+  apply_phase4_pairwise_assignment();
+
   const auto mode = CurrentMode();
   int phase4_continuity_raw = -1;
   int phase4_continuity_sid = -1;

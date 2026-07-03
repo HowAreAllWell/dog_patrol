@@ -158,6 +158,7 @@ class VisionDemoNode : public rclcpp::Node {
     this->declare_parameter<bool>("sid.enable_phase4_merged_split_handoff", false);
     this->declare_parameter<bool>("sid.enable_phase4_merged_side_recovery", false);
     this->declare_parameter<bool>("sid.enable_phase4_merged_single_blob_handoff", false);
+    this->declare_parameter<bool>("sid.enable_phase4_pairwise_assignment", false);
     this->declare_parameter<bool>("sid.reid_enable", true);
     this->declare_parameter<std::string>("sid.reid_backend", "light");
     this->declare_parameter<std::string>("sid.reid_model_path", "");
@@ -347,6 +348,8 @@ class VisionDemoNode : public rclcpp::Node {
         this->get_parameter("sid.enable_phase4_merged_side_recovery").as_bool();
     sid_cfg.enable_phase4_merged_single_blob_handoff =
         this->get_parameter("sid.enable_phase4_merged_single_blob_handoff").as_bool();
+    sid_cfg.enable_phase4_pairwise_assignment =
+        this->get_parameter("sid.enable_phase4_pairwise_assignment").as_bool();
     const bool sid_reid_enable_param = this->get_parameter("sid.reid_enable").as_bool();
     if (!sid_reid_enable_param) {
       RCLCPP_WARN(get_logger(), "reid is mandatory; override sid.reid_enable to true");
@@ -476,13 +479,14 @@ class VisionDemoNode : public rclcpp::Node {
                 identity_cfg.overlap_iou_freeze, identity_cfg.split_stable_frames, identity_cfg.merge_hold_frames,
                 identity_cfg.app_w, identity_cfg.geo_w, identity_cfg.time_w);
     RCLCPP_INFO(get_logger(),
-                "startup_effective_config identity_assign active_max=%.3f recovery_max=%.3f raw_continuity_max=%.3f min_margin=%.3f stable_feature_frames=%d merged_requires_overlap=%s phase4_merged_split_handoff=%s phase4_merged_side_recovery=%s phase4_merged_single_blob_handoff=%s reid=%s reid_backend=%s reid_model=%s reid_input=%dx%d",
+                "startup_effective_config identity_assign active_max=%.3f recovery_max=%.3f raw_continuity_max=%.3f min_margin=%.3f stable_feature_frames=%d merged_requires_overlap=%s phase4_merged_split_handoff=%s phase4_merged_side_recovery=%s phase4_merged_single_blob_handoff=%s phase4_pairwise_assignment=%s reid=%s reid_backend=%s reid_model=%s reid_input=%dx%d",
                 identity_cfg.active_assign_max_cost, identity_cfg.recovery_max_cost,
                 identity_cfg.raw_continuity_max_cost, identity_cfg.min_assignment_margin,
                 identity_cfg.stable_frames_before_feature_update, BoolStr(identity_cfg.merged_requires_overlap),
                 BoolStr(identity_cfg.enable_phase4_merged_split_handoff),
                 BoolStr(identity_cfg.enable_phase4_merged_side_recovery),
                 BoolStr(identity_cfg.enable_phase4_merged_single_blob_handoff),
+                BoolStr(identity_cfg.enable_phase4_pairwise_assignment),
                 BoolStr(identity_cfg.reid_enable),
                 identity_cfg.reid_backend.c_str(), identity_cfg.reid_model_path.c_str(),
                 identity_cfg.reid_input_width, identity_cfg.reid_input_height);
