@@ -239,6 +239,13 @@ bool LooksLikeMergedSideRecovery(const cv::Rect2f &carrier_bbox, const cv::Rect2
   return touches_carrier_side || close_to_carrier_side;
 }
 
+bool Phase5BirthCandidateRequiresStability(const TrackletObservation &observation) {
+  const float height = std::max(1.0F, observation.bbox.height);
+  const float aspect = observation.bbox.width / height;
+  return observation.bbox.area() < 20000.0F && height < 300.0F &&
+         aspect >= 0.25F && aspect <= 0.60F;
+}
+
 }  // namespace
 
 class IdentityManager::Impl {
@@ -275,6 +282,7 @@ class IdentityManager::Impl {
     float confidence{0.0F};
     int stable_frames{0};
     int last_update_frame{-1};
+    bool requires_stability{false};
   };
 
   Config config;
@@ -371,14 +379,43 @@ IdentityManagerResult IdentityManager::Update(const std::vector<TrackletObservat
     if (!impl_->config.enable_phase5_birth_manager) {
       return;
     }
-    std::vector<int> candidate_raw_ids;
-    for (const auto &row : impl_->last_score_debug_rows) {
-      if (row.stage == "phase5_birth_candidate" && row.raw_track_id > 0 && row.selected && !row.accepted) {
-        candidate_raw_ids.push_back(row.raw_track_id);
+    std::vector<int> allocation_raw_ids;
+    for (auto &row : impl_->last_score_debug_rows) {
+      if (row.stage != "phase5_birth_candidate" || row.raw_track_id <= 0 || row.accepted) {
+        continue;
       }
+      row.selected = true;
+
+      if (row.reject_reason != "phase5_birth_manager_pending") {
+        impl_->new_birth_candidate_shadow_by_raw_id.erase(row.raw_track_id);
+        continue;
+      }
+
+      const auto obs_it = observations_by_raw_track_id.find(row.raw_track_id);
+      if (obs_it != observations_by_raw_track_id.end() &&
+          Phase5BirthCandidateRequiresStability(obs_it->second)) {
+        auto &candidate = impl_->new_birth_candidate_shadow_by_raw_id[row.raw_track_id];
+        if (candidate.last_update_frame != current_frame_idx - 1) {
+          candidate.stable_frames = 0;
+        }
+        candidate.stable_frames += 1;
+        candidate.bbox = obs_it->second.bbox;
+        candidate.confidence = obs_it->second.confidence;
+        candidate.last_update_frame = current_frame_idx;
+        candidate.requires_stability = true;
+        if (candidate.stable_frames < 2) {
+          row.reject_reason = "small_new_person_pending";
+          continue;
+        }
+      }
+
+      allocation_raw_ids.push_back(row.raw_track_id);
     }
-    for (const int raw_track_id : candidate_raw_ids) {
+    for (const int raw_track_id : allocation_raw_ids) {
       impl_->legacy_identity_matcher.ApplyPhase5BirthAllocation(tracks, raw_track_id, frame);
+    }
+    if (allocation_raw_ids.empty()) {
+      return;
     }
     refresh_legacy_debug_rows();
     for (const auto &row : impl_->last_score_debug_rows) {
@@ -590,12 +627,21 @@ IdentityManagerResult IdentityManager::Update(const std::vector<TrackletObservat
       const TrackletObservation *observation =
           obs_it == observations_by_raw_track_id.end() ? nullptr : &obs_it->second;
       const auto pending_it = impl_->new_birth_candidate_shadow_by_raw_id.find(score.raw_track_id);
-      const int stable_frames = pending_it == impl_->new_birth_candidate_shadow_by_raw_id.end()
-                                    ? 0
-                                    : pending_it->second.stable_frames + 1;
+      const int stable_frames =
+          pending_it == impl_->new_birth_candidate_shadow_by_raw_id.end()
+              ? 0
+              : pending_it->second.stable_frames +
+                    (pending_it->second.last_update_frame == current_frame_idx ? 0 : 1);
       if (score.stage == "phase5_birth_candidate" &&
           score.reject_reason == "phase5_birth_manager_pending") {
         scored_new_birth_raw_ids.insert(score.raw_track_id);
+        continue;
+      }
+      if (score.stage == "phase5_birth_candidate" &&
+          score.reject_reason == "small_new_person_pending") {
+        append_new_birth_candidate_row(score, observation, "new_birth_candidate_pending",
+                                       "small_new_person_pending", "pending_stability",
+                                       stable_frames);
         continue;
       }
       if (score.stage == "birth_candidate") {
@@ -615,13 +661,15 @@ IdentityManagerResult IdentityManager::Update(const std::vector<TrackletObservat
         continue;
       }
       if ((score.stage == "new_semantic" || score.stage == "phase5_new_semantic") && score.accepted) {
+        const bool promoted_after_stability =
+            pending_it != impl_->new_birth_candidate_shadow_by_raw_id.end() &&
+            pending_it->second.requires_stability;
         append_new_birth_candidate_row(score, observation, "new_birth_candidate_allocated",
-                                       score.stage == "phase5_new_semantic" &&
-                                               pending_it == impl_->new_birth_candidate_shadow_by_raw_id.end()
-                                           ? "phase5_birth_manager_allocated"
-                                           : (pending_it == impl_->new_birth_candidate_shadow_by_raw_id.end()
-                                                  ? "new_semantic_allocated"
-                                                  : "small_stable_new_person_promoted"),
+                                       promoted_after_stability
+                                           ? "small_stable_new_person_promoted"
+                                           : (score.stage == "phase5_new_semantic"
+                                                  ? "phase5_birth_manager_allocated"
+                                                  : "new_semantic_allocated"),
                                        "allocated", stable_frames);
         impl_->new_birth_candidate_shadow_by_raw_id.erase(score.raw_track_id);
       }
@@ -642,6 +690,7 @@ IdentityManagerResult IdentityManager::Update(const std::vector<TrackletObservat
       candidate.bbox = obs.bbox;
       candidate.confidence = obs.confidence;
       candidate.last_update_frame = current_frame_idx;
+      candidate.requires_stability = true;
 
       ScoreDebugRow pending_score;
       pending_score.raw_track_id = obs.raw_track_id;

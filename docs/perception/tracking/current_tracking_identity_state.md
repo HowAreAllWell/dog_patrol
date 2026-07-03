@@ -75,9 +75,9 @@ VisualizerRecorder::Render(frame, tracks, primary, identity_result)
 - 转换 legacy score debug row 为 `IdentityAssignmentEvidence`；
 - 暴露当前 identity mode 和 feature freeze 状态。
 - 输出 `phase3_shadow_state.csv` 使用的 shadow-only debug rows，包括 hypothesis input、MergedGroup、SplitCandidate、single-blob handoff decision、pairwise matrix、Phase 4 handoff evidence 和 Phase 5 `NewBirthCandidate` lifecycle evidence。
-- 提供默认关闭的 `sid.enable_phase5_birth_manager` 迁移 flag；显式启用时，accepted birth allocation 由 `IdentityManager` Phase 5 path 调用 legacy state seam 应用，并以 `stage=phase5_new_semantic` / `reason=phase5_birth_manager_allocated` 记录。
+- 提供默认关闭的 `sid.enable_phase5_birth_manager` 迁移 flag；显式启用时，hidden / pending / accepted birth decision surface 由 `IdentityManager` Phase 5 helper 表达，accepted birth allocation 通过 legacy state seam 应用，并以 `stage=phase5_birth_candidate` / `stage=phase5_new_semantic` 及 `new_birth_candidate_*` rows 记录。
 
-因此，当前 identity 层接口和一部分 shadow / Phase 4 evidence route 已经迁移，但核心 semantic id birth、hidden candidate、feature bank 更新等逻辑仍主要在 legacy matcher 内部。
+因此，当前 identity 层接口和一部分 shadow / Phase 4/5 evidence route 已经迁移，但底层 identity state、feature bank 更新和部分 legacy 对照逻辑仍主要在 legacy matcher 内部。
 
 ### 2.3 `LegacyIdentityMatcher`
 
@@ -163,7 +163,7 @@ VisualizerRecorder::Render(frame, tracks, primary, identity_result)
    - `sid.enable_phase4_pairwise_assignment`
 10. 已补充 Phase 5 readiness 文档，固定 birth / hidden candidate 的现有证据面与下一步建议。
 11. 已加入 Phase 5 `NewBirthCandidate` shadow-only lifecycle rows：`new_birth_candidate_pending`、`new_birth_candidate_hidden`、`new_birth_candidate_allocated`，用于观察 legacy birth / hidden / allocation 决策。
-12. 已新增默认关闭的 Phase 5 birth migration flag：`sid.enable_phase5_birth_manager`。flag-off 回退 legacy `new_semantic` allocation；flag-on 迁移 accepted birth allocation 到 `IdentityManager` Phase 5 path，同时保留 legacy score/debug rows 对照。
+12. 已新增默认关闭的 Phase 5 birth migration flag：`sid.enable_phase5_birth_manager`。flag-off 回退 legacy `birth_candidate` / `new_semantic`；flag-on 迁移 hidden / pending / accepted birth decision surface 到 `IdentityManager` Phase 5 path，同时保留 legacy score/debug rows 对照。
 
 ## 4. 尚未完成或需要特别注意的点
 
@@ -175,7 +175,7 @@ VisualizerRecorder::Render(frame, tracks, primary, identity_result)
 6. `pending_recovery_frames` 当前不是完整 pending recovery 状态机。
 7. 配置中仍存在 legacy / diagnostics 对照配置，后续需要明确保留、归档或删除。
 8. 当前测试通过不等于算法效果达标；离线评估和视频复盘仍是必要输入。
-9. Phase 5 birth / hidden candidate 已有 shadow-only `NewBirthCandidate` lifecycle evidence 和默认关闭的 accepted allocation 迁移 flag，但还没有独立 `BirthManager`。当前 hidden/pending 判断仍保留 legacy gate 作为对照；flag-on 时 accepted allocation 通过 `IdentityManager` Phase 5 path 应用。
+9. Phase 5 birth / hidden candidate 已有 `NewBirthCandidate` lifecycle evidence 和默认关闭的 birth migration flag，但还没有独立 `BirthManager` 类。当前 flag-on 路径已由 `IdentityManager` Phase 5 helper 表达 hidden / pending / accepted decision surface；legacy gate 和 score rows 仍保留为 rollback / 对照。
 
 ## 5. 当前效果判断口径
 

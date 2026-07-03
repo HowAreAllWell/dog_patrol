@@ -470,6 +470,12 @@ TEST(IdentityManagerTest, Phase5BirthManagerFlagPreservesHiddenAndSmallPromotion
            MakePersonTrack(8, cv::Rect2f(1664, 805, 50, 170), {0.0F, 0.0F, 1.0F})}),
       IdlePrimary());
   EXPECT_EQ(small_pending.SemanticIdForRawTrack(8), -1);
+  const auto *pending_score = FindScoreStage(manager.LastScoreDebugRows(), 8, "phase5_birth_candidate");
+  ASSERT_NE(pending_score, nullptr);
+  EXPECT_EQ(pending_score->semantic_id, -1);
+  EXPECT_EQ(pending_score->reject_reason, "small_new_person_pending");
+  EXPECT_TRUE(pending_score->selected);
+  EXPECT_FALSE(pending_score->accepted);
   ASSERT_NE(FindEvent(manager.LastPhase3ShadowDebugRows(), "new_birth_candidate_pending", 8), nullptr);
 
   const auto small_promoted = manager.Update(
