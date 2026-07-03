@@ -14,7 +14,7 @@ Orin 宿主机侧视觉验收 demo，包含检测、短期跟踪、语义身份�
 - `udp_json_adapter`：localhost UDP JSON
 
 未接入或未完成：
-- identity 层仍主要由 `LegacyIdentityMatcher` 承担，尚未迁移为完整的新状态机；`FeatureUpdatePolicy` 决策 helper、`FeatureGeometryUpdateState` mutation helper、`FeatureBankCost` read/cost helper、`ReliableGeometryCost` reliable-geometry read/cost helper 与 identity record lifecycle helper 已抽取。legacy identity record 已抽为 identity 层内部 `LegacyIdentityRecord` 类型并嵌入 feature bank / reliable geometry 子状态，但底层 ownership 仍在 legacy 内部。
+- identity 层仍主要由 `LegacyIdentityMatcher` 承担，尚未迁移为完整的新状态机；`FeatureUpdatePolicy` 决策 helper、`FeatureGeometryUpdateState` mutation helper、`FeatureBankCost` read/cost helper、`ReliableGeometryCost` reliable-geometry read/cost helper、`AssignmentCost` cost composition helper 与 identity record lifecycle helper 已抽取。legacy identity record 已抽为 identity 层内部 `LegacyIdentityRecord` 类型并嵌入 feature bank / reliable geometry 子状态，但底层 ownership 仍在 legacy 内部。
 - 距离/2D 相对位置
 - 控制逻辑
 
