@@ -53,6 +53,7 @@ set(MODULE_SOURCES
   src/modules/birth_manager.cpp
   src/modules/phase5_birth_coordinator.cpp
   src/modules/occlusion_mode_state.cpp
+  src/modules/occlusion_group_shadow_lifecycle.cpp
   src/modules/semantic_id_allocator.cpp
   src/modules/assignment_application_plan.cpp
   src/modules/assignment_application_executor.cpp
@@ -239,6 +240,14 @@ if(BUILD_TESTING)
     target_include_directories(test_occlusion_mode_state PRIVATE include src/modules)
     target_link_libraries(test_occlusion_mode_state ${PROJECT_NAME}_modules)
     ament_target_dependencies(test_occlusion_mode_state rclcpp)
+  endif()
+
+  ament_add_gtest(test_occlusion_group_shadow_lifecycle test/test_occlusion_group_shadow_lifecycle.cpp)
+  if(TARGET test_occlusion_group_shadow_lifecycle)
+    target_compile_features(test_occlusion_group_shadow_lifecycle PUBLIC cxx_std_17)
+    target_include_directories(test_occlusion_group_shadow_lifecycle PRIVATE include src/modules)
+    target_link_libraries(test_occlusion_group_shadow_lifecycle ${PROJECT_NAME}_modules)
+    ament_target_dependencies(test_occlusion_group_shadow_lifecycle rclcpp)
   endif()
 
   ament_add_gtest(test_birth_candidate_store test/test_birth_candidate_store.cpp)
