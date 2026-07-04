@@ -50,6 +50,7 @@ set(MODULE_SOURCES
   src/modules/raw_continuity_decision.cpp
   src/modules/birth_candidate_decision.cpp
   src/modules/birth_candidate_store.cpp
+  src/modules/birth_manager.cpp
   src/modules/semantic_id_allocator.cpp
   src/modules/assignment_application_plan.cpp
   src/modules/assignment_application_executor.cpp
@@ -227,6 +228,14 @@ if(BUILD_TESTING)
     target_include_directories(test_birth_candidate_store PRIVATE include src/modules)
     target_link_libraries(test_birth_candidate_store ${PROJECT_NAME}_modules)
     ament_target_dependencies(test_birth_candidate_store rclcpp)
+  endif()
+
+  ament_add_gtest(test_birth_manager test/test_birth_manager.cpp)
+  if(TARGET test_birth_manager)
+    target_compile_features(test_birth_manager PUBLIC cxx_std_17)
+    target_include_directories(test_birth_manager PRIVATE include src/modules)
+    target_link_libraries(test_birth_manager ${PROJECT_NAME}_modules)
+    ament_target_dependencies(test_birth_manager rclcpp)
   endif()
 
   ament_add_gtest(test_raw_semantic_binding test/test_raw_semantic_binding.cpp)
