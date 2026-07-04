@@ -53,6 +53,7 @@ set(MODULE_SOURCES
   src/modules/birth_manager.cpp
   src/modules/phase5_birth_coordinator.cpp
   src/modules/phase4_handoff_coordinator.cpp
+  src/modules/merged_single_blob_assignment_decision.cpp
   src/modules/occlusion_mode_state.cpp
   src/modules/occlusion_group_shadow_lifecycle.cpp
   src/modules/semantic_id_allocator.cpp
@@ -281,6 +282,14 @@ if(BUILD_TESTING)
     target_include_directories(test_phase4_handoff_coordinator PRIVATE include src/modules)
     target_link_libraries(test_phase4_handoff_coordinator ${PROJECT_NAME}_modules)
     ament_target_dependencies(test_phase4_handoff_coordinator rclcpp)
+  endif()
+
+  ament_add_gtest(test_merged_single_blob_assignment_decision test/test_merged_single_blob_assignment_decision.cpp)
+  if(TARGET test_merged_single_blob_assignment_decision)
+    target_compile_features(test_merged_single_blob_assignment_decision PUBLIC cxx_std_17)
+    target_include_directories(test_merged_single_blob_assignment_decision PRIVATE include src/modules)
+    target_link_libraries(test_merged_single_blob_assignment_decision ${PROJECT_NAME}_modules)
+    ament_target_dependencies(test_merged_single_blob_assignment_decision rclcpp)
   endif()
 
   ament_add_gtest(test_raw_semantic_binding test/test_raw_semantic_binding.cpp)
