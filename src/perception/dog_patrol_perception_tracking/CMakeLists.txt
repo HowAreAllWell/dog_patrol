@@ -62,6 +62,7 @@ set(MODULE_SOURCES
   src/modules/assignment_candidate_builder.cpp
   src/modules/active_assignment_input_collector.cpp
   src/modules/inactive_recovery_input_collector.cpp
+  src/modules/unresolved_track_final_resolution_coordinator.cpp
   src/modules/raw_semantic_binding_store.cpp
   src/modules/legacy_identity_store.cpp
   src/modules/legacy_identity_matcher.cpp
@@ -228,6 +229,14 @@ if(BUILD_TESTING)
     target_include_directories(test_inactive_recovery_input_collector PRIVATE include src/modules)
     target_link_libraries(test_inactive_recovery_input_collector ${PROJECT_NAME}_modules)
     ament_target_dependencies(test_inactive_recovery_input_collector rclcpp)
+  endif()
+
+  ament_add_gtest(test_unresolved_track_final_resolution_coordinator test/test_unresolved_track_final_resolution_coordinator.cpp)
+  if(TARGET test_unresolved_track_final_resolution_coordinator)
+    target_compile_features(test_unresolved_track_final_resolution_coordinator PUBLIC cxx_std_17)
+    target_include_directories(test_unresolved_track_final_resolution_coordinator PRIVATE include src/modules)
+    target_link_libraries(test_unresolved_track_final_resolution_coordinator ${PROJECT_NAME}_modules)
+    ament_target_dependencies(test_unresolved_track_final_resolution_coordinator rclcpp)
   endif()
 
   ament_add_gtest(test_raw_continuity_decision test/test_raw_continuity_decision.cpp)
