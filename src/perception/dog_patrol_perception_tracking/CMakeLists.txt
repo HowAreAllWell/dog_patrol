@@ -51,6 +51,7 @@ set(MODULE_SOURCES
   src/modules/birth_candidate_decision.cpp
   src/modules/birth_candidate_store.cpp
   src/modules/birth_manager.cpp
+  src/modules/phase5_birth_coordinator.cpp
   src/modules/occlusion_mode_state.cpp
   src/modules/semantic_id_allocator.cpp
   src/modules/assignment_application_plan.cpp
@@ -254,6 +255,14 @@ if(BUILD_TESTING)
     target_include_directories(test_birth_manager PRIVATE include src/modules)
     target_link_libraries(test_birth_manager ${PROJECT_NAME}_modules)
     ament_target_dependencies(test_birth_manager rclcpp)
+  endif()
+
+  ament_add_gtest(test_phase5_birth_coordinator test/test_phase5_birth_coordinator.cpp)
+  if(TARGET test_phase5_birth_coordinator)
+    target_compile_features(test_phase5_birth_coordinator PUBLIC cxx_std_17)
+    target_include_directories(test_phase5_birth_coordinator PRIVATE include src/modules)
+    target_link_libraries(test_phase5_birth_coordinator ${PROJECT_NAME}_modules)
+    ament_target_dependencies(test_phase5_birth_coordinator rclcpp)
   endif()
 
   ament_add_gtest(test_raw_semantic_binding test/test_raw_semantic_binding.cpp)
