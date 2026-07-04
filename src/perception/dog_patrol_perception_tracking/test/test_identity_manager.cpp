@@ -246,7 +246,7 @@ TEST(IdentityManagerTest, EmitsPhase5NewBirthCandidateHiddenRowsWithoutAllocatin
   EXPECT_EQ(ambiguous_row->reason, "ambiguous_recovery_pending");
   EXPECT_EQ(ambiguous_row->hypothesis_status, "pending_recovery");
   EXPECT_FALSE(ambiguous_row->decision_accepted);
-  EXPECT_FALSE(ambiguous_row->decision_selected);
+  EXPECT_TRUE(ambiguous_row->decision_selected);
   EXPECT_FLOAT_EQ(ambiguous_row->candidate_bbox.x, 100.0F);
   EXPECT_FLOAT_EQ(ambiguous_row->candidate_bbox.width, 50.0F);
 
@@ -388,7 +388,7 @@ TEST(IdentityManagerTest, EmitsPhase5NewBirthCandidateAllocationRowsWithoutChang
   EXPECT_TRUE(allocation_row->decision_accepted);
 }
 
-TEST(IdentityManagerTest, Phase5BirthManagerFlagMigratesAllocationWithRollback) {
+TEST(IdentityManagerTest, Phase5BirthManagerDefaultMigratesAllocationWithExplicitRollback) {
   vision_demo_host::IdentityManager::Config rollback_cfg;
   rollback_cfg.enable_phase5_birth_manager = false;
   vision_demo_host::IdentityManager rollback_manager(rollback_cfg);
@@ -413,9 +413,9 @@ TEST(IdentityManagerTest, Phase5BirthManagerFlagMigratesAllocationWithRollback) 
   EXPECT_TRUE(rollback_score->accepted);
   EXPECT_EQ(FindScoreStage(rollback_manager.LastScoreDebugRows(), 14, "phase5_new_semantic"), nullptr);
 
-  vision_demo_host::IdentityManager::Config migrated_cfg;
-  migrated_cfg.enable_phase5_birth_manager = true;
-  vision_demo_host::IdentityManager migrated_manager(migrated_cfg);
+  vision_demo_host::IdentityManager::Config default_cfg;
+  EXPECT_TRUE(default_cfg.enable_phase5_birth_manager);
+  vision_demo_host::IdentityManager migrated_manager(default_cfg);
 
   const auto migrated_initial = migrated_manager.Update(
       vision_demo_host::TrackletObservationsFromTracks(
@@ -978,6 +978,7 @@ TEST(IdentityManagerTest, EmitsSingleBlobHandoffAcceptedDecisionWithoutChangingL
 
 TEST(IdentityManagerTest, Phase4MergedSingleBlobHandoffDefaultsOnAndFalseRollsBack) {
   vision_demo_host::IdentityManager::Config cfg;
+  cfg.enable_phase5_birth_manager = false;
   cfg.max_missing_frames = 180;
   cfg.active_assign_max_cost = 0.55F;
   cfg.min_assignment_margin = 0.08F;
@@ -1140,6 +1141,7 @@ TEST(IdentityManagerTest, EmitsPairwiseAssignmentMatrixShadowRowsWithoutChanging
 
 TEST(IdentityManagerTest, Phase4PairwiseAssignmentDefaultsOnAndFalseRollsBack) {
   vision_demo_host::IdentityManager::Config cfg;
+  cfg.enable_phase5_birth_manager = false;
   cfg.max_missing_frames = 180;
   cfg.active_assign_max_cost = 0.55F;
   cfg.min_assignment_margin = 0.08F;

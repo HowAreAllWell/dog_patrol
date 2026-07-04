@@ -159,7 +159,7 @@ class VisionDemoNode : public rclcpp::Node {
     this->declare_parameter<bool>("sid.enable_phase4_merged_side_recovery", true);
     this->declare_parameter<bool>("sid.enable_phase4_merged_single_blob_handoff", true);
     this->declare_parameter<bool>("sid.enable_phase4_pairwise_assignment", true);
-    this->declare_parameter<bool>("sid.enable_phase5_birth_manager", false);
+    this->declare_parameter<bool>("sid.enable_phase5_birth_manager", true);
     this->declare_parameter<bool>("sid.reid_enable", true);
     this->declare_parameter<std::string>("sid.reid_backend", "light");
     this->declare_parameter<std::string>("sid.reid_model_path", "");

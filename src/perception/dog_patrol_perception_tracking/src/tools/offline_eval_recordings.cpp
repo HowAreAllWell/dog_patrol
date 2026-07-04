@@ -74,7 +74,7 @@ struct Options {
   bool sid_enable_phase4_merged_side_recovery{true};
   bool sid_enable_phase4_merged_single_blob_handoff{true};
   bool sid_enable_phase4_pairwise_assignment{true};
-  bool sid_enable_phase5_birth_manager{false};
+  bool sid_enable_phase5_birth_manager{true};
   bool sid_reid_enable{true};  // compatibility input, runtime forces true.
   std::string sid_reid_backend{"light"};
   std::string sid_reid_model_path{};
