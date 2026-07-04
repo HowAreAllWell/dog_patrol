@@ -61,6 +61,7 @@ set(MODULE_SOURCES
   src/modules/assignment_application_executor.cpp
   src/modules/assignment_candidate_builder.cpp
   src/modules/active_assignment_input_collector.cpp
+  src/modules/inactive_recovery_input_collector.cpp
   src/modules/raw_semantic_binding_store.cpp
   src/modules/legacy_identity_store.cpp
   src/modules/legacy_identity_matcher.cpp
@@ -219,6 +220,14 @@ if(BUILD_TESTING)
     target_include_directories(test_inactive_recovery_solver PRIVATE include src/modules)
     target_link_libraries(test_inactive_recovery_solver ${PROJECT_NAME}_modules)
     ament_target_dependencies(test_inactive_recovery_solver rclcpp)
+  endif()
+
+  ament_add_gtest(test_inactive_recovery_input_collector test/test_inactive_recovery_input_collector.cpp)
+  if(TARGET test_inactive_recovery_input_collector)
+    target_compile_features(test_inactive_recovery_input_collector PUBLIC cxx_std_17)
+    target_include_directories(test_inactive_recovery_input_collector PRIVATE include src/modules)
+    target_link_libraries(test_inactive_recovery_input_collector ${PROJECT_NAME}_modules)
+    ament_target_dependencies(test_inactive_recovery_input_collector rclcpp)
   endif()
 
   ament_add_gtest(test_raw_continuity_decision test/test_raw_continuity_decision.cpp)
