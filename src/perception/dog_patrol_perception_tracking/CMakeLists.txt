@@ -60,6 +60,7 @@ set(MODULE_SOURCES
   src/modules/assignment_application_plan.cpp
   src/modules/assignment_application_executor.cpp
   src/modules/assignment_candidate_builder.cpp
+  src/modules/active_assignment_input_collector.cpp
   src/modules/raw_semantic_binding_store.cpp
   src/modules/legacy_identity_store.cpp
   src/modules/legacy_identity_matcher.cpp
@@ -330,6 +331,14 @@ if(BUILD_TESTING)
     target_include_directories(test_assignment_candidate_builder PRIVATE include src/modules)
     target_link_libraries(test_assignment_candidate_builder ${PROJECT_NAME}_modules)
     ament_target_dependencies(test_assignment_candidate_builder rclcpp)
+  endif()
+
+  ament_add_gtest(test_active_assignment_input_collector test/test_active_assignment_input_collector.cpp)
+  if(TARGET test_active_assignment_input_collector)
+    target_compile_features(test_active_assignment_input_collector PUBLIC cxx_std_17)
+    target_include_directories(test_active_assignment_input_collector PRIVATE include src/modules)
+    target_link_libraries(test_active_assignment_input_collector ${PROJECT_NAME}_modules)
+    ament_target_dependencies(test_active_assignment_input_collector rclcpp)
   endif()
 
   ament_add_gtest(test_legacy_identity_store test/test_legacy_identity_store.cpp)
