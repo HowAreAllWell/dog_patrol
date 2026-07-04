@@ -52,6 +52,7 @@ set(MODULE_SOURCES
   src/modules/birth_candidate_store.cpp
   src/modules/semantic_id_allocator.cpp
   src/modules/assignment_application_plan.cpp
+  src/modules/raw_semantic_binding_store.cpp
   src/modules/legacy_identity_matcher.cpp
   src/modules/identity_manager.cpp
   src/modules/visualizer_recorder.cpp
@@ -223,6 +224,14 @@ if(BUILD_TESTING)
     target_include_directories(test_birth_candidate_store PRIVATE include src/modules)
     target_link_libraries(test_birth_candidate_store ${PROJECT_NAME}_modules)
     ament_target_dependencies(test_birth_candidate_store rclcpp)
+  endif()
+
+  ament_add_gtest(test_raw_semantic_binding test/test_raw_semantic_binding.cpp)
+  if(TARGET test_raw_semantic_binding)
+    target_compile_features(test_raw_semantic_binding PUBLIC cxx_std_17)
+    target_include_directories(test_raw_semantic_binding PRIVATE include src/modules)
+    target_link_libraries(test_raw_semantic_binding ${PROJECT_NAME}_modules)
+    ament_target_dependencies(test_raw_semantic_binding rclcpp)
   endif()
 
   ament_add_gtest(test_semantic_id_allocator test/test_semantic_id_allocator.cpp)
