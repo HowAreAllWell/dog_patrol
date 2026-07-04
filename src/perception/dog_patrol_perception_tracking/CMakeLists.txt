@@ -53,6 +53,7 @@ set(MODULE_SOURCES
   src/modules/semantic_id_allocator.cpp
   src/modules/assignment_application_plan.cpp
   src/modules/raw_semantic_binding_store.cpp
+  src/modules/legacy_identity_store.cpp
   src/modules/legacy_identity_matcher.cpp
   src/modules/identity_manager.cpp
   src/modules/visualizer_recorder.cpp
@@ -248,6 +249,14 @@ if(BUILD_TESTING)
     target_include_directories(test_assignment_application_plan PRIVATE include src/modules)
     target_link_libraries(test_assignment_application_plan ${PROJECT_NAME}_modules)
     ament_target_dependencies(test_assignment_application_plan rclcpp)
+  endif()
+
+  ament_add_gtest(test_legacy_identity_store test/test_legacy_identity_store.cpp)
+  if(TARGET test_legacy_identity_store)
+    target_compile_features(test_legacy_identity_store PUBLIC cxx_std_17)
+    target_include_directories(test_legacy_identity_store PRIVATE include src/modules)
+    target_link_libraries(test_legacy_identity_store ${PROJECT_NAME}_modules)
+    ament_target_dependencies(test_legacy_identity_store rclcpp)
   endif()
 
   ament_add_gtest(test_mot_tracker_config test/test_mot_tracker_config.cpp)
