@@ -52,6 +52,7 @@ set(MODULE_SOURCES
   src/modules/birth_candidate_store.cpp
   src/modules/birth_manager.cpp
   src/modules/phase5_birth_coordinator.cpp
+  src/modules/phase4_handoff_coordinator.cpp
   src/modules/occlusion_mode_state.cpp
   src/modules/occlusion_group_shadow_lifecycle.cpp
   src/modules/semantic_id_allocator.cpp
@@ -272,6 +273,14 @@ if(BUILD_TESTING)
     target_include_directories(test_phase5_birth_coordinator PRIVATE include src/modules)
     target_link_libraries(test_phase5_birth_coordinator ${PROJECT_NAME}_modules)
     ament_target_dependencies(test_phase5_birth_coordinator rclcpp)
+  endif()
+
+  ament_add_gtest(test_phase4_handoff_coordinator test/test_phase4_handoff_coordinator.cpp)
+  if(TARGET test_phase4_handoff_coordinator)
+    target_compile_features(test_phase4_handoff_coordinator PUBLIC cxx_std_17)
+    target_include_directories(test_phase4_handoff_coordinator PRIVATE include src/modules)
+    target_link_libraries(test_phase4_handoff_coordinator ${PROJECT_NAME}_modules)
+    ament_target_dependencies(test_phase4_handoff_coordinator rclcpp)
   endif()
 
   ament_add_gtest(test_raw_semantic_binding test/test_raw_semantic_binding.cpp)

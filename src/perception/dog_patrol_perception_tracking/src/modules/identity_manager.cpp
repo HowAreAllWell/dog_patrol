@@ -11,6 +11,7 @@
 #include "identity_observation_projection.hpp"
 #include "legacy_identity_matcher.hpp"
 #include "occlusion_group_shadow_lifecycle.hpp"
+#include "phase4_handoff_coordinator.hpp"
 #include "phase5_birth_coordinator.hpp"
 
 namespace vision_demo_host {
@@ -108,26 +109,6 @@ IdentityManager::Phase3ShadowDebugRow FromLegacyPairwiseDebugRow(
   return out;
 }
 
-std::vector<std::pair<int, int>> ParsePairwisePairs(const std::string &pairs) {
-  std::vector<std::pair<int, int>> out;
-  std::stringstream ss(pairs);
-  std::string token;
-  while (std::getline(ss, token, '|')) {
-    const auto sep = token.find("->");
-    if (sep == std::string::npos) {
-      return {};
-    }
-    try {
-      const int raw_id = std::stoi(token.substr(0, sep));
-      const int semantic_id = std::stoi(token.substr(sep + 2));
-      out.emplace_back(raw_id, semantic_id);
-    } catch (...) {
-      return {};
-    }
-  }
-  return out;
-}
-
 std::string TrackletHypothesisStatusToDebugString(const TrackletHypothesisStatus status) {
   switch (status) {
     case TrackletHypothesisStatus::kTracked:
@@ -167,46 +148,6 @@ bool IsSplitCandidateHypothesis(const TrackletHypothesis &hypothesis) {
   return hypothesis.status == TrackletHypothesisStatus::kTracked ||
          hypothesis.status == TrackletHypothesisStatus::kSuppressedDuplicateCandidate ||
          hypothesis.status == TrackletHypothesisStatus::kSplitCandidate;
-}
-
-bool LooksLikeMergedSplitHandoff(const cv::Rect2f &carrier_bbox, const cv::Rect2f &candidate_bbox) {
-  const float carrier_area = std::max(1.0F, carrier_bbox.area());
-  const float candidate_area = std::max(1.0F, candidate_bbox.area());
-  const float carrier_aspect = carrier_bbox.width / std::max(1.0F, carrier_bbox.height);
-  const bool candidate_is_taller_and_higher =
-      candidate_bbox.height >= carrier_bbox.height * 1.08F &&
-      candidate_bbox.y + carrier_bbox.height * 0.05F < carrier_bbox.y;
-  return carrier_aspect <= 0.40F &&
-         (carrier_area <= 0.85F * candidate_area || candidate_is_taller_and_higher);
-}
-
-bool LooksLikeMergedSideRecovery(const cv::Rect2f &carrier_bbox, const cv::Rect2f &candidate_bbox,
-                                 const float candidate_confidence) {
-  const float candidate_height = std::max(1.0F, candidate_bbox.height);
-  const float candidate_aspect = candidate_bbox.width / candidate_height;
-  if (candidate_confidence < 0.45F || candidate_height < 300.0F || candidate_aspect < 0.25F ||
-      candidate_aspect > 0.70F) {
-    return false;
-  }
-
-  const float vertical_overlap =
-      std::max(0.0F, std::min(candidate_bbox.y + candidate_bbox.height, carrier_bbox.y + carrier_bbox.height) -
-                         std::max(candidate_bbox.y, carrier_bbox.y));
-  if (vertical_overlap / candidate_height < 0.45F) {
-    return false;
-  }
-
-  const float carrier_left = carrier_bbox.x;
-  const float carrier_right = carrier_bbox.x + carrier_bbox.width;
-  const float candidate_left = candidate_bbox.x;
-  const float candidate_right = candidate_bbox.x + candidate_bbox.width;
-  const bool touches_carrier_side =
-      (candidate_left < carrier_left && candidate_right > carrier_left) ||
-      (candidate_left < carrier_right && candidate_right > carrier_right);
-  const float side_gap = std::min(std::abs(candidate_right - carrier_left),
-                                  std::abs(candidate_left - carrier_right));
-  const bool close_to_carrier_side = side_gap <= std::max(25.0F, carrier_bbox.width * 0.20F);
-  return touches_carrier_side || close_to_carrier_side;
 }
 
 }  // namespace
@@ -328,53 +269,24 @@ IdentityManagerResult IdentityManager::Update(const std::vector<TrackletObservat
 
   apply_phase5_birth_manager();
   IdentityManagerResult result = build_result_from_legacy();
-
-  const auto append_phase4_pairwise_rows = [&](const Phase3ShadowDebugRow &matrix_row,
-                                               const std::vector<std::pair<int, int>> &pairs) {
-    for (std::size_t i = 0; i < pairs.size(); ++i) {
-      Phase3ShadowDebugRow row = matrix_row;
-      row.event_idx = event_idx++;
-      row.event_type = "phase4_pairwise_assignment";
-      row.reason = "pairwise_appearance_override";
-      row.candidate_raw_track_id = pairs[i].first;
-      row.candidate_semantic_id = pairs[i].second;
-      row.related_raw_track_id = pairs[pairs.size() - 1 - i].first;
-      impl_->last_phase3_shadow_debug_rows.push_back(std::move(row));
-    }
+  const auto refresh_outputs = [&]() {
+    refresh_legacy_debug_rows();
+    result = build_result_from_legacy();
   };
 
-  const auto apply_phase4_pairwise_assignment = [&]() {
-    if (!impl_->config.enable_phase4_pairwise_assignment) {
-      return;
-    }
-    for (const auto &row : impl_->last_phase3_shadow_debug_rows) {
-      if (row.event_type != "pairwise_assignment_matrix" || !row.pairwise_appearance_override) {
-        continue;
-      }
-      const auto alternate_pairs = ParsePairwisePairs(row.pairwise_alternate_pairs);
-      if (alternate_pairs.size() != 2U || alternate_pairs[0].first <= 0 || alternate_pairs[0].second <= 0 ||
-          alternate_pairs[1].first <= 0 || alternate_pairs[1].second <= 0 ||
-          alternate_pairs[0].first == alternate_pairs[1].first ||
-          alternate_pairs[0].second == alternate_pairs[1].second) {
-        continue;
-      }
-      const bool applied = impl_->legacy_identity_matcher.ApplyPhase4PairwiseAssignment(
-          tracks, alternate_pairs[0].first, alternate_pairs[0].second,
-          alternate_pairs[1].first, alternate_pairs[1].second, frame);
-      if (!applied) {
-        continue;
-      }
-      raw_to_semantic_id_[alternate_pairs[0].first] = alternate_pairs[0].second;
-      raw_to_semantic_id_[alternate_pairs[1].first] = alternate_pairs[1].second;
-      const Phase3ShadowDebugRow matrix_row = row;
-      refresh_legacy_debug_rows();
-      result = build_result_from_legacy();
-      append_phase4_pairwise_rows(matrix_row, alternate_pairs);
-      break;
-    }
-  };
-
-  apply_phase4_pairwise_assignment();
+  Phase4HandoffCoordinator::PairwiseInput pairwise_input;
+  pairwise_input.enabled = impl_->config.enable_phase4_pairwise_assignment;
+  pairwise_input.phase3_rows = &impl_->last_phase3_shadow_debug_rows;
+  pairwise_input.raw_to_semantic_id = &raw_to_semantic_id_;
+  pairwise_input.next_event_idx = &event_idx;
+  Phase4HandoffCoordinator::ApplyPairwiseAssignment(
+      pairwise_input,
+      [&](const int first_raw_track_id, const int first_semantic_id,
+          const int second_raw_track_id, const int second_semantic_id) {
+        return impl_->legacy_identity_matcher.ApplyPhase4PairwiseAssignment(
+            tracks, first_raw_track_id, first_semantic_id, second_raw_track_id, second_semantic_id, frame);
+      },
+      refresh_outputs);
 
   const auto mode = CurrentMode();
   int phase4_continuity_raw = -1;
@@ -478,76 +390,6 @@ IdentityManagerResult IdentityManager::Update(const std::vector<TrackletObservat
     }
   };
 
-  const auto append_phase4_single_blob_handoff_row = [&](const Phase3ShadowDebugRow &decision_row) {
-    Phase3ShadowDebugRow row = decision_row;
-    row.event_idx = event_idx++;
-    row.event_type = "phase4_merged_single_blob_handoff";
-    row.reason = "merged_single_blob_handoff";
-    impl_->last_phase3_shadow_debug_rows.push_back(std::move(row));
-  };
-
-  const auto apply_phase4_single_blob_handoff = [&]() {
-    if (!impl_->config.enable_phase4_merged_single_blob_handoff) {
-      return;
-    }
-
-    const Phase3ShadowDebugRow *continuity_decision = nullptr;
-    for (int i = 0; i < static_cast<int>(impl_->last_phase3_shadow_debug_rows.size()); ++i) {
-      const auto &row = impl_->last_phase3_shadow_debug_rows[static_cast<std::size_t>(i)];
-      if (row.event_type == "single_blob_handoff_decision" &&
-          row.reason == "single_blob_continuity_kept" &&
-          row.carrier_raw_track_id > 0 &&
-          row.carrier_semantic_id > 0 &&
-          row.candidate_semantic_id == row.carrier_semantic_id) {
-        continuity_decision = &row;
-      }
-    }
-
-    int accepted_decision_index = -1;
-    for (int i = 0; i < static_cast<int>(impl_->last_phase3_shadow_debug_rows.size()); ++i) {
-      const auto &row = impl_->last_phase3_shadow_debug_rows[static_cast<std::size_t>(i)];
-      if (row.event_type != "single_blob_handoff_decision" ||
-          (row.reason != "single_blob_handoff_accepted" &&
-           row.reason != "single_blob_handoff_eligible") ||
-          row.carrier_raw_track_id <= 0 || row.carrier_semantic_id <= 0 ||
-          row.candidate_semantic_id <= 0 ||
-          row.carrier_semantic_id == row.candidate_semantic_id) {
-        continue;
-      }
-      if (row.reason == "single_blob_handoff_eligible" && continuity_decision != nullptr) {
-        const bool handoff_margin_ok =
-            row.decision_geo_cost <= 0.75F &&
-            row.decision_final_score <= continuity_decision->decision_final_score + 0.04F &&
-            row.decision_app_cost + 0.025F <= continuity_decision->decision_app_cost;
-        if (!handoff_margin_ok) {
-          continue;
-        }
-      }
-      accepted_decision_index = i;
-      break;
-    }
-    if (accepted_decision_index < 0) {
-      return;
-    }
-    auto &accepted_decision =
-        impl_->last_phase3_shadow_debug_rows[static_cast<std::size_t>(accepted_decision_index)];
-
-    const bool applied = impl_->legacy_identity_matcher.ApplyPhase4MergedSingleBlobHandoff(
-        tracks, accepted_decision.carrier_raw_track_id, accepted_decision.carrier_semantic_id,
-        accepted_decision.candidate_semantic_id, frame);
-    if (!applied) {
-      return;
-    }
-
-    accepted_decision.reason = "single_blob_handoff_accepted";
-    accepted_decision.decision_selected = true;
-    accepted_decision.decision_accepted = true;
-    raw_to_semantic_id_[accepted_decision.carrier_raw_track_id] = accepted_decision.candidate_semantic_id;
-    refresh_legacy_debug_rows();
-    result = build_result_from_legacy();
-    append_phase4_single_blob_handoff_row(accepted_decision);
-  };
-
   const auto shadow_rows_context = [&]() {
     OcclusionGroupShadowLifecycle::ShadowRowsContext context;
     context.current_frame_idx = current_frame_idx;
@@ -558,57 +400,6 @@ IdentityManagerResult IdentityManager::Update(const std::vector<TrackletObservat
 
   const auto recovery_group = [&]() {
     return OcclusionGroupShadowLifecycle::RecoveryGroup(impl_->occlusion_group_shadow_state, current_frame_idx);
-  };
-
-  const auto side_recovery_carrier = [&](const OcclusionGroupShadowLifecycle::MergedGroupShadowState &group,
-                                         const int candidate_raw_track_id) {
-    int related_raw_track_id = group.carrier_raw_track_id;
-    int related_semantic_id = group.carrier_semantic_id;
-    for (const auto &row : impl_->last_score_debug_rows) {
-      if (row.raw_track_id == candidate_raw_track_id || !row.accepted ||
-          group.semantic_ids.count(row.semantic_id) == 0) {
-        continue;
-      }
-      if (row.stage == "raw_continuity" || row.stage == "assign_candidate" ||
-          row.stage == "phase4_merged_split_handoff") {
-        related_raw_track_id = row.raw_track_id;
-        related_semantic_id = row.semantic_id;
-        break;
-      }
-    }
-    return std::pair<int, int>{related_raw_track_id, related_semantic_id};
-  };
-
-  const auto append_side_recovery_row = [&](const std::string &event_type,
-                                            const OcclusionGroupShadowLifecycle::MergedGroupShadowState &group,
-                                            const TrackletHypothesis &hypothesis,
-                                            const int candidate_semantic_id,
-                                            const int related_raw_track_id,
-                                            const int related_semantic_id,
-                                            const std::string &reason) {
-    const auto candidate_it =
-        impl_->occlusion_group_shadow_state.split_candidates_by_raw_id.find(hypothesis.raw_track_id);
-    Phase3ShadowDebugRow row;
-    row.frame_idx = current_frame_idx;
-    row.event_idx = event_idx++;
-    row.event_type = event_type;
-    row.group_id = group.group_id;
-    row.semantic_ids = JoinSemanticIds(group.semantic_ids);
-    row.carrier_semantic_id = related_semantic_id;
-    row.carrier_raw_track_id = related_raw_track_id;
-    row.candidate_raw_track_id = hypothesis.raw_track_id;
-    row.candidate_semantic_id = candidate_semantic_id;
-    row.candidate_bbox = hypothesis.bbox;
-    row.candidate_confidence = hypothesis.confidence;
-    row.reason = reason;
-    row.related_raw_track_id = related_raw_track_id;
-    row.hypothesis_status = TrackletHypothesisStatusToDebugString(hypothesis.status);
-    row.candidate_stable_frames =
-        candidate_it == impl_->occlusion_group_shadow_state.split_candidates_by_raw_id.end() ? 1
-                                                                                              : candidate_it->second.stable_frames;
-    row.group_age_frames = group.age_frames;
-    row.group_last_update_frame = group.last_update_frame;
-    impl_->last_phase3_shadow_debug_rows.push_back(std::move(row));
   };
 
   const auto append_side_reappearance_rows = [&]() {
@@ -632,67 +423,25 @@ IdentityManagerResult IdentityManager::Update(const std::vector<TrackletObservat
       if (side_recovery_row == nullptr) {
         continue;
       }
-
-      const auto [related_raw_track_id, related_semantic_id] =
-          side_recovery_carrier(*group, hypothesis.raw_track_id);
-      append_side_recovery_row("side_reappearance_candidate", *group, hypothesis, side_recovery_row->semantic_id,
-                               related_raw_track_id, related_semantic_id, "side_reappearance_candidate");
-    }
-  };
-
-  const auto apply_phase4_side_recovery = [&]() {
-    if (!impl_->config.enable_phase4_merged_side_recovery) {
-      return;
-    }
-    const OcclusionGroupShadowLifecycle::MergedGroupShadowState *group = recovery_group();
-    if (group == nullptr || group->group_id <= 0 || group->semantic_ids.size() < 2) {
-      return;
-    }
-
-    for (const auto &hypothesis : shadow_hypotheses) {
-      if (hypothesis.class_id != ClassId::kPerson || hypothesis.raw_track_id <= 0 ||
-          hypothesis.status != TrackletHypothesisStatus::kTracked ||
-          hypothesis.raw_track_id == group->carrier_raw_track_id ||
-          raw_to_semantic_id_.find(hypothesis.raw_track_id) != raw_to_semantic_id_.end()) {
-        continue;
-      }
-
-      const auto [related_raw_track_id, related_semantic_id] =
-          side_recovery_carrier(*group, hypothesis.raw_track_id);
-      if (related_raw_track_id <= 0 || related_semantic_id <= 0 ||
-          group->semantic_ids.count(related_semantic_id) == 0) {
-        continue;
-      }
-      const auto carrier_obs_it = observations_by_raw_track_id.find(related_raw_track_id);
-      if (carrier_obs_it == observations_by_raw_track_id.end() ||
-          !LooksLikeMergedSideRecovery(carrier_obs_it->second.bbox, hypothesis.bbox, hypothesis.confidence)) {
-        continue;
-      }
-
-      int candidate_semantic_id = -1;
-      for (const int semantic_id : group->semantic_ids) {
-        if (semantic_id != related_semantic_id) {
-          candidate_semantic_id = semantic_id;
-          break;
-        }
-      }
-      if (candidate_semantic_id <= 0) {
-        continue;
-      }
-
-      const bool applied = impl_->legacy_identity_matcher.ApplyPhase4MergedSideRecovery(
-          tracks, related_raw_track_id, related_semantic_id, hypothesis.raw_track_id,
-          candidate_semantic_id, frame);
-      if (!applied) {
-        continue;
-      }
-      raw_to_semantic_id_[hypothesis.raw_track_id] = candidate_semantic_id;
-      refresh_legacy_debug_rows();
-      result = build_result_from_legacy();
-      append_side_recovery_row("phase4_merged_side_recovery", *group, hypothesis,
-                               candidate_semantic_id, related_raw_track_id,
-                               related_semantic_id, "merged_side_recovery");
-      break;
+      Phase3ShadowDebugRow row;
+      row.frame_idx = current_frame_idx;
+      row.event_idx = event_idx++;
+      row.event_type = "side_reappearance_candidate";
+      row.group_id = group->group_id;
+      row.semantic_ids = JoinSemanticIds(group->semantic_ids);
+      row.carrier_semantic_id = group->carrier_semantic_id;
+      row.carrier_raw_track_id = group->carrier_raw_track_id;
+      row.candidate_raw_track_id = hypothesis.raw_track_id;
+      row.candidate_semantic_id = side_recovery_row->semantic_id;
+      row.candidate_bbox = hypothesis.bbox;
+      row.candidate_confidence = hypothesis.confidence;
+      row.reason = "side_reappearance_candidate";
+      row.related_raw_track_id = group->carrier_raw_track_id;
+      row.hypothesis_status = TrackletHypothesisStatusToDebugString(hypothesis.status);
+      row.candidate_stable_frames = 1;
+      row.group_age_frames = group->age_frames;
+      row.group_last_update_frame = group->last_update_frame;
+      impl_->last_phase3_shadow_debug_rows.push_back(std::move(row));
     }
   };
 
@@ -706,8 +455,37 @@ IdentityManagerResult IdentityManager::Update(const std::vector<TrackletObservat
       &impl_->occlusion_group_shadow_state, sync_input, shadow_rows_context());
 
   append_single_blob_decision_rows();
-  apply_phase4_single_blob_handoff();
-  apply_phase4_side_recovery();
+  Phase4HandoffCoordinator::SingleBlobInput single_blob_input;
+  single_blob_input.enabled = impl_->config.enable_phase4_merged_single_blob_handoff;
+  single_blob_input.phase3_rows = &impl_->last_phase3_shadow_debug_rows;
+  single_blob_input.raw_to_semantic_id = &raw_to_semantic_id_;
+  single_blob_input.next_event_idx = &event_idx;
+  Phase4HandoffCoordinator::ApplyMergedSingleBlobHandoff(
+      single_blob_input,
+      [&](const int carrier_raw_track_id, const int carrier_semantic_id, const int candidate_semantic_id) {
+        return impl_->legacy_identity_matcher.ApplyPhase4MergedSingleBlobHandoff(
+            tracks, carrier_raw_track_id, carrier_semantic_id, candidate_semantic_id, frame);
+      },
+      refresh_outputs);
+
+  Phase4HandoffCoordinator::SideRecoveryInput side_recovery_input;
+  side_recovery_input.enabled = impl_->config.enable_phase4_merged_side_recovery;
+  side_recovery_input.current_frame_idx = current_frame_idx;
+  side_recovery_input.shadow_hypotheses = &shadow_hypotheses;
+  side_recovery_input.observations_by_raw_track_id = &observations_by_raw_track_id;
+  side_recovery_input.score_rows = &impl_->last_score_debug_rows;
+  side_recovery_input.phase3_rows = &impl_->last_phase3_shadow_debug_rows;
+  side_recovery_input.raw_to_semantic_id = &raw_to_semantic_id_;
+  side_recovery_input.occlusion_state = &impl_->occlusion_group_shadow_state;
+  side_recovery_input.next_event_idx = &event_idx;
+  Phase4HandoffCoordinator::ApplyMergedSideRecovery(
+      side_recovery_input,
+      [&](const int carrier_raw_track_id, const int carrier_semantic_id,
+          const int candidate_raw_track_id, const int candidate_semantic_id) {
+        return impl_->legacy_identity_matcher.ApplyPhase4MergedSideRecovery(
+            tracks, carrier_raw_track_id, carrier_semantic_id, candidate_raw_track_id, candidate_semantic_id, frame);
+      },
+      refresh_outputs);
   append_side_reappearance_rows();
 
   if (impl_->occlusion_group_shadow_state.merged_group.active) {
@@ -756,52 +534,25 @@ IdentityManagerResult IdentityManager::Update(const std::vector<TrackletObservat
           &impl_->occlusion_group_shadow_state, candidate_input, shadow_rows_context());
     }
 
-    if (impl_->config.enable_phase4_merged_split_handoff) {
-      for (auto &entry : impl_->occlusion_group_shadow_state.split_candidates_by_raw_id) {
-        auto &candidate = entry.second;
-        if (!candidate.seen_this_frame || phase4_continuity_sid <= 0) {
-          continue;
-        }
-        if (prev_raw_to_semantic.find(candidate.candidate_raw_track_id) != prev_raw_to_semantic.end()) {
-          continue;
-        }
-        const int continuity_raw = phase4_continuity_raw;
-        const int continuity_sid = phase4_continuity_sid;
-        int exposed_partial_sid = -1;
-        for (const int semantic_id : impl_->occlusion_group_shadow_state.merged_group.semantic_ids) {
-          if (semantic_id != continuity_sid) {
-            exposed_partial_sid = semantic_id;
-            break;
-          }
-        }
-        if (continuity_raw <= 0 || continuity_sid <= 0 || exposed_partial_sid <= 0 ||
-            continuity_raw == candidate.candidate_raw_track_id || exposed_partial_sid == continuity_sid) {
-          continue;
-        }
-        const auto carrier_obs_it = observations_by_raw_track_id.find(continuity_raw);
-        if (carrier_obs_it == observations_by_raw_track_id.end() ||
-            !LooksLikeMergedSplitHandoff(carrier_obs_it->second.bbox, candidate.bbox)) {
-          continue;
-        }
-        const bool applied = impl_->legacy_identity_matcher.ApplyPhase4MergedSplitHandoff(
-            tracks, continuity_raw, exposed_partial_sid, candidate.candidate_raw_track_id, continuity_sid,
-            frame);
-        if (!applied) {
-          continue;
-        }
-        raw_to_semantic_id_[continuity_raw] = exposed_partial_sid;
-        raw_to_semantic_id_[candidate.candidate_raw_track_id] = continuity_sid;
-        candidate.candidate_semantic_id = continuity_sid;
-        impl_->occlusion_group_shadow_state.merged_group.carrier_raw_track_id = continuity_raw;
-        impl_->occlusion_group_shadow_state.merged_group.carrier_semantic_id = exposed_partial_sid;
-        refresh_legacy_debug_rows();
-        result = build_result_from_legacy();
-        OcclusionGroupShadowLifecycle::AppendSplitCandidateRow(
-            impl_->occlusion_group_shadow_state, candidate, "phase4_merged_split_handoff",
-            shadow_rows_context(), "merged_split_handoff");
-        break;
-      }
-    }
+    Phase4HandoffCoordinator::MergedSplitInput merged_split_input;
+    merged_split_input.enabled = impl_->config.enable_phase4_merged_split_handoff;
+    merged_split_input.current_frame_idx = current_frame_idx;
+    merged_split_input.phase4_continuity_raw = phase4_continuity_raw;
+    merged_split_input.phase4_continuity_sid = phase4_continuity_sid;
+    merged_split_input.prev_raw_to_semantic = &prev_raw_to_semantic;
+    merged_split_input.observations_by_raw_track_id = &observations_by_raw_track_id;
+    merged_split_input.phase3_rows = &impl_->last_phase3_shadow_debug_rows;
+    merged_split_input.raw_to_semantic_id = &raw_to_semantic_id_;
+    merged_split_input.occlusion_state = &impl_->occlusion_group_shadow_state;
+    merged_split_input.next_event_idx = &event_idx;
+    Phase4HandoffCoordinator::ApplyMergedSplitHandoff(
+        merged_split_input,
+        [&](const int continuity_raw_track_id, const int exposed_partial_sid,
+            const int candidate_raw_track_id, const int continuity_sid) {
+          return impl_->legacy_identity_matcher.ApplyPhase4MergedSplitHandoff(
+              tracks, continuity_raw_track_id, exposed_partial_sid, candidate_raw_track_id, continuity_sid, frame);
+        },
+        refresh_outputs);
 
     OcclusionGroupShadowLifecycle::EndMissingSplitCandidates(&impl_->occlusion_group_shadow_state,
                                                              shadow_rows_context());
