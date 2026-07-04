@@ -47,6 +47,7 @@ set(MODULE_SOURCES
   src/modules/assignment_cost.cpp
   src/modules/active_assignment_solver.cpp
   src/modules/inactive_recovery_solver.cpp
+  src/modules/raw_continuity_decision.cpp
   src/modules/legacy_identity_matcher.cpp
   src/modules/identity_manager.cpp
   src/modules/visualizer_recorder.cpp
@@ -194,6 +195,14 @@ if(BUILD_TESTING)
     target_include_directories(test_inactive_recovery_solver PRIVATE include src/modules)
     target_link_libraries(test_inactive_recovery_solver ${PROJECT_NAME}_modules)
     ament_target_dependencies(test_inactive_recovery_solver rclcpp)
+  endif()
+
+  ament_add_gtest(test_raw_continuity_decision test/test_raw_continuity_decision.cpp)
+  if(TARGET test_raw_continuity_decision)
+    target_compile_features(test_raw_continuity_decision PUBLIC cxx_std_17)
+    target_include_directories(test_raw_continuity_decision PRIVATE include src/modules)
+    target_link_libraries(test_raw_continuity_decision ${PROJECT_NAME}_modules)
+    ament_target_dependencies(test_raw_continuity_decision rclcpp)
   endif()
 
   ament_add_gtest(test_mot_tracker_config test/test_mot_tracker_config.cpp)
