@@ -48,6 +48,7 @@ set(MODULE_SOURCES
   src/modules/active_assignment_solver.cpp
   src/modules/inactive_recovery_solver.cpp
   src/modules/raw_continuity_decision.cpp
+  src/modules/birth_candidate_decision.cpp
   src/modules/legacy_identity_matcher.cpp
   src/modules/identity_manager.cpp
   src/modules/visualizer_recorder.cpp
@@ -203,6 +204,14 @@ if(BUILD_TESTING)
     target_include_directories(test_raw_continuity_decision PRIVATE include src/modules)
     target_link_libraries(test_raw_continuity_decision ${PROJECT_NAME}_modules)
     ament_target_dependencies(test_raw_continuity_decision rclcpp)
+  endif()
+
+  ament_add_gtest(test_birth_candidate_decision test/test_birth_candidate_decision.cpp)
+  if(TARGET test_birth_candidate_decision)
+    target_compile_features(test_birth_candidate_decision PUBLIC cxx_std_17)
+    target_include_directories(test_birth_candidate_decision PRIVATE include src/modules)
+    target_link_libraries(test_birth_candidate_decision ${PROJECT_NAME}_modules)
+    ament_target_dependencies(test_birth_candidate_decision rclcpp)
   endif()
 
   ament_add_gtest(test_mot_tracker_config test/test_mot_tracker_config.cpp)
