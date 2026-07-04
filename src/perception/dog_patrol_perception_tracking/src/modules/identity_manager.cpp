@@ -2,12 +2,13 @@
 
 #include <algorithm>
 #include <map>
-#include <sstream>
 #include <optional>
+#include <sstream>
 #include <set>
 #include <unordered_map>
 #include <utility>
 
+#include "identity_observation_projection.hpp"
 #include "legacy_identity_matcher.hpp"
 
 namespace vision_demo_host {
@@ -142,41 +143,6 @@ std::string TrackletHypothesisStatusToDebugString(const TrackletHypothesisStatus
     default:
       return "unknown";
   }
-}
-
-const IdentityManager::ScoreDebugRow *FindBestDebugRow(
-    const std::vector<IdentityManager::ScoreDebugRow> &rows, const int raw_track_id, const int semantic_id) {
-  const IdentityManager::ScoreDebugRow *fallback = nullptr;
-  for (const auto &row : rows) {
-    if (row.raw_track_id != raw_track_id || row.semantic_id != semantic_id) {
-      continue;
-    }
-    if (row.accepted) {
-      return &row;
-    }
-    if (fallback == nullptr || row.selected) {
-      fallback = &row;
-    }
-  }
-  return fallback;
-}
-
-IdentityState StateFromSnapshot(const LegacyIdentityMatcher::IdentitySnapshot &snapshot,
-                                const IdentityManager::Mode mode,
-                                const int max_missing_frames) {
-  if (snapshot.seen_this_frame) {
-    return IdentityState::kActive;
-  }
-  if (mode == IdentityManager::Mode::kMerged) {
-    return IdentityState::kMerged;
-  }
-  if (mode == IdentityManager::Mode::kSplitRecovery) {
-    return IdentityState::kSplitRecovery;
-  }
-  if (snapshot.missing_frames <= std::max(0, max_missing_frames)) {
-    return IdentityState::kOccluded;
-  }
-  return IdentityState::kLost;
 }
 
 std::string JoinSemanticIds(const std::set<int> &semantic_ids) {
@@ -429,50 +395,15 @@ IdentityManagerResult IdentityManager::Update(const std::vector<TrackletObservat
   };
 
   const auto build_result_from_legacy = [&]() {
-    IdentityManagerResult built;
-    built.primary_semantic_id = impl_->legacy_identity_matcher.CurrentPrimarySemanticId();
-    built.feature_update_frozen = impl_->legacy_identity_matcher.IsFeatureUpdateFrozen();
-    const auto mode = CurrentMode();
-    const auto snapshots = impl_->legacy_identity_matcher.IdentitySnapshots();
-    built.identities.reserve(snapshots.size());
-    const auto &debug_rows = impl_->last_score_debug_rows;
-    for (const auto &snapshot : snapshots) {
-      if (snapshot.semantic_id <= 0) {
-        continue;
-      }
-
-      IdentityObservation identity;
-      identity.semantic_id = snapshot.semantic_id;
-      identity.state = StateFromSnapshot(snapshot, mode, impl_->config.max_missing_frames);
-      identity.class_id = snapshot.class_id;
-      identity.confidence = snapshot.confidence;
-      identity.bbox = snapshot.has_reliable_geometry ? snapshot.reliable_bbox : snapshot.bbox;
-      identity.missing_frames = snapshot.missing_frames;
-      identity.visible = snapshot.seen_this_frame;
-      identity.primary = (built.primary_semantic_id > 0 && identity.semantic_id == built.primary_semantic_id);
-      if (snapshot.supporting_raw_track_id > 0) {
-        identity.supporting_raw_track_id = snapshot.supporting_raw_track_id;
-        auto obs_it = observations_by_raw_track_id.find(snapshot.supporting_raw_track_id);
-        if (obs_it != observations_by_raw_track_id.end()) {
-          const auto &obs = obs_it->second;
-          identity.supporting_tracklet = obs;
-          identity.class_id = obs.class_id;
-          identity.confidence = obs.confidence;
-          identity.bbox = obs.bbox;
-          identity.occlusion_suspect = obs.occlusion_suspect;
-          identity.low_score_update = obs.low_score_update;
-          identity.just_recovered = obs.just_recovered;
-          identity.association = obs.association;
-
-          if (const auto *row = FindBestDebugRow(debug_rows, obs.raw_track_id, identity.semantic_id); row != nullptr) {
-            identity.assignment = AssignmentEvidenceFromDebug(*row);
-          }
-        }
-      }
-
-      built.identities.push_back(std::move(identity));
-    }
-    return built;
+    IdentityObservationProjection::Input input;
+    input.snapshots = impl_->legacy_identity_matcher.IdentitySnapshots();
+    input.observations_by_raw_track_id = observations_by_raw_track_id;
+    input.debug_rows = impl_->last_score_debug_rows;
+    input.mode = CurrentMode();
+    input.primary_semantic_id = impl_->legacy_identity_matcher.CurrentPrimarySemanticId();
+    input.feature_update_frozen = impl_->legacy_identity_matcher.IsFeatureUpdateFrozen();
+    input.max_missing_frames = impl_->config.max_missing_frames;
+    return IdentityObservationProjection::Build(input);
   };
 
   apply_phase5_birth_manager();

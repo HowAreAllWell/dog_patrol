@@ -59,6 +59,7 @@ set(MODULE_SOURCES
   src/modules/raw_semantic_binding_store.cpp
   src/modules/legacy_identity_store.cpp
   src/modules/legacy_identity_matcher.cpp
+  src/modules/identity_observation_projection.cpp
   src/modules/identity_manager.cpp
   src/modules/visualizer_recorder.cpp
   src/modules/runtime_monitor.cpp
@@ -133,6 +134,14 @@ if(BUILD_TESTING)
     target_include_directories(test_identity_manager PRIVATE include)
     target_link_libraries(test_identity_manager ${PROJECT_NAME}_modules)
     ament_target_dependencies(test_identity_manager rclcpp)
+  endif()
+
+  ament_add_gtest(test_identity_observation_projection test/test_identity_observation_projection.cpp)
+  if(TARGET test_identity_observation_projection)
+    target_compile_features(test_identity_observation_projection PUBLIC cxx_std_17)
+    target_include_directories(test_identity_observation_projection PRIVATE include src/modules)
+    target_link_libraries(test_identity_observation_projection ${PROJECT_NAME}_modules)
+    ament_target_dependencies(test_identity_observation_projection rclcpp)
   endif()
 
   ament_add_gtest(test_feature_update_policy test/test_feature_update_policy.cpp)
