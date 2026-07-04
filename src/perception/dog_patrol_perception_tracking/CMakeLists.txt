@@ -52,6 +52,7 @@ set(MODULE_SOURCES
   src/modules/birth_candidate_store.cpp
   src/modules/semantic_id_allocator.cpp
   src/modules/assignment_application_plan.cpp
+  src/modules/assignment_application_executor.cpp
   src/modules/assignment_candidate_builder.cpp
   src/modules/raw_semantic_binding_store.cpp
   src/modules/legacy_identity_store.cpp
@@ -250,6 +251,14 @@ if(BUILD_TESTING)
     target_include_directories(test_assignment_application_plan PRIVATE include src/modules)
     target_link_libraries(test_assignment_application_plan ${PROJECT_NAME}_modules)
     ament_target_dependencies(test_assignment_application_plan rclcpp)
+  endif()
+
+  ament_add_gtest(test_assignment_application_executor test/test_assignment_application_executor.cpp)
+  if(TARGET test_assignment_application_executor)
+    target_compile_features(test_assignment_application_executor PUBLIC cxx_std_17)
+    target_include_directories(test_assignment_application_executor PRIVATE include src/modules)
+    target_link_libraries(test_assignment_application_executor ${PROJECT_NAME}_modules)
+    ament_target_dependencies(test_assignment_application_executor rclcpp)
   endif()
 
   ament_add_gtest(test_assignment_candidate_builder test/test_assignment_candidate_builder.cpp)
