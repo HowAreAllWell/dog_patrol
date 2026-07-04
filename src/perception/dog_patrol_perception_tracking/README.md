@@ -14,7 +14,7 @@ Orin 宿主机侧视觉验收 demo，包含检测、短期跟踪、语义身份�
 - `udp_json_adapter`：localhost UDP JSON
 
 未接入或未完成：
-- identity 层仍主要由 `LegacyIdentityMatcher` 承担，尚未迁移为完整的新状态机；`FeatureUpdatePolicy` 决策 helper、`FeatureGeometryUpdateState` mutation helper、`FeatureBankCost` read/cost helper、`ReliableGeometryCost` reliable-geometry read/cost helper、`AssignmentCost` cost composition helper、`ActiveAssignmentSolver` active assignment helper、`InactiveRecoverySolver` inactive recovery helper、`RawContinuityDecision` raw continuity helper、`BirthCandidateDecision` birth / hidden candidate helper 与 identity record lifecycle helper 已抽取。legacy identity record 已抽为 identity 层内部 `LegacyIdentityRecord` 类型并嵌入 feature bank / reliable geometry 子状态，但底层 storage ownership、candidate collection、score/debug row aggregation、assignment apply、raw-to-semantic mapping 和 birth ownership 仍在 legacy 内部。
+- identity 层仍主要由 `LegacyIdentityMatcher` 承担，尚未迁移为完整的新状态机；`FeatureUpdatePolicy` 决策 helper、`FeatureGeometryUpdateState` mutation helper、`FeatureBankCost` read/cost helper、`ReliableGeometryCost` reliable-geometry read/cost helper、`AssignmentCost` cost composition helper、`ActiveAssignmentSolver` active assignment helper、`InactiveRecoverySolver` inactive recovery helper、`RawContinuityDecision` raw continuity helper、`BirthCandidateDecision` birth / hidden candidate helper、`BirthCandidateStore` birth candidate storage helper 与 identity record lifecycle helper 已抽取。legacy identity record 已抽为 identity 层内部 `LegacyIdentityRecord` 类型并嵌入 feature bank / reliable geometry 子状态，但底层 identity storage ownership、candidate collection、score/debug row aggregation、assignment apply、raw-to-semantic mapping 和完整 birth ownership 仍在 legacy 内部。
 - 距离/2D 相对位置
 - 控制逻辑
 
@@ -243,6 +243,7 @@ Tracker ReID 配置（`tracker.*`）：
 - `INACTIVE` 恢复使用分层阈值 + 同帧一对一约束。
 - 新 `raw_id` 不等于新 `semantic_id`：只有无法解释为已有语义、且不像 active identity 的重复/分裂框、身体局部、虚影或宽矮碎片时，才分配新语义 ID。
 - 非 primary 新语义 ID 由内部 `SemanticIdAllocator` 分配：从 `2` 开始，跳过 `1` 和当前 identity storage 已占用的 semantic id；primary bootstrap 仍使用 semantic id `1`。
+- 小目标新人稳定确认的 per-raw-track pending hit count / last-seen frame 由内部 `BirthCandidateStore` 维护；它不分配 semantic id，只向 `BirthCandidateDecision` 提供稳定帧 evidence。
 - hidden candidate 完全不显示、不进入正式 identity 输出、不参与 primary、不占用 semantic id；小远目标可在快速连续确认后晋升并分配语义 ID。
 
 历史对照配置（仅用于离线诊断记录；当前 runtime ReID 主链为强制开启）：
