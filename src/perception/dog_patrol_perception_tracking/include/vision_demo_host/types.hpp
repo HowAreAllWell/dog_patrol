@@ -124,6 +124,7 @@ enum class PrimaryState {
   kLocked,
   kOccluded,
   kLost,
+  kPendingRecovery,
 };
 
 struct PrimaryTargetResult {
@@ -221,6 +222,8 @@ inline std::string PrimaryStateToString(const PrimaryState state) {
       return "LOCKED";
     case PrimaryState::kOccluded:
       return "OCCLUDED";
+    case PrimaryState::kPendingRecovery:
+      return "PENDING_RECOVERY";
     case PrimaryState::kLost:
       return "LOST";
     default:

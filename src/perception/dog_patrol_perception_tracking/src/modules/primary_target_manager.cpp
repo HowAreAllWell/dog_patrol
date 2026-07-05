@@ -151,8 +151,8 @@ PrimaryTargetResult PrimaryTargetManager::Update(const std::vector<IdentityObser
         state_.primary_track = std::nullopt;
         state_.raw_track_id = -1;
         state_.primary_target_id = primary_target_id_;
-        state_.state = PrimaryState::kOccluded;
-        last_decision_reason_ = "visible_primary_sanity_rejected_occluded";
+        state_.state = PrimaryState::kPendingRecovery;
+        last_decision_reason_ = "pending_recovery_visible_primary_sanity_rejected";
         return state_;
       }
       last_decision_reason_ = "visible_primary_sanity_rejected_no_primary";
@@ -193,13 +193,20 @@ PrimaryTargetResult PrimaryTargetManager::Update(const std::vector<IdentityObser
       return state_;
     }
 
+    if (current_primary_identity->state == IdentityState::kMerged ||
+        current_primary_identity->state == IdentityState::kSplitRecovery) {
+      state_.state = PrimaryState::kPendingRecovery;
+      last_decision_reason_ = "pending_recovery_from_identity_state";
+      return state_;
+    }
+
     state_.state = PrimaryState::kOccluded;
     last_decision_reason_ = "occluded_from_identity_state";
     return state_;
   }
 
   if (primary_target_id_ > 0 || bound_raw_track_id_ > 0 || state_.state == PrimaryState::kLocked ||
-      state_.state == PrimaryState::kOccluded) {
+      state_.state == PrimaryState::kOccluded || state_.state == PrimaryState::kPendingRecovery) {
     state_.missing_frames += 1;
     state_.primary_track = std::nullopt;
     state_.raw_track_id = -1;

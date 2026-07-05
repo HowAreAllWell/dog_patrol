@@ -140,6 +140,11 @@ TEST(PrimaryTargetManagerTest, NonPersonCannotBecomePrimaryTarget) {
   EXPECT_EQ(s.primary_target_id, -1);
 }
 
+TEST(PrimaryTargetManagerTest, PendingRecoveryStateSerializesPublicString) {
+  EXPECT_EQ(vision_demo_host::PrimaryStateToString(vision_demo_host::PrimaryState::kPendingRecovery),
+            "PENDING_RECOVERY");
+}
+
 TEST(PrimaryTargetManagerTest, ReacquireCanSwitchPrimarySemanticIdAfterLongLoss) {
   vision_demo_host::PrimaryTargetManager::Config cfg;
   cfg.lost_threshold_frames = 2;
@@ -166,7 +171,7 @@ TEST(PrimaryTargetManagerTest, ReacquireCanSwitchPrimarySemanticIdAfterLongLoss)
   EXPECT_EQ(s5.primary_track->id, 20);
 }
 
-TEST(PrimaryTargetManagerTest, SuspiciousVisiblePrimaryKeepsSemanticIdOccluded) {
+TEST(PrimaryTargetManagerTest, SuspiciousVisiblePrimaryKeepsSemanticIdPendingRecovery) {
   vision_demo_host::PrimaryTargetManager::Config cfg;
   cfg.lost_threshold_frames = 3;
   cfg.min_person_area_px = 100.0F;
@@ -180,10 +185,11 @@ TEST(PrimaryTargetManagerTest, SuspiciousVisiblePrimaryKeepsSemanticIdOccluded) 
 
   auto suspicious = MakeIdentity(1, 8, vision_demo_host::ClassId::kPerson, cv::Rect2f(500, 0, 50, 50));
   auto s2 = mgr.Update({suspicious});
-  EXPECT_EQ(s2.state, vision_demo_host::PrimaryState::kOccluded);
+  EXPECT_EQ(s2.state, vision_demo_host::PrimaryState::kPendingRecovery);
   EXPECT_FALSE(s2.primary_track.has_value());
   EXPECT_EQ(s2.primary_target_id, 1);
   EXPECT_EQ(mgr.LastRejectReason(), "visible_primary_center_jump");
+  EXPECT_EQ(mgr.LastDecisionReason(), "pending_recovery_visible_primary_sanity_rejected");
 }
 
 TEST(PrimaryTargetManagerTest, OcclusionSuspectVisiblePrimaryRejected) {
@@ -198,7 +204,7 @@ TEST(PrimaryTargetManagerTest, OcclusionSuspectVisiblePrimaryRejected) {
   auto suspicious = MakeIdentity(1, 7, vision_demo_host::ClassId::kPerson, cv::Rect2f(0, 0, 50, 50));
   suspicious.occlusion_suspect = true;
   auto s2 = mgr.Update({suspicious});
-  EXPECT_EQ(s2.state, vision_demo_host::PrimaryState::kOccluded);
+  EXPECT_EQ(s2.state, vision_demo_host::PrimaryState::kPendingRecovery);
   EXPECT_FALSE(s2.primary_track.has_value());
   EXPECT_EQ(s2.primary_target_id, 1);
   EXPECT_EQ(mgr.LastRejectReason(), "visible_primary_occlusion_suspect");
@@ -217,7 +223,7 @@ TEST(PrimaryTargetManagerTest, LowScoreVisiblePrimaryRejected) {
   suspicious.low_score_update = true;
   suspicious.association.low_score_detection = true;
   auto s2 = mgr.Update({suspicious});
-  EXPECT_EQ(s2.state, vision_demo_host::PrimaryState::kOccluded);
+  EXPECT_EQ(s2.state, vision_demo_host::PrimaryState::kPendingRecovery);
   EXPECT_FALSE(s2.primary_track.has_value());
   EXPECT_EQ(s2.primary_target_id, 1);
   EXPECT_EQ(mgr.LastRejectReason(), "visible_primary_low_score_update");
@@ -241,6 +247,33 @@ TEST(PrimaryTargetManagerTest, OccludedIdentityLifecyclePreventsImmediateReplace
   EXPECT_EQ(s2.primary_target_id, 1);
   EXPECT_FALSE(s2.primary_track.has_value());
   EXPECT_EQ(mgr.LastDecisionReason(), "occluded_from_identity_state");
+}
+
+TEST(PrimaryTargetManagerTest, MergedAndSplitRecoveryIdentityLifecycleArePendingRecovery) {
+  vision_demo_host::PrimaryTargetManager::Config cfg;
+  cfg.lost_threshold_frames = 3;
+  cfg.min_person_area_px = 100.0F;
+  vision_demo_host::PrimaryTargetManager mgr(cfg);
+
+  auto s1 = mgr.Update({MakeIdentity(1, 7, vision_demo_host::ClassId::kPerson, cv::Rect2f(0, 0, 50, 50))});
+  ASSERT_TRUE(s1.primary_track.has_value());
+  EXPECT_EQ(s1.state, vision_demo_host::PrimaryState::kLocked);
+
+  auto merged_primary = MakeLifecycleIdentity(1, vision_demo_host::IdentityState::kMerged, 1,
+                                              cv::Rect2f(0, 0, 50, 50));
+  auto merged_state = mgr.Update({merged_primary});
+  EXPECT_EQ(merged_state.state, vision_demo_host::PrimaryState::kPendingRecovery);
+  EXPECT_EQ(merged_state.primary_target_id, 1);
+  EXPECT_FALSE(merged_state.primary_track.has_value());
+  EXPECT_EQ(mgr.LastDecisionReason(), "pending_recovery_from_identity_state");
+
+  auto split_primary = MakeLifecycleIdentity(1, vision_demo_host::IdentityState::kSplitRecovery, 2,
+                                             cv::Rect2f(0, 0, 50, 50));
+  auto split_state = mgr.Update({split_primary});
+  EXPECT_EQ(split_state.state, vision_demo_host::PrimaryState::kPendingRecovery);
+  EXPECT_EQ(split_state.primary_target_id, 1);
+  EXPECT_FALSE(split_state.primary_track.has_value());
+  EXPECT_EQ(mgr.LastDecisionReason(), "pending_recovery_from_identity_state");
 }
 
 TEST(PrimaryTargetManagerTest, LostIdentityLifecycleReleasesPrimaryForNewIdentity) {
