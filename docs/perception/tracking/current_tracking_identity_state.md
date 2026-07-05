@@ -1,6 +1,6 @@
 # 当前 tracking identity 实现状态
 
-日期：2026-07-04
+日期：2026-07-05
 
 本文记录当前代码的真实实现状态，用于接手和排查 identity 相关问题。它不是新的架构设计文档；`orin_hik_h264_MOT` 中 01/02 已修问题和后续架构风险见 `docs/orin_hik_h264_MOT_01_02_issue_resolution.md`。Phase 5 birth / hidden candidate readiness 证据见 `docs/phase5_birth_hidden_candidate_readiness.md`。
 
@@ -97,10 +97,11 @@ VisualizerRecorder::Render(frame, tracks, primary, identity_result)
 - `RawSemanticBindingStore` 已作为 identity 层内部可单测 raw-to-semantic binding helper 抽取，legacy matcher 把 previous-frame raw snapshot、planned raw map replacement、lookup、Phase 4/5 direct bind 和 reset/clear 委托给该 helper。
 - `LegacyIdentityRecordLifecycle` 已作为 identity 层内部可单测 lifecycle helper 抽取，legacy matcher 在 observation apply、seen/missing aging、occlusion protection、single-blob carrier handoff missing 和 snapshot projection 时委托该 helper。
 - `LegacyIdentityStore` 已作为 identity 层内部可单测 record store facade 抽取，legacy matcher 把 semantic-id lookup、occupied-id / active-inactive person 枚举、frame-begin reset、age-one-frame、occlusion protection、carrier handoff missing 和 sorted snapshot projection 委托给该 facade。
+- `LegacyIdentityMatcher` 已新增内部 `RuntimeState` holder，集中持有 `LegacyIdentityStore`、`RawSemanticBindingStore`、`SemanticIdAllocator`、`BirthManager`、frame index、primary/bootstrap state、occlusion mode state 和 debug row buffers；该 state 仍由 legacy matcher 内部拥有，尚未迁移到 `IdentityManager`。
 - 输出 `phase3_shadow_state.csv` 使用的 shadow-only debug rows，包括 hypothesis input、MergedGroup、SplitCandidate、single-blob handoff decision、pairwise matrix、Phase 4 handoff evidence 和 Phase 5 `NewBirthCandidate` lifecycle evidence。
 - Phase 5 BirthManager 已固定为唯一运行时 birth / hidden candidate 路径；hidden / pending / accepted birth decision surface 由 `IdentityManager` Phase 5 helper 表达，accepted birth allocation 通过 legacy state seam 应用，并以 `stage=phase5_birth_candidate` / `stage=phase5_new_semantic` 及 `new_birth_candidate_*` rows 记录。
 
-因此，当前 identity 层接口、一部分 shadow / Phase 4/5 evidence route、update-policy 决策面、feature-bank read / appearance-cost 规则、reliable-geometry read / prediction / cost / gate 规则、assignment cost composition 规则、active assignment input collection 规则、active assignment solving / acceptance 规则、inactive recovery input collection 规则、inactive recovery selection 规则、raw continuity assignment decision 规则、birth / hidden candidate decision 规则、birth candidate storage / stability counter 规则、birth / hidden candidate facade 协调规则、unresolved-track final resolution 编排规则、semantic id allocation counter / skip-existing-id 规则、assignment candidate/debug 构造规则、assignment application planning 规则、assignment apply mutation orchestration 规则、Phase 4 direct apply mutation mechanics、raw-to-semantic binding storage 规则、identity record store facade 规则、feature bank / reliable geometry mutation 规则、legacy identity record 类型边界，以及 record lifecycle mutation 规则已经迁移；legacy record 内部也已收敛出 feature bank / reliable geometry 子状态。但底层 identity state storage ownership、feature bank / reliable geometry ownership，以及部分 legacy 对照逻辑仍主要在 legacy matcher 内部。
+因此，当前 identity 层接口、一部分 shadow / Phase 4/5 evidence route、update-policy 决策面、feature-bank read / appearance-cost 规则、reliable-geometry read / prediction / cost / gate 规则、assignment cost composition 规则、active assignment input collection 规则、active assignment solving / acceptance 规则、inactive recovery input collection 规则、inactive recovery selection 规则、raw continuity assignment decision 规则、birth / hidden candidate decision 规则、birth candidate storage / stability counter 规则、birth / hidden candidate facade 协调规则、unresolved-track final resolution 编排规则、semantic id allocation counter / skip-existing-id 规则、assignment candidate/debug 构造规则、assignment application planning 规则、assignment apply mutation orchestration 规则、Phase 4 direct apply mutation mechanics、raw-to-semantic binding storage 规则、identity record store facade 规则、runtime mutable state holder、feature bank / reliable geometry mutation 规则、legacy identity record 类型边界，以及 record lifecycle mutation 规则已经迁移；legacy record 内部也已收敛出 feature bank / reliable geometry 子状态。但底层 runtime state ownership 仍在 legacy matcher 内部，尚未 hoist 到 `IdentityManager`，primary/output 仍保持 legacy 边界。
 
 ### 2.3 `LegacyIdentityMatcher`
 
@@ -118,6 +119,7 @@ VisualizerRecorder::Render(frame, tracks, primary, identity_result)
 - birth / hidden candidate gate；
 - feature update freeze；
 - score debug rows。
+- 内部 `RuntimeState` holder，集中管理 identity store、raw binding、semantic id allocator、BirthManager、frame/primary/occlusion/debug mutable state。
 
 该模块是后续重构要逐步替换或拆解的重点。它不应被视为目标架构完成态。
 
