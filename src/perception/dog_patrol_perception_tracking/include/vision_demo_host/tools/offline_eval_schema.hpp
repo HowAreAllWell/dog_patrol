@@ -2,6 +2,8 @@
 
 #include <string>
 
+#include "vision_demo_host/tools/identity_offline_metrics.hpp"
+
 namespace vision_demo_host::tools {
 
 inline std::string PerFrameCsvHeader() {

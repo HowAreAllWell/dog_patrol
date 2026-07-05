@@ -215,3 +215,31 @@ TEST(OfflineEvalSchemaTest, Phase3ShadowStateHelpDocumentsShadowOnlyContract) {
     EXPECT_NE(help.find(term), std::string::npos) << term;
   }
 }
+
+TEST(OfflineEvalSchemaTest, IdentityOfflineMetricsHelpDocumentsAdditiveOutput) {
+  const std::string help = vision_demo_host::tools::IdentityOfflineMetricsHelp();
+  const std::vector<std::string> required_terms{
+      "identity_metrics.json",
+      "identity_metrics.md",
+      "additive",
+      "per_frame.csv",
+      "identities.csv",
+      "sid_scores.csv",
+      "phase3_shadow_state.csv",
+      "tracklet_hypotheses.csv",
+      "unavailable",
+      "PENDING_RECOVERY",
+      "primary decision",
+      "identity states",
+      "assignment stages",
+      "feature_update_reason",
+      "geometry_update_reason",
+      "event_type",
+      "NewBirthCandidate",
+      "Phase 4 handoff",
+      "tracklet hypothesis",
+  };
+  for (const auto &term : required_terms) {
+    EXPECT_NE(help.find(term), std::string::npos) << term;
+  }
+}

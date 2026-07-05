@@ -460,6 +460,7 @@ ros2 run vision_demo_host offline_eval_recordings
   - `tracklet_hypotheses.csv`（随 `--save-tracks-csv=true` 输出，用于 shadow candidate 验收）
   - `phase3_shadow_state.csv`（随 `--save-tracks-csv=true` 输出，用于 Phase 3 identity shadow state 验收）
   - `sid_scores.csv`（默认输出，用于 legacy identity assignment / birth gate score evidence）
+  - `identity_metrics.json` / `identity_metrics.md`（每个数据集固定输出的 additive identity acceptance metrics）
 - 映射表：
   - `dataset_dir_map.csv`（`sXX` 与原始数据集目录的对应关系）
 - 总表：
@@ -479,6 +480,7 @@ ros2 run vision_demo_host offline_eval_recordings
   - `sid_mode`（`NORMAL` / `MERGED` / `SPLIT_RECOVERY`）
   - `sid_freeze`（1=语义特征更新冻结，0=可更新）
 - `sid_scores.csv` 中 `feature_update_allowed`、`geometry_update_allowed` 和 `sid_freeze` 保持既有 boolean 语义；`feature_update_reason` / `geometry_update_reason` 是 Phase 6 决策证据字段，用于解释 feature-bank / reliable-geometry update 为什么允许、等待或阻断。当前 reason 包括 `allowed_update`、`global_merge_split_freeze`、`overlapping_track_freeze`、`unreliable_low_quality_observation`、`insufficient_stable_frames`、`update_blocked_by_rejected_assignment`。
+- `identity_metrics.json` / `identity_metrics.md` 聚合现有 debug CSV，不改变 tracker、identity、primary、UDP、overlay 或既有 CSV schema；缺失的可选输入会标记为 `unavailable`，对应分布保持空/零计数。当前聚合项包括 primary state（含 `PENDING_RECOVERY`）、primary decision/reject/recovery reason、identity state、assignment stage/reject reason、feature/geometry update reason、Phase 3 shadow `event_type`、NewBirthCandidate hidden/pending/allocated reason、Phase 4 handoff event、tracklet hypothesis status/reason。
 - `primary_raw_track_id_debug` 仅用于离线排障，不参与画面叠字语义
 - `tracklet_hypotheses.csv` 固定字段：
   - `frame_idx,hypothesis_idx,status,raw_track_id,class_id,score,x,y,w,h,reason,related_raw_track_id,assoc_stage,assoc_cost,assoc_iou,assoc_motion_dist,assoc_app_dist,assoc_appearance_used,assoc_final_gate,assoc_reject_reason`

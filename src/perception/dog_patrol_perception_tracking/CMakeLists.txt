@@ -71,6 +71,7 @@ set(MODULE_SOURCES
   src/modules/identity_manager.cpp
   src/modules/visualizer_recorder.cpp
   src/modules/runtime_monitor.cpp
+  src/tools/identity_offline_metrics.cpp
 )
 
 add_library(${PROJECT_NAME}_modules ${MODULE_SOURCES})
@@ -412,6 +413,16 @@ if(BUILD_TESTING)
   if(TARGET test_offline_eval_schema)
     target_compile_features(test_offline_eval_schema PUBLIC cxx_std_17)
     target_include_directories(test_offline_eval_schema PRIVATE include)
+    target_link_libraries(test_offline_eval_schema ${PROJECT_NAME}_modules)
+    ament_target_dependencies(test_offline_eval_schema rclcpp)
+  endif()
+
+  ament_add_gtest(test_identity_offline_metrics test/test_identity_offline_metrics.cpp)
+  if(TARGET test_identity_offline_metrics)
+    target_compile_features(test_identity_offline_metrics PUBLIC cxx_std_17)
+    target_include_directories(test_identity_offline_metrics PRIVATE include)
+    target_link_libraries(test_identity_offline_metrics ${PROJECT_NAME}_modules)
+    ament_target_dependencies(test_identity_offline_metrics rclcpp)
   endif()
 endif()
 

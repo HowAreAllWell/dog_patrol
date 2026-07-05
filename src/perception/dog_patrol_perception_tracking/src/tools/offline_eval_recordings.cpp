@@ -22,6 +22,7 @@
 #include "vision_demo_host/modules/primary_target_manager.hpp"
 #include "vision_demo_host/modules/udp_json_adapter.hpp"
 #include "vision_demo_host/tools/offline_eval_schema.hpp"
+#include "vision_demo_host/tools/identity_offline_metrics.hpp"
 #include "vision_demo_host/types.hpp"
 
 namespace {
@@ -231,7 +232,8 @@ void PrintUsage() {
       << "  --help\n\n"
       << vision_demo_host::tools::PerFrameCsvHelp() << "\n"
       << vision_demo_host::tools::TrackletHypothesesCsvHelp() << "\n"
-      << vision_demo_host::tools::Phase3ShadowStateCsvHelp();
+      << vision_demo_host::tools::Phase3ShadowStateCsvHelp() << "\n"
+      << vision_demo_host::tools::IdentityOfflineMetricsHelp();
 }
 
 bool ParseBool(const std::string &v, bool *out) {
@@ -1294,6 +1296,11 @@ int main(int argc, char **argv) {
     DatasetMetrics m = EvaluateOne(opt, dataset_dir, out_dir);
     WriteDatasetJson(out_dir / "summary.json", m);
     WriteDatasetMd(out_dir / "summary.md", m);
+    const auto identity_metrics = vision_demo_host::tools::BuildIdentityOfflineMetrics(out_dir, name);
+    std::string metrics_error;
+    if (!vision_demo_host::tools::WriteIdentityOfflineMetricsFiles(out_dir, identity_metrics, &metrics_error)) {
+      std::cout << "  [offline_eval] warning: identity metrics write failed: " << metrics_error << std::endl;
+    }
     all_results.push_back(m);
 
     if (m.ok) {
