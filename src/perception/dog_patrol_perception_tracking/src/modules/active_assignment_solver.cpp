@@ -145,12 +145,6 @@ ActiveAssignmentSolver::Result ActiveAssignmentSolver::Solve(const std::vector<T
         row.appearance_override = appearance_override;
         result.pairwise_debug_rows.push_back(row);
       }
-      if (appearance_override && !config.disable_legacy_pairwise_assignment) {
-        assign[0] = alt0;
-        assign[1] = alt1;
-        pairwise_appearance_override[0] = true;
-        pairwise_appearance_override[1] = true;
-      }
     }
   }
 

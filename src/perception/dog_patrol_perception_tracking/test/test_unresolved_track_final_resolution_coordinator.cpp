@@ -211,7 +211,7 @@ TEST(UnresolvedTrackFinalResolutionCoordinatorTest, AmbiguousRecoverySelectedMar
   EXPECT_FALSE(row->accepted);
 }
 
-TEST(UnresolvedTrackFinalResolutionCoordinatorTest, SideRecoveryAcceptedAssignsBestActiveMissingIdentity) {
+TEST(UnresolvedTrackFinalResolutionCoordinatorTest, SideRecoverySuppressesLegacyApplyForPhase4) {
   const std::vector<Track> tracks{PersonTrack(101, cv::Rect2f(0, 0, 50, 100))};
   const std::vector<int> person_track_indices{0};
   const std::vector<std::vector<float>> person_features{{0.10F, 0.20F, 0.30F, 0.40F}};
@@ -225,32 +225,6 @@ TEST(UnresolvedTrackFinalResolutionCoordinatorTest, SideRecoveryAcceptedAssignsB
   const auto result = UnresolvedTrackFinalResolutionCoordinator::Resolve(BaseInput(
       tracks, person_track_indices, person_features, assigned_track_to_sid, sid_used, active_semantic_ids,
       prev_raw_to_semantic, score_debug_rows, identities));
-
-  ASSERT_EQ(result.assigned_track_to_sid.at(0), 12);
-  ASSERT_TRUE(result.sid_used.at(12));
-  const auto *row = FindRow(result.debug_rows, "merged_side_recovery");
-  ASSERT_NE(row, nullptr);
-  EXPECT_EQ(row->semantic_id, 12);
-  EXPECT_TRUE(row->accepted);
-  ASSERT_EQ(result.erase_pending_raw_track_ids.size(), 1U);
-  EXPECT_EQ(result.erase_pending_raw_track_ids[0], 101);
-}
-
-TEST(UnresolvedTrackFinalResolutionCoordinatorTest, SideRecoveryRollbackSuppressionErasesPendingWithoutAssignment) {
-  const std::vector<Track> tracks{PersonTrack(101, cv::Rect2f(0, 0, 50, 100))};
-  const std::vector<int> person_track_indices{0};
-  const std::vector<std::vector<float>> person_features{{0.10F, 0.20F}};
-  const std::unordered_map<int, int> assigned_track_to_sid;
-  const std::unordered_map<int, bool> sid_used;
-  const std::vector<int> active_semantic_ids{11};
-  const std::unordered_map<int, int> prev_raw_to_semantic;
-  const std::vector<UnresolvedTrackFinalResolutionCoordinator::DebugRow> score_debug_rows;
-  const std::unordered_map<int, LegacyIdentityRecord> identities{{11, Identity(11, 3)}};
-  auto input = BaseInput(tracks, person_track_indices, person_features, assigned_track_to_sid, sid_used,
-                         active_semantic_ids, prev_raw_to_semantic, score_debug_rows, identities);
-  input.config.disable_legacy_merged_side_recovery = true;
-
-  const auto result = UnresolvedTrackFinalResolutionCoordinator::Resolve(input);
 
   EXPECT_TRUE(result.assigned_track_to_sid.empty());
   EXPECT_TRUE(result.debug_rows.empty());

@@ -7,10 +7,6 @@
 namespace vision_demo_host {
 namespace {
 
-float ClampUnit(const float value) {
-  return std::clamp(value, 0.0F, 1.0F);
-}
-
 std::vector<float> FeatureForTrack(const std::vector<int> &person_track_indices,
                                    const std::vector<std::vector<float>> &person_features,
                                    const int track_idx) {
@@ -149,28 +145,8 @@ UnresolvedTrackFinalResolutionCoordinator::Resolve(const Input &input) {
       }
     }
 
-    if (side_recovery_sid > 0 && input.config.disable_legacy_merged_side_recovery) {
-      result.erase_pending_raw_track_ids.push_back(track.id);
-      continue;
-    }
     if (side_recovery_sid > 0) {
-      result.assigned_track_to_sid[track_idx] = side_recovery_sid;
-      result.sid_used[side_recovery_sid] = true;
       result.erase_pending_raw_track_ids.push_back(track.id);
-
-      DebugRow row;
-      row.track_idx = track_idx;
-      row.raw_track_id = track.id;
-      row.semantic_id = side_recovery_sid;
-      row.app_cost = side_recovery_evidence.app_cost;
-      row.geo_cost = side_recovery_evidence.geo_cost;
-      row.time_cost = side_recovery_evidence.time_cost;
-      row.final_score = side_recovery_evidence.final_score;
-      row.margin = std::max(0.0F, 1.0F - ClampUnit(side_recovery_evidence.final_score));
-      row.selected = true;
-      row.accepted = true;
-      row.stage = "merged_side_recovery";
-      result.debug_rows.push_back(std::move(row));
       continue;
     }
 

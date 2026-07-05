@@ -14,7 +14,6 @@ class MergedSingleBlobAssignmentDecision {
   struct Config {
     float min_assignment_margin{0.08F};
     int max_missing_frames{180};
-    bool disable_legacy_merged_single_blob_handoff{false};
   };
 
   struct CandidateRow {

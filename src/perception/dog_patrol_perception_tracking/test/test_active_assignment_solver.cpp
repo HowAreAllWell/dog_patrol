@@ -94,7 +94,7 @@ TEST(ActiveAssignmentSolverTest, RejectsInsufficientMarginUnlessRecentlyMissingC
   EXPECT_EQ(result.assignments[1].reject_reason, "");
 }
 
-TEST(ActiveAssignmentSolverTest, PairwiseAppearanceOverrideSelectsAlternatePairing) {
+TEST(ActiveAssignmentSolverTest, PairwiseAppearanceOverrideRemainsEvidenceOnly) {
   const std::vector<ActiveAssignmentSolver::TrackInput> tracks{TrackInput(9), TrackInput(10)};
   const std::vector<ActiveAssignmentSolver::CandidateInput> candidates{
       CandidateInput(1, 5),
@@ -114,10 +114,12 @@ TEST(ActiveAssignmentSolverTest, PairwiseAppearanceOverrideSelectsAlternatePairi
   EXPECT_FLOAT_EQ(result.pairwise_debug_rows[0].selected_final_cost, 0.40F);
   EXPECT_FLOAT_EQ(result.pairwise_debug_rows[0].alternate_final_cost, 0.47F);
   ASSERT_EQ(result.assignments.size(), 2U);
-  EXPECT_EQ(result.assignments[0].semantic_id, 2);
-  EXPECT_EQ(result.assignments[1].semantic_id, 1);
-  EXPECT_TRUE(result.assignments[0].pairwise_appearance_override);
-  EXPECT_TRUE(result.assignments[1].pairwise_appearance_override);
-  EXPECT_TRUE(result.assignments[0].accepted);
-  EXPECT_TRUE(result.assignments[1].accepted);
+  EXPECT_EQ(result.assignments[0].semantic_id, 1);
+  EXPECT_EQ(result.assignments[1].semantic_id, 2);
+  EXPECT_FALSE(result.assignments[0].pairwise_appearance_override);
+  EXPECT_FALSE(result.assignments[1].pairwise_appearance_override);
+  EXPECT_FALSE(result.assignments[0].accepted);
+  EXPECT_FALSE(result.assignments[1].accepted);
+  EXPECT_EQ(result.assignments[0].reject_reason, "assignment_margin_reject");
+  EXPECT_EQ(result.assignments[1].reject_reason, "assignment_margin_reject");
 }

@@ -59,22 +59,16 @@ MergedSingleBlobAssignmentDecision::Result MergedSingleBlobAssignmentDecision::D
                                       best_app_missing_frames <= config.max_missing_frames;
     if (best_app_was_missing && best_app_cost + 0.025F <= continuity_app_cost) {
       legacy_handoff_available = true;
-      if (!config.disable_legacy_merged_single_blob_handoff) {
-        best_sid = best_app_sid;
-        best_cost = best_app_final;
-      }
     }
   }
 
-  if (legacy_handoff_available && config.disable_legacy_merged_single_blob_handoff &&
-      input.continuity_semantic_id > 0) {
+  if (legacy_handoff_available && input.continuity_semantic_id > 0) {
     best_sid = input.continuity_semantic_id;
     if (continuity_cost < kBigCost * 0.5F) {
       best_cost = continuity_cost;
     }
   }
-  if ((!legacy_handoff_available || config.disable_legacy_merged_single_blob_handoff) &&
-      input.continuity_semantic_id > 0 && continuity_cost < kBigCost * 0.5F &&
+  if (input.continuity_semantic_id > 0 && continuity_cost < kBigCost * 0.5F &&
       best_sid != input.continuity_semantic_id) {
     best_sid = input.continuity_semantic_id;
     best_cost = continuity_cost;

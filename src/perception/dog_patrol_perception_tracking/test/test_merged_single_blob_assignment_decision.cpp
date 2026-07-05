@@ -129,7 +129,7 @@ TEST(MergedSingleBlobAssignmentDecisionTest, RetainsCloseContinuityCandidateByMa
   EXPECT_TRUE(FindRow(result.active_candidates, 1, "merged_candidate")->selected);
 }
 
-TEST(MergedSingleBlobAssignmentDecisionTest, AllowsBestAppearanceHandoffWhenEligible) {
+TEST(MergedSingleBlobAssignmentDecisionTest, KeepsContinuityWhenHandoffIsEligibleForPhase4) {
   auto input = BaseInput(1);
   input.active_candidates = {
       ActiveCandidate(1, 0.20F, 0.20F, 0.30F),
@@ -137,21 +137,6 @@ TEST(MergedSingleBlobAssignmentDecisionTest, AllowsBestAppearanceHandoffWhenElig
   };
 
   const auto result = MergedSingleBlobAssignmentDecision::Decide(input, Config());
-
-  EXPECT_EQ(result.semantic_id, 2);
-  EXPECT_TRUE(FindRow(result.active_candidates, 2, "merged_candidate")->selected);
-}
-
-TEST(MergedSingleBlobAssignmentDecisionTest, RollbackFlagPrefersContinuityOverEligibleHandoff) {
-  auto input = BaseInput(1);
-  input.active_candidates = {
-      ActiveCandidate(1, 0.20F, 0.20F, 0.30F),
-      ActiveCandidate(2, 0.16F, 0.30F, 0.32F, 20),
-  };
-  auto config = Config();
-  config.disable_legacy_merged_single_blob_handoff = true;
-
-  const auto result = MergedSingleBlobAssignmentDecision::Decide(input, config);
 
   EXPECT_EQ(result.semantic_id, 1);
   EXPECT_TRUE(FindRow(result.active_candidates, 1, "merged_candidate")->selected);

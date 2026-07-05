@@ -221,10 +221,6 @@ src/vision_demo_host/scripts/live_bearing_test.sh \
 - `sid.split_stable_frames`（分离恢复后稳定多少帧再恢复更新）
 - `sid.merge_hold_frames`（进入 merged 后最少保持帧数）
 - `sid.app_w` / `sid.geo_w` / `sid.time_w`（语义恢复一对一分配权重）
-- `sid.enable_phase4_merged_split_handoff`（默认 `true`；Phase 4 `merged_split_handoff` 迁移路径，显式设为 `false` 可回退 legacy）
-- `sid.enable_phase4_merged_side_recovery`（默认 `true`；Phase 4 `merged_side_recovery` 迁移路径，显式设为 `false` 可回退 legacy）
-- `sid.enable_phase4_merged_single_blob_handoff`（默认 `true`；Phase 4 merged single-blob handoff 迁移路径，显式设为 `false` 可回退 legacy）
-- `sid.enable_phase4_pairwise_assignment`（默认 `true`；Phase 4 `2x2 pairwise assignment` 迁移路径，显式设为 `false` 可回退 legacy）
 - `sid.enable_phase5_birth_manager`（默认 `true`；Phase 5 accepted birth allocation 迁移路径，显式设为 `false` 可回退 legacy `new_semantic` allocation）
 - `sid.reid_enable`（兼容输入；运行时强制开启语义层外观特征）
 - `sid.reid_backend`（`light` 或 `osnet_onnx`）
@@ -498,11 +494,8 @@ ros2 run vision_demo_host offline_eval_recordings
   - `#15` 起输出 2x2 pairwise assignment matrix shadow rows：`event_type=pairwise_assignment_matrix`；`pairwise_*` 字段记录 selected / alternate pairings、final cost sum、appearance cost sum、margin 和 appearance override 是否触发。该行只补观测，不迁移 2x2 pairwise assignment 行为。
   - `#23` 起输出 Phase 5 `NewBirthCandidate` shadow lifecycle rows：`event_type=new_birth_candidate_pending` 表示小目标新人等待稳定确认，`event_type=new_birth_candidate_hidden` 表示 birth gate 隐藏或延迟分配，`event_type=new_birth_candidate_allocated` 表示正式分配；`reason` 可为 `small_new_person_pending`、`small_stable_new_person_promoted`、`new_semantic_allocated`、`phase5_birth_manager_allocated`、`ambiguous_recovery_pending`、`duplicate_split_hidden`、`skinny_partial_hidden`、`wide_fragment_hidden`。
   - `sid.enable_phase5_birth_manager=true` / `--sid-enable-phase5-birth-manager true` 默认启用，hidden / pending / accepted birth decision surface 由 `IdentityManager` Phase 5 path 表达，small pending 在 `sid_scores.csv` 中使用 `stage=phase5_birth_candidate`、`reject_reason=small_new_person_pending`，accepted allocation 使用 `stage=phase5_new_semantic`，对应 `new_birth_candidate_allocated` row 使用 `reason=phase5_birth_manager_allocated` 或 `small_stable_new_person_promoted`；显式设为 `false` 时回退 legacy `new_semantic` allocation。hidden / pending birth decisions 仍不分配 semantic id。
-  - `sid.enable_phase4_merged_split_handoff=true` / `--sid-enable-phase4-merged-split-handoff true` 默认启用，`merged_split_handoff` 迁移路径会额外输出 `event_type=phase4_merged_split_handoff`、`reason=merged_split_handoff` 行；显式设为 `false` 时回退 legacy 路径且不输出该 Phase 4 行。
-  - `sid.enable_phase4_merged_side_recovery=true` / `--sid-enable-phase4-merged-side-recovery true` 默认启用，`merged_side_recovery` 迁移路径会额外输出 `event_type=phase4_merged_side_recovery`、`reason=merged_side_recovery` 行；显式设为 `false` 时回退 legacy `merged_side_recovery`。
-  - `sid.enable_phase4_merged_single_blob_handoff=true` / `--sid-enable-phase4-merged-single-blob-handoff true` 默认启用，merged single-blob accepted handoff 由 `IdentityManager` / Phase 4 state 执行，并额外输出 `event_type=phase4_merged_single_blob_handoff`、`reason=merged_single_blob_handoff` 行；显式设为 `false` 时回退 legacy accepted 分支。
-  - `sid.enable_phase4_pairwise_assignment=true` / `--sid-enable-phase4-pairwise-assignment true` 默认启用，2x2 pairwise appearance override 由 `IdentityManager` / Phase 4 state 执行，并额外输出 `event_type=phase4_pairwise_assignment`、`reason=pairwise_appearance_override` 行；显式设为 `false` 时回退 legacy pairwise override 分支。
-  - `#13` 起输出 side reappearance shadow evidence：legacy rollback 路径中，侧边再出现 raw track 会输出 `event_type=side_reappearance_candidate`、`reason=side_reappearance_candidate` 行；默认 Phase 4 side recovery 路径中，该行由可同样 join 的 `phase4_merged_side_recovery` 行替代。两者都回链到 preceding `MergedGroup`、carrier raw id 和 missing semantic guess。
+  - Phase 4 四条 handoff 路径已固定为当前运行时行为：`phase4_merged_split_handoff`、`phase4_merged_side_recovery`、`phase4_merged_single_blob_handoff` 和 `phase4_pairwise_assignment`。对应行仍写入 `phase3_shadow_state.csv`，并保留原有 reason / pairwise 字段语义。
+  - `#13` 起输出 side reappearance shadow evidence：Phase 4 side recovery 路径会输出可 join 的 `phase4_merged_side_recovery` 行，回链到 preceding `MergedGroup`、carrier raw id 和 missing semantic guess。
   - 回链方法：先按相同 `frame_idx` 筛两张表，再用 `candidate_raw_track_id` 对 `raw_track_id`，并核对 `reason`、`related_raw_track_id`、bbox/score；`duplicate_output_hidden` 行必须保留 hidden candidate 事实，不表示该候选参与显示或 semantic id 分配。
   - 离线 smoke 验收应先看 `phase3_shadow_state.csv` 的 `event_type` 分布，确认至少覆盖 `hypothesis_input`、`merged_group_enter/update/end` 和 `split_candidate_enter/update/end`；再看 `tracklet_hypotheses.csv` 的 #6 reason 分布仍只使用既有 reason 字符串。
   - 人工抽查窗口：`orin_hik_h264_MOT/01` 的 `746-771` 看 group lifecycle，`793-795` 看 hidden split candidate，`1015-1031` 看 split recovery evidence；`760`、`795`、`1030` 附近同时回查 `tracklet_hypotheses.csv`；`orin_hik_h264_MOT/02` 的 `790-850` 用于第二段 handoff/恢复场景抽查。

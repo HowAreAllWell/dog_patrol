@@ -41,10 +41,6 @@ LegacyIdentityMatcher::Config ToLegacyConfig(const IdentityManager::Config &conf
   out.min_assignment_margin = config.min_assignment_margin;
   out.stable_frames_before_feature_update = config.stable_frames_before_feature_update;
   out.merged_requires_overlap = config.merged_requires_overlap;
-  out.disable_legacy_merged_split_handoff = config.enable_phase4_merged_split_handoff;
-  out.disable_legacy_merged_side_recovery = config.enable_phase4_merged_side_recovery;
-  out.disable_legacy_merged_single_blob_handoff = config.enable_phase4_merged_single_blob_handoff;
-  out.disable_legacy_pairwise_assignment = config.enable_phase4_pairwise_assignment;
   out.disable_legacy_birth_allocation = config.enable_phase5_birth_manager;
   out.reid_enable = config.reid_enable;
   out.reid_backend = config.reid_backend;
@@ -275,7 +271,7 @@ IdentityManagerResult IdentityManager::Update(const std::vector<TrackletObservat
   };
 
   Phase4HandoffCoordinator::PairwiseInput pairwise_input;
-  pairwise_input.enabled = impl_->config.enable_phase4_pairwise_assignment;
+  pairwise_input.enabled = true;
   pairwise_input.phase3_rows = &impl_->last_phase3_shadow_debug_rows;
   pairwise_input.raw_to_semantic_id = &raw_to_semantic_id_;
   pairwise_input.next_event_idx = &event_idx;
@@ -291,8 +287,7 @@ IdentityManagerResult IdentityManager::Update(const std::vector<TrackletObservat
   const auto mode = CurrentMode();
   int phase4_continuity_raw = -1;
   int phase4_continuity_sid = -1;
-  if (impl_->config.enable_phase4_merged_split_handoff &&
-      impl_->occlusion_group_shadow_state.merged_group.active &&
+  if (impl_->occlusion_group_shadow_state.merged_group.active &&
       observations_by_raw_track_id.size() >= 2) {
     for (const auto &[raw_id, semantic_id] : prev_raw_to_semantic) {
       if (impl_->occlusion_group_shadow_state.merged_group.semantic_ids.count(semantic_id) == 0) {
@@ -456,7 +451,7 @@ IdentityManagerResult IdentityManager::Update(const std::vector<TrackletObservat
 
   append_single_blob_decision_rows();
   Phase4HandoffCoordinator::SingleBlobInput single_blob_input;
-  single_blob_input.enabled = impl_->config.enable_phase4_merged_single_blob_handoff;
+  single_blob_input.enabled = true;
   single_blob_input.phase3_rows = &impl_->last_phase3_shadow_debug_rows;
   single_blob_input.raw_to_semantic_id = &raw_to_semantic_id_;
   single_blob_input.next_event_idx = &event_idx;
@@ -469,7 +464,7 @@ IdentityManagerResult IdentityManager::Update(const std::vector<TrackletObservat
       refresh_outputs);
 
   Phase4HandoffCoordinator::SideRecoveryInput side_recovery_input;
-  side_recovery_input.enabled = impl_->config.enable_phase4_merged_side_recovery;
+  side_recovery_input.enabled = true;
   side_recovery_input.current_frame_idx = current_frame_idx;
   side_recovery_input.shadow_hypotheses = &shadow_hypotheses;
   side_recovery_input.observations_by_raw_track_id = &observations_by_raw_track_id;
@@ -535,7 +530,7 @@ IdentityManagerResult IdentityManager::Update(const std::vector<TrackletObservat
     }
 
     Phase4HandoffCoordinator::MergedSplitInput merged_split_input;
-    merged_split_input.enabled = impl_->config.enable_phase4_merged_split_handoff;
+    merged_split_input.enabled = true;
     merged_split_input.current_frame_idx = current_frame_idx;
     merged_split_input.phase4_continuity_raw = phase4_continuity_raw;
     merged_split_input.phase4_continuity_sid = phase4_continuity_sid;

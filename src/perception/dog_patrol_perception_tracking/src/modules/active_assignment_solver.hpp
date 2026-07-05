@@ -15,7 +15,6 @@ class ActiveAssignmentSolver {
     int max_missing_frames{180};
     float active_assign_max_cost{0.55F};
     float min_assignment_margin{0.08F};
-    bool disable_legacy_pairwise_assignment{false};
   };
 
   struct TrackInput {
