@@ -9,6 +9,7 @@
 #include <utility>
 
 #include "identity_observation_projection.hpp"
+#include "identity_runtime_mutation_applier.hpp"
 #include "legacy_identity_matcher.hpp"
 #include "occlusion_group_shadow_lifecycle.hpp"
 #include "phase4_handoff_coordinator.hpp"
@@ -150,13 +151,24 @@ bool IsSplitCandidateHypothesis(const TrackletHypothesis &hypothesis) {
 
 class IdentityManager::Impl {
  public:
-  Impl() : legacy_identity_matcher(LegacyIdentityMatcher::Config{}, &identity_runtime_state) {}
+  Impl()
+      : legacy_identity_config(ToLegacyConfig(config)),
+        legacy_identity_matcher(legacy_identity_config, &identity_runtime_state),
+        mutation_applier(legacy_identity_config, &identity_runtime_state,
+                         &mutation_appearance_features) {}
   explicit Impl(Config config)
-      : config(std::move(config)), legacy_identity_matcher(ToLegacyConfig(this->config), &identity_runtime_state) {}
+      : config(std::move(config)),
+        legacy_identity_config(ToLegacyConfig(this->config)),
+        legacy_identity_matcher(legacy_identity_config, &identity_runtime_state),
+        mutation_applier(legacy_identity_config, &identity_runtime_state,
+                         &mutation_appearance_features) {}
 
   Config config;
+  LegacyIdentityMatcher::Config legacy_identity_config;
   LegacyIdentityMatcher::RuntimeState identity_runtime_state;
   LegacyIdentityMatcher legacy_identity_matcher;
+  AppearanceFeatureService mutation_appearance_features;
+  IdentityRuntimeMutationApplier mutation_applier;
   std::vector<ScoreDebugRow> last_score_debug_rows;
   std::vector<Phase3ShadowDebugRow> last_phase3_shadow_debug_rows;
   OcclusionGroupShadowLifecycle::State occlusion_group_shadow_state;
@@ -168,11 +180,25 @@ IdentityManager::IdentityManager() : impl_(std::make_shared<Impl>()) {}
 
 IdentityManager::IdentityManager(Config config) : impl_(std::make_shared<Impl>(config)) {}
 
-bool IdentityManager::Initialize(std::string *error) { return impl_->legacy_identity_matcher.Initialize(error); }
+bool IdentityManager::Initialize(std::string *error) {
+  if (!impl_->legacy_identity_matcher.Initialize(error)) {
+    return false;
+  }
+  impl_->mutation_appearance_features = AppearanceFeatureService(
+      AppearanceFeatureService::Config{impl_->legacy_identity_config.reid_backend,
+                                       impl_->legacy_identity_config.reid_model_path,
+                                       impl_->legacy_identity_config.reid_input_width,
+                                       impl_->legacy_identity_config.reid_input_height,
+                                       16,
+                                       8},
+      AppearanceFeatureService::Profile::kIdentity);
+  return impl_->mutation_appearance_features.Initialize(error);
+}
 
 void IdentityManager::Reset() {
   LegacyIdentityMatcher::ResetRuntimeState(&impl_->identity_runtime_state);
   impl_->legacy_identity_matcher.ResetAdapter();
+  impl_->mutation_appearance_features = AppearanceFeatureService();
   impl_->last_score_debug_rows.clear();
   impl_->last_phase3_shadow_debug_rows.clear();
   OcclusionGroupShadowLifecycle::Reset(&impl_->occlusion_group_shadow_state);
@@ -249,7 +275,7 @@ IdentityManagerResult IdentityManager::Update(const std::vector<TrackletObservat
     Phase5BirthCoordinator::ApplyAcceptedBirths(
         input,
         [&](const int raw_track_id) {
-          impl_->legacy_identity_matcher.ApplyPhase5BirthAllocation(tracks, raw_track_id, frame);
+          impl_->mutation_applier.ApplyPhase5BirthAllocation(tracks, raw_track_id, frame);
         },
         [&]() { refresh_legacy_debug_rows(); });
   };
@@ -282,7 +308,7 @@ IdentityManagerResult IdentityManager::Update(const std::vector<TrackletObservat
       pairwise_input,
       [&](const int first_raw_track_id, const int first_semantic_id,
           const int second_raw_track_id, const int second_semantic_id) {
-        return impl_->legacy_identity_matcher.ApplyPhase4PairwiseAssignment(
+        return impl_->mutation_applier.ApplyPhase4PairwiseAssignment(
             tracks, first_raw_track_id, first_semantic_id, second_raw_track_id, second_semantic_id, frame);
       },
       refresh_outputs);
@@ -461,7 +487,7 @@ IdentityManagerResult IdentityManager::Update(const std::vector<TrackletObservat
   Phase4HandoffCoordinator::ApplyMergedSingleBlobHandoff(
       single_blob_input,
       [&](const int carrier_raw_track_id, const int carrier_semantic_id, const int candidate_semantic_id) {
-        return impl_->legacy_identity_matcher.ApplyPhase4MergedSingleBlobHandoff(
+        return impl_->mutation_applier.ApplyPhase4MergedSingleBlobHandoff(
             tracks, carrier_raw_track_id, carrier_semantic_id, candidate_semantic_id, frame);
       },
       refresh_outputs);
@@ -480,7 +506,7 @@ IdentityManagerResult IdentityManager::Update(const std::vector<TrackletObservat
       side_recovery_input,
       [&](const int carrier_raw_track_id, const int carrier_semantic_id,
           const int candidate_raw_track_id, const int candidate_semantic_id) {
-        return impl_->legacy_identity_matcher.ApplyPhase4MergedSideRecovery(
+        return impl_->mutation_applier.ApplyPhase4MergedSideRecovery(
             tracks, carrier_raw_track_id, carrier_semantic_id, candidate_raw_track_id, candidate_semantic_id, frame);
       },
       refresh_outputs);
@@ -547,7 +573,7 @@ IdentityManagerResult IdentityManager::Update(const std::vector<TrackletObservat
         merged_split_input,
         [&](const int continuity_raw_track_id, const int exposed_partial_sid,
             const int candidate_raw_track_id, const int continuity_sid) {
-          return impl_->legacy_identity_matcher.ApplyPhase4MergedSplitHandoff(
+          return impl_->mutation_applier.ApplyPhase4MergedSplitHandoff(
               tracks, continuity_raw_track_id, exposed_partial_sid, candidate_raw_track_id, continuity_sid, frame);
         },
         refresh_outputs);

@@ -103,6 +103,7 @@ void Phase5BirthCoordinator::ApplyAcceptedBirths(const ApplyInput &input,
 
   for (const int raw_track_id : allocation_raw_ids) {
     apply_accepted_allocation(raw_track_id);
+    input.shadow_by_raw_track_id->erase(raw_track_id);
   }
   if (allocation_raw_ids.empty()) {
     return;

@@ -66,6 +66,7 @@ set(MODULE_SOURCES
   src/modules/unresolved_track_final_resolution_coordinator.cpp
   src/modules/raw_semantic_binding_store.cpp
   src/modules/legacy_identity_store.cpp
+  src/modules/identity_runtime_mutation_applier.cpp
   src/modules/legacy_identity_matcher.cpp
   src/modules/identity_observation_projection.cpp
   src/modules/identity_manager.cpp
