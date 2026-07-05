@@ -171,15 +171,6 @@ std::string TimestampCompactNow() {
   return oss.str();
 }
 
-cv::Point CompactOverlayTrackLabelPoint(const cv::Mat &canvas, const cv::Rect2f &bbox) {
-  const int tx = std::max(0, static_cast<int>(bbox.x) + 4);
-  int ty = std::min(canvas.rows - 2, std::max(14, static_cast<int>(bbox.y) + 16));
-  if (tx < 620 && ty < 104) {
-    ty = std::min(canvas.rows - 2, std::max(116, static_cast<int>(bbox.y) + 116));
-  }
-  return cv::Point(tx, ty);
-}
-
 void PrintUsage() {
   std::cout
       << "Usage: offline_eval_recordings [options]\n"
@@ -776,7 +767,7 @@ void DrawEvalOverlay(cv::Mat *canvas, const std::vector<vision_demo_host::Track>
     std::ostringstream label;
     label << "id=" << semantic_id << " " << vision_demo_host::IdentityStateToString(identity->state)
           << " raw=" << track.id;
-    cv::putText(*canvas, label.str(), CompactOverlayTrackLabelPoint(*canvas, track.bbox),
+    cv::putText(*canvas, label.str(), vision_demo_host::CompactOverlayTrackLabelPoint(canvas->size(), track.bbox),
                 cv::FONT_HERSHEY_SIMPLEX, 0.8, color, 2);
   }
 

@@ -88,3 +88,28 @@ TEST(PrimaryRecoveryDebugTest, BuildsCompactOverlayLineWithReasonAndFreezeMarker
 
   EXPECT_EQ(line, "PENDING_RECOVERY id=7 raw=42 reason=merged freeze");
 }
+
+TEST(PrimaryRecoveryDebugTest, TrackLabelPointStaysTopAnchoredWhenBoxHeightChanges) {
+  const cv::Size frame_size(1280, 720);
+  const cv::Rect2f short_box(120.0F, 80.0F, 64.0F, 90.0F);
+  const cv::Rect2f tall_box(120.0F, 80.0F, 64.0F, 320.0F);
+
+  const cv::Point short_label = vision_demo_host::CompactOverlayTrackLabelPoint(frame_size, short_box);
+  const cv::Point tall_label = vision_demo_host::CompactOverlayTrackLabelPoint(frame_size, tall_box);
+
+  EXPECT_EQ(short_label.y, tall_label.y);
+  EXPECT_EQ(short_label.y, 96);
+}
+
+TEST(PrimaryRecoveryDebugTest, TrackLabelPointTopBoundaryClampIsVisibleAndDeterministic) {
+  const cv::Size frame_size(1280, 720);
+  const cv::Rect2f top_clipped_box(120.0F, -40.0F, 64.0F, 180.0F);
+  const cv::Rect2f top_clipped_tall_box(120.0F, -40.0F, 64.0F, 360.0F);
+
+  const cv::Point label = vision_demo_host::CompactOverlayTrackLabelPoint(frame_size, top_clipped_box);
+  const cv::Point tall_label =
+      vision_demo_host::CompactOverlayTrackLabelPoint(frame_size, top_clipped_tall_box);
+
+  EXPECT_EQ(label.y, 14);
+  EXPECT_EQ(tall_label.y, label.y);
+}

@@ -1,5 +1,6 @@
 #include "vision_demo_host/modules/primary_recovery_debug.hpp"
 
+#include <algorithm>
 #include <sstream>
 
 namespace vision_demo_host {
@@ -100,6 +101,12 @@ std::string BuildPrimaryOverlayLine(const PrimaryTargetResult &primary,
     line << " freeze";
   }
   return line.str();
+}
+
+cv::Point CompactOverlayTrackLabelPoint(const cv::Size &frame_size, const cv::Rect2f &bbox) {
+  const int tx = std::min(frame_size.width - 2, std::max(0, static_cast<int>(bbox.x) + 4));
+  const int ty = std::min(frame_size.height - 2, std::max(14, static_cast<int>(bbox.y) + 16));
+  return cv::Point(tx, ty);
 }
 
 }  // namespace vision_demo_host
