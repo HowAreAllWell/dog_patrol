@@ -38,6 +38,7 @@ set(MODULE_SOURCES
   src/modules/association_utils.cpp
   src/modules/mot_tracker.cpp
   src/modules/primary_target_manager.cpp
+  src/modules/primary_recovery_debug.cpp
   src/modules/bearing_estimator.cpp
   src/modules/udp_json_adapter.cpp
   src/modules/feature_update_policy.cpp
@@ -125,6 +126,14 @@ if(BUILD_TESTING)
     target_include_directories(test_primary_target_manager PRIVATE include)
     target_link_libraries(test_primary_target_manager ${PROJECT_NAME}_modules)
     ament_target_dependencies(test_primary_target_manager rclcpp)
+  endif()
+
+  ament_add_gtest(test_primary_recovery_debug test/test_primary_recovery_debug.cpp)
+  if(TARGET test_primary_recovery_debug)
+    target_compile_features(test_primary_recovery_debug PUBLIC cxx_std_17)
+    target_include_directories(test_primary_recovery_debug PRIVATE include)
+    target_link_libraries(test_primary_recovery_debug ${PROJECT_NAME}_modules)
+    ament_target_dependencies(test_primary_recovery_debug rclcpp)
   endif()
 
   ament_add_gtest(test_legacy_identity_matcher test/test_legacy_identity_matcher.cpp)

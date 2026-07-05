@@ -540,7 +540,8 @@ class VisionDemoNode : public rclcpp::Node {
                            error.c_str());
     }
 
-    visualizer_.Render(frame, tracks, primary, &identity_result);
+    visualizer_.Render(frame, tracks, primary, &identity_result, primary_manager_.LastDecisionReason(),
+                       primary_manager_.LastRejectReason());
 
     if (monitor_.ShouldReport()) {
       const int primary_id = primary.primary_target_id;

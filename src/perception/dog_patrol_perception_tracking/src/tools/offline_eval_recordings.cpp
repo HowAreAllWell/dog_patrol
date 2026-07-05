@@ -18,6 +18,7 @@
 #include "vision_demo_host/modules/identity_manager.hpp"
 #include "vision_demo_host/modules/mot_tracker.hpp"
 #include "vision_demo_host/modules/preprocess_infer.hpp"
+#include "vision_demo_host/modules/primary_recovery_debug.hpp"
 #include "vision_demo_host/modules/primary_target_manager.hpp"
 #include "vision_demo_host/modules/udp_json_adapter.hpp"
 #include "vision_demo_host/tools/offline_eval_schema.hpp"
@@ -170,6 +171,15 @@ std::string TimestampCompactNow() {
   return oss.str();
 }
 
+cv::Point CompactOverlayTrackLabelPoint(const cv::Mat &canvas, const cv::Rect2f &bbox) {
+  const int tx = std::max(0, static_cast<int>(bbox.x) + 4);
+  int ty = std::min(canvas.rows - 2, std::max(14, static_cast<int>(bbox.y) + 16));
+  if (tx < 620 && ty < 104) {
+    ty = std::min(canvas.rows - 2, std::max(116, static_cast<int>(bbox.y) + 116));
+  }
+  return cv::Point(tx, ty);
+}
+
 void PrintUsage() {
   std::cout
       << "Usage: offline_eval_recordings [options]\n"
@@ -228,6 +238,7 @@ void PrintUsage() {
       << "  --sid-reid-input-width <n>             (default: 128)\n"
       << "  --sid-reid-input-height <n>            (default: 256)\n"
       << "  --help\n\n"
+      << vision_demo_host::tools::PerFrameCsvHelp() << "\n"
       << vision_demo_host::tools::TrackletHypothesesCsvHelp() << "\n"
       << vision_demo_host::tools::Phase3ShadowStateCsvHelp();
 }
@@ -738,22 +749,15 @@ void WriteDatasetJson(const std::filesystem::path &out_path, const DatasetMetric
 
 void DrawEvalOverlay(cv::Mat *canvas, const std::vector<vision_demo_host::Track> &tracks,
                      const vision_demo_host::IdentityManagerResult &identity_result,
-                     const vision_demo_host::IdentityManager::Mode identity_mode,
                      const vision_demo_host::PrimaryTargetResult &primary, const vision_demo_host::BearingOutput &bo,
-                     const std::size_t frame_idx, const std::size_t det_count) {
+                     const std::size_t frame_idx, const std::size_t det_count,
+                     const std::string &primary_decision_reason,
+                     const std::string &primary_reject_reason) {
   const int primary_semantic_id = primary.primary_target_id;
 
   auto find_identity_by_raw = [&](const int raw_track_id) -> const vision_demo_host::IdentityObservation * {
     for (const auto &identity : identity_result.identities) {
       if (identity.supporting_raw_track_id.has_value() && *identity.supporting_raw_track_id == raw_track_id) {
-        return &identity;
-      }
-    }
-    return nullptr;
-  };
-  auto find_identity_by_sid = [&](const int semantic_id) -> const vision_demo_host::IdentityObservation * {
-    for (const auto &identity : identity_result.identities) {
-      if (identity.semantic_id == semantic_id) {
         return &identity;
       }
     }
@@ -772,37 +776,20 @@ void DrawEvalOverlay(cv::Mat *canvas, const std::vector<vision_demo_host::Track>
     std::ostringstream label;
     label << "id=" << semantic_id << " " << vision_demo_host::IdentityStateToString(identity->state)
           << " raw=" << track.id;
-    if (!track.association.stage.empty()) {
-      label << " " << track.association.stage << " c=" << std::fixed << std::setprecision(2)
-            << track.association.fused_cost;
-    }
-    const int tx = std::max(0, static_cast<int>(track.bbox.x) + 4);
-    const int ty = std::min(canvas->rows - 2, std::max(14, static_cast<int>(track.bbox.y) + 16));
-    cv::putText(*canvas, label.str(), cv::Point(tx, ty), cv::FONT_HERSHEY_SIMPLEX, 0.8, color, 2);
-  }
-
-  if (primary_semantic_id > 0) {
-    cv::putText(*canvas, "PRIMARY id=" + std::to_string(primary_semantic_id), cv::Point(20, 56),
-                cv::FONT_HERSHEY_SIMPLEX, 0.6, cv::Scalar(0, 0, 255), 2);
+    cv::putText(*canvas, label.str(), CompactOverlayTrackLabelPoint(*canvas, track.bbox),
+                cv::FONT_HERSHEY_SIMPLEX, 0.8, color, 2);
   }
 
   std::ostringstream line1;
   line1 << "frame=" << frame_idx << " det=" << det_count << " tracks=" << tracks.size();
-  std::ostringstream line2;
-  line2 << "state=" << vision_demo_host::PrimaryStateToString(primary.state)
-        << " primary_id=" << primary_semantic_id
-        << " sid_mode=" << vision_demo_host::IdentityModeToString(identity_mode)
-        << " freeze=" << (identity_result.feature_update_frozen ? "1" : "0");
-  if (const auto *identity = find_identity_by_sid(primary_semantic_id); identity != nullptr) {
-    line2 << " identity=" << vision_demo_host::IdentityStateToString(identity->state)
-          << " miss=" << identity->missing_frames;
-  }
+  const std::string line2 = vision_demo_host::BuildPrimaryOverlayLine(
+      primary, identity_result, primary_decision_reason, primary_reject_reason);
   std::ostringstream line3;
   line3 << std::fixed << std::setprecision(4) << "bearing_base_rad=" << bo.bearing_base_rad
         << " conf=" << bo.bearing_confidence;
 
   cv::putText(*canvas, line1.str(), cv::Point(20, 30), cv::FONT_HERSHEY_SIMPLEX, 0.7, cv::Scalar(255, 255, 255), 2);
-  cv::putText(*canvas, line2.str(), cv::Point(20, 60), cv::FONT_HERSHEY_SIMPLEX, 0.7, cv::Scalar(255, 255, 255), 2);
+  cv::putText(*canvas, line2, cv::Point(20, 60), cv::FONT_HERSHEY_SIMPLEX, 0.7, cv::Scalar(255, 255, 255), 2);
   cv::putText(*canvas, line3.str(), cv::Point(20, 90), cv::FONT_HERSHEY_SIMPLEX, 0.7, cv::Scalar(255, 255, 255), 2);
 }
 
@@ -988,7 +975,7 @@ DatasetMetrics EvaluateOne(const Options &opt, const std::filesystem::path &data
   std::ofstream identities_csv;
   if (opt.save_frame_csv) {
     frame_csv.open(result_dir / "per_frame.csv");
-    frame_csv << "frame_idx,det_count,track_count,track_state,primary_semantic_id,primary_raw_track_id_debug,bearing_base_rad,sid_mode,sid_freeze,visible_semantic_ids,primary_decision_reason,primary_reject_reason\n";
+    frame_csv << vision_demo_host::tools::PerFrameCsvHeader() << "\n";
 
     det_raw_csv.open(result_dir / "det_raw.csv");
     det_raw_csv << "frame_idx,det_idx,class_id,score,x,y,w,h\n";
@@ -1115,7 +1102,11 @@ DatasetMetrics EvaluateOne(const Options &opt, const std::filesystem::path &data
                 << vision_demo_host::IdentityModeToString(identity_manager.CurrentMode()) << ","
                 << (identity_manager.IsFeatureUpdateFrozen() ? "1" : "0") << ","
                 << sid_list.str() << "," << primary_mgr.LastDecisionReason() << ","
-                << primary_mgr.LastRejectReason() << "\n";
+                << primary_mgr.LastRejectReason() << ","
+                << vision_demo_host::PrimaryRecoveryReasonToken(primary, identity_result,
+                                                                primary_mgr.LastDecisionReason(),
+                                                                primary_mgr.LastRejectReason()) << ","
+                << vision_demo_host::PrimarySupportingRawTrackIdDebug(primary, identity_result) << "\n";
     }
     if (det_raw_csv.is_open()) {
       for (std::size_t i = 0; i < detections.size(); ++i) {
@@ -1236,8 +1227,8 @@ DatasetMetrics EvaluateOne(const Options &opt, const std::filesystem::path &data
     if (eval_writer.isOpened()) {
       cv::Mat canvas = frame.clone();
       (void)identity_result;
-      DrawEvalOverlay(&canvas, tracks, identity_result, identity_manager.CurrentMode(), primary, bo, frame_idx,
-                      detections.size());
+      DrawEvalOverlay(&canvas, tracks, identity_result, primary, bo, frame_idx, detections.size(),
+                      primary_mgr.LastDecisionReason(), primary_mgr.LastRejectReason());
       eval_writer.write(canvas);
     }
     frame_idx++;

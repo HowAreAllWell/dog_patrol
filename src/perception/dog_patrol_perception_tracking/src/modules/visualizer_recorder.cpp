@@ -9,6 +9,8 @@
 #include <sstream>
 #include <utility>
 
+#include "vision_demo_host/modules/primary_recovery_debug.hpp"
+
 namespace vision_demo_host {
 namespace {
 
@@ -40,15 +42,6 @@ std::string BuildNvencMp4WriterPipeline(const std::string &output_path, const in
   return oss.str();
 }
 
-const IdentityObservation *FindIdentityBySemanticId(const IdentityManagerResult &result, const int semantic_id) {
-  for (const auto &identity : result.identities) {
-    if (identity.semantic_id == semantic_id) {
-      return &identity;
-    }
-  }
-  return nullptr;
-}
-
 const IdentityObservation *FindIdentityByRawTrack(const IdentityManagerResult &result, const int raw_track_id) {
   for (const auto &identity : result.identities) {
     if (identity.supporting_raw_track_id.has_value() && *identity.supporting_raw_track_id == raw_track_id) {
@@ -56,6 +49,15 @@ const IdentityObservation *FindIdentityByRawTrack(const IdentityManagerResult &r
     }
   }
   return nullptr;
+}
+
+cv::Point CompactOverlayTrackLabelPoint(const cv::Mat &canvas, const cv::Rect2f &bbox) {
+  const int tx = std::max(0, static_cast<int>(bbox.x) + 4);
+  int ty = std::min(canvas.rows - 2, std::max(14, static_cast<int>(bbox.y) + 16));
+  if (tx < 620 && ty < 104) {
+    ty = std::min(canvas.rows - 2, std::max(116, static_cast<int>(bbox.y) + 116));
+  }
+  return cv::Point(tx, ty);
 }
 
 }  // namespace
@@ -81,7 +83,9 @@ bool VisualizerRecorder::Initialize(const cv::Size &frame_size, std::string *err
 
 void VisualizerRecorder::Render(const cv::Mat &frame, const std::vector<Track> &tracks,
                                 const PrimaryTargetResult &primary,
-                                const IdentityManagerResult *identity_result) {
+                                const IdentityManagerResult *identity_result,
+                                const std::string &primary_decision_reason,
+                                const std::string &primary_reject_reason) {
   if (!config_.enable_visualization && !config_.enable_recording) {
     return;
   }
@@ -103,28 +107,14 @@ void VisualizerRecorder::Render(const cv::Mat &frame, const std::vector<Track> &
     cv::rectangle(canvas, track.bbox, color, 2);
     std::ostringstream label;
     label << "id=" << semantic_id << " " << IdentityStateToString(identity->state) << " raw=" << track.id;
-    if (!track.association.stage.empty()) {
-      label << " " << track.association.stage << " c=" << std::fixed << std::setprecision(2)
-            << track.association.fused_cost;
-    }
-    const int tx = std::max(0, static_cast<int>(track.bbox.x) + 4);
-    const int ty = std::min(canvas.rows - 2, std::max(14, static_cast<int>(track.bbox.y) + 16));
-    cv::putText(canvas, label.str(), cv::Point(tx, ty), cv::FONT_HERSHEY_SIMPLEX, 0.8, color, 2);
+    cv::putText(canvas, label.str(), CompactOverlayTrackLabelPoint(canvas, track.bbox),
+                cv::FONT_HERSHEY_SIMPLEX, 0.8, color, 2);
   }
 
-  if (primary_semantic_id > 0) {
-    std::ostringstream primary_label;
-    primary_label << "PRIMARY id=" << primary_semantic_id;
-    if (const auto *identity = FindIdentityBySemanticId(*identity_result, primary_semantic_id); identity != nullptr) {
-      primary_label << " identity=" << IdentityStateToString(identity->state)
-                    << " miss=" << identity->missing_frames;
-    }
-    cv::putText(canvas, primary_label.str(), cv::Point(20, 56),
-                cv::FONT_HERSHEY_SIMPLEX, 0.6, cv::Scalar(0, 0, 255), 2);
-  }
-
-  cv::putText(canvas, "identity_freeze=" + std::string(identity_result->feature_update_frozen ? "1" : "0"),
-              cv::Point(20, 28), cv::FONT_HERSHEY_SIMPLEX, 0.6, cv::Scalar(255, 255, 255), 2);
+  const std::string primary_line = BuildPrimaryOverlayLine(
+      primary, *identity_result, primary_decision_reason, primary_reject_reason);
+  cv::putText(canvas, primary_line, cv::Point(20, 28), cv::FONT_HERSHEY_SIMPLEX, 0.6,
+              cv::Scalar(255, 255, 255), 2);
 
   if (config_.enable_visualization) {
     cv::imshow("vision_demo_host", canvas);

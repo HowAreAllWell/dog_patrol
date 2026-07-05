@@ -5,6 +5,36 @@
 
 #include "vision_demo_host/tools/offline_eval_schema.hpp"
 
+TEST(OfflineEvalSchemaTest, PerFrameCsvHeaderAppendsPrimaryRecoveryDebugFields) {
+  const std::string expected =
+      "frame_idx,det_count,track_count,track_state,primary_semantic_id,primary_raw_track_id_debug,"
+      "bearing_base_rad,sid_mode,sid_freeze,visible_semantic_ids,primary_decision_reason,"
+      "primary_reject_reason,primary_recovery_reason,primary_supporting_raw_track_id_debug";
+
+  EXPECT_EQ(vision_demo_host::tools::PerFrameCsvHeader(), expected);
+}
+
+TEST(OfflineEvalSchemaTest, PerFrameCsvHelpDocumentsPendingRecoveryReasonTokens) {
+  const std::string help = vision_demo_host::tools::PerFrameCsvHelp();
+  const std::vector<std::string> required_terms{
+      "per_frame.csv",
+      "PENDING_RECOVERY",
+      "primary_recovery_reason",
+      "primary_supporting_raw_track_id_debug",
+      "center_jump",
+      "low_score",
+      "assoc_gate",
+      "merged",
+      "split_recovery",
+      "pending",
+      "appended",
+      "UDP",
+  };
+  for (const auto &term : required_terms) {
+    EXPECT_NE(help.find(term), std::string::npos) << term;
+  }
+}
+
 TEST(OfflineEvalSchemaTest, TrackletHypothesesCsvHeaderIsStable) {
   const std::string expected =
       "frame_idx,hypothesis_idx,status,raw_track_id,class_id,score,x,y,w,h,reason,related_raw_track_id,"

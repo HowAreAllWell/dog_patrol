@@ -48,7 +48,9 @@ class VisualizerRecorder {
   bool Initialize(const cv::Size &frame_size, std::string *error);
   void Render(const cv::Mat &frame, const std::vector<Track> &tracks,
               const PrimaryTargetResult &primary,
-              const IdentityManagerResult *identity_result);
+              const IdentityManagerResult *identity_result,
+              const std::string &primary_decision_reason = {},
+              const std::string &primary_reject_reason = {});
 
  private:
   Config config_;

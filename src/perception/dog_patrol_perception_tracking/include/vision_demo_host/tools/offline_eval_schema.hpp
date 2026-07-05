@@ -4,6 +4,24 @@
 
 namespace vision_demo_host::tools {
 
+inline std::string PerFrameCsvHeader() {
+  return "frame_idx,det_count,track_count,track_state,primary_semantic_id,primary_raw_track_id_debug,"
+         "bearing_base_rad,sid_mode,sid_freeze,visible_semantic_ids,primary_decision_reason,"
+         "primary_reject_reason,primary_recovery_reason,primary_supporting_raw_track_id_debug";
+}
+
+inline std::string PerFrameCsvHelp() {
+  return
+      "Per-frame CSV:\n"
+      "  per_frame.csv is written when --save-frame-csv=true.\n"
+      "  Schema: " +
+      PerFrameCsvHeader() + "\n"
+      "  Existing fields keep their order. Phase 7 appended primary_recovery_reason and\n"
+      "  primary_supporting_raw_track_id_debug so PENDING_RECOVERY frames can be reviewed without changing UDP.\n"
+      "  primary_recovery_reason is the compact token used by the video overlay. Tokens include center_jump,\n"
+      "  low_score, assoc_gate, merged, split_recovery, and fallback pending.\n";
+}
+
 inline std::string TrackletHypothesesCsvHeader() {
   return "frame_idx,hypothesis_idx,status,raw_track_id,class_id,score,x,y,w,h,reason,related_raw_track_id,"
          "assoc_stage,assoc_cost,assoc_iou,assoc_motion_dist,assoc_app_dist,assoc_appearance_used,"
