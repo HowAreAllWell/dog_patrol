@@ -223,7 +223,7 @@ void PrintUsage() {
       << "  --sid-enable-phase4-merged-side-recovery <true|false> (default: true; false rolls back to legacy)\n"
       << "  --sid-enable-phase4-merged-single-blob-handoff <true|false> (default: true; false rolls back to legacy)\n"
       << "  --sid-enable-phase4-pairwise-assignment <true|false> (default: true; false rolls back to legacy)\n"
-      << "  --sid-enable-phase5-birth-manager <true|false> (default: false; true migrates accepted birth allocation)\n"
+      << "  --sid-enable-phase5-birth-manager <true|false> (default: true; false rolls back to legacy-compatible birth allocation)\n"
       << "  --sid-reid-enable <true|false>         (compat-only; runtime forces true)\n"
       << "  --sid-reid-backend <light|osnet_onnx> (default: light)\n"
       << "  --sid-reid-model-path <path>           (default: \"\")\n"
