@@ -150,10 +150,12 @@ bool IsSplitCandidateHypothesis(const TrackletHypothesis &hypothesis) {
 
 class IdentityManager::Impl {
  public:
-  Impl() = default;
-  explicit Impl(Config config) : config(std::move(config)), legacy_identity_matcher(ToLegacyConfig(this->config)) {}
+  Impl() : legacy_identity_matcher(LegacyIdentityMatcher::Config{}, &identity_runtime_state) {}
+  explicit Impl(Config config)
+      : config(std::move(config)), legacy_identity_matcher(ToLegacyConfig(this->config), &identity_runtime_state) {}
 
   Config config;
+  LegacyIdentityMatcher::RuntimeState identity_runtime_state;
   LegacyIdentityMatcher legacy_identity_matcher;
   std::vector<ScoreDebugRow> last_score_debug_rows;
   std::vector<Phase3ShadowDebugRow> last_phase3_shadow_debug_rows;
@@ -169,7 +171,8 @@ IdentityManager::IdentityManager(Config config) : impl_(std::make_shared<Impl>(c
 bool IdentityManager::Initialize(std::string *error) { return impl_->legacy_identity_matcher.Initialize(error); }
 
 void IdentityManager::Reset() {
-  impl_->legacy_identity_matcher.Reset();
+  LegacyIdentityMatcher::ResetRuntimeState(&impl_->identity_runtime_state);
+  impl_->legacy_identity_matcher.ResetAdapter();
   impl_->last_score_debug_rows.clear();
   impl_->last_phase3_shadow_debug_rows.clear();
   OcclusionGroupShadowLifecycle::Reset(&impl_->occlusion_group_shadow_state);
