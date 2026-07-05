@@ -141,10 +141,12 @@ VisualizerRecorder::Render(frame, tracks, primary, identity_result)
   - just recovered；
   - 中心跳变过大；
   - 面积比例异常；
-- 被拒绝的可见主目标会转为 `OCCLUDED`，而不是立即锁定；
+- 被拒绝的可见主目标会转为 `PENDING_RECOVERY`，保留当前 `primary_target_id`，但不输出 `primary_track`；
+- 当前 primary identity 处于 `MERGED` 或 `SPLIT_RECOVERY` 时也会转为 `PENDING_RECOVERY`；
+- 普通缺失仍转为 `OCCLUDED`，而不是立即释放 primary；
 - identity 进入 lost / inactive 后会释放 primary。
 
-注意：当前 `pending_recovery_frames` 配置存在，但没有形成独立的对外 `PENDING_RECOVERY` 状态。
+注意：`PENDING_RECOVERY` 已是公开 `PrimaryState` / UDP `track_state` 值；当前只覆盖可见 primary sanity rejection 以及 identity `MERGED` / `SPLIT_RECOVERY` 的窄范围语义，不表示完整 pending recovery 状态机已经迁移完成。
 
 ### 2.5 输出与可视化
 
@@ -219,7 +221,7 @@ VisualizerRecorder::Render(frame, tracks, primary, identity_result)
 3. 合并、拆分、遮挡生命周期仍保留 legacy 对照口径，但 Phase 3/4 已有 shadow rows 和 default-on migrated handoff evidence。
 4. feature update policy 决策面、feature-bank read/cost helper、reliable-geometry read/cost helper、assignment cost composition helper、active assignment input/solving helper、inactive recovery input/selection helper、raw-continuity decision helper、birth / hidden candidate decision helper、birth candidate storage helper、birth facade helper、unresolved-track final resolution helper、semantic id allocation helper、assignment application planning helper、assignment apply executor helper、Phase 4 direct apply mutation helper、raw-to-semantic binding storage helper、feature bank / reliable geometry mutation helper、legacy identity record 类型边界和 record lifecycle mutation helper 已独立，legacy record 内也已有 feature bank / reliable geometry 子状态；但长期特征管理、feature bank ownership、reliable geometry ownership，以及 birth apply 后的 identity storage / primary / output ownership 仍主要在 legacy matcher 内完成。
 5. `IdentityAssignmentEvidence` 已输出，但 Primary 当前主要使用 track / association / bbox sanity 信息，并未完整消费 identity assignment confidence。
-6. `pending_recovery_frames` 当前不是完整 pending recovery 状态机。
+6. `PENDING_RECOVERY` 已作为 public primary / UDP 状态接入，但当前只覆盖 visible primary sanity rejection 和 identity `MERGED` / `SPLIT_RECOVERY`；`pending_recovery_frames` 仍不是完整 pending recovery 状态机。
 7. 配置中仍存在 legacy / diagnostics 对照配置，后续需要明确保留、归档或删除。
 8. 当前测试通过不等于算法效果达标；离线评估和视频复盘仍是必要输入。
 9. Phase 5 birth / hidden candidate 已有独立 `BirthManager` facade、`NewBirthCandidate` lifecycle evidence 和默认开启的 birth migration flag。当前默认路径由 `IdentityManager` Phase 5 helper 表达 hidden / pending / accepted decision surface；legacy gate 和 score rows 仍保留为显式 rollback / 对照。
