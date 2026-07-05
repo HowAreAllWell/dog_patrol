@@ -10,7 +10,7 @@
 
 #include "identity_observation_projection.hpp"
 #include "identity_runtime_mutation_applier.hpp"
-#include "legacy_identity_matcher.hpp"
+#include "identity_assignment_engine_adapter.hpp"
 #include "occlusion_group_shadow_lifecycle.hpp"
 #include "phase4_handoff_coordinator.hpp"
 #include "phase5_birth_coordinator.hpp"
@@ -18,8 +18,8 @@
 namespace vision_demo_host {
 namespace {
 
-LegacyIdentityMatcher::Config ToLegacyConfig(const IdentityManager::Config &config) {
-  LegacyIdentityMatcher::Config out;
+IdentityAssignmentEngineAdapter::Config ToAdapterConfig(const IdentityManager::Config &config) {
+  IdentityAssignmentEngineAdapter::Config out;
   out.max_missing_frames = config.max_missing_frames;
   out.feat_bank_size = config.feat_bank_size;
   out.recover_sim_thresh_strict = config.recover_sim_thresh_strict;
@@ -65,7 +65,7 @@ IdentityManager::Mode FromLegacyMode(const LegacyIdentityMode mode) {
   }
 }
 
-IdentityManager::ScoreDebugRow FromLegacyDebugRow(const LegacyIdentityMatcher::ScoreDebugRow &row) {
+IdentityManager::ScoreDebugRow FromAdapterDebugRow(const IdentityAssignmentEngineAdapter::ScoreDebugRow &row) {
   IdentityManager::ScoreDebugRow out;
   out.frame_idx = row.frame_idx;
   out.mode = FromLegacyMode(row.mode);
@@ -89,8 +89,8 @@ IdentityManager::ScoreDebugRow FromLegacyDebugRow(const LegacyIdentityMatcher::S
   return out;
 }
 
-IdentityManager::Phase3ShadowDebugRow FromLegacyPairwiseDebugRow(
-    const LegacyIdentityMatcher::PairwiseAssignmentDebugRow &row) {
+IdentityManager::Phase3ShadowDebugRow FromAdapterPairwiseDebugRow(
+    const IdentityAssignmentEngineAdapter::PairwiseAssignmentDebugRow &row) {
   IdentityManager::Phase3ShadowDebugRow out;
   out.frame_idx = row.frame_idx - 1;
   out.event_type = "pairwise_assignment_matrix";
@@ -152,21 +152,21 @@ bool IsSplitCandidateHypothesis(const TrackletHypothesis &hypothesis) {
 class IdentityManager::Impl {
  public:
   Impl()
-      : legacy_identity_config(ToLegacyConfig(config)),
-        legacy_identity_matcher(legacy_identity_config, &identity_runtime_state),
-        mutation_applier(legacy_identity_config, &identity_runtime_state,
+      : adapter_config(ToAdapterConfig(config)),
+        identity_assignment_engine_adapter(adapter_config, &identity_runtime_state),
+        mutation_applier(adapter_config, &identity_runtime_state,
                          &mutation_appearance_features) {}
   explicit Impl(Config config)
       : config(std::move(config)),
-        legacy_identity_config(ToLegacyConfig(this->config)),
-        legacy_identity_matcher(legacy_identity_config, &identity_runtime_state),
-        mutation_applier(legacy_identity_config, &identity_runtime_state,
+        adapter_config(ToAdapterConfig(this->config)),
+        identity_assignment_engine_adapter(adapter_config, &identity_runtime_state),
+        mutation_applier(adapter_config, &identity_runtime_state,
                          &mutation_appearance_features) {}
 
   Config config;
-  LegacyIdentityMatcher::Config legacy_identity_config;
-  LegacyIdentityMatcher::RuntimeState identity_runtime_state;
-  LegacyIdentityMatcher legacy_identity_matcher;
+  IdentityAssignmentEngineAdapter::Config adapter_config;
+  IdentityAssignmentEngineAdapter::RuntimeState identity_runtime_state;
+  IdentityAssignmentEngineAdapter identity_assignment_engine_adapter;
   AppearanceFeatureService mutation_appearance_features;
   IdentityRuntimeMutationApplier mutation_applier;
   std::vector<ScoreDebugRow> last_score_debug_rows;
@@ -181,14 +181,14 @@ IdentityManager::IdentityManager() : impl_(std::make_shared<Impl>()) {}
 IdentityManager::IdentityManager(Config config) : impl_(std::make_shared<Impl>(config)) {}
 
 bool IdentityManager::Initialize(std::string *error) {
-  if (!impl_->legacy_identity_matcher.Initialize(error)) {
+  if (!impl_->identity_assignment_engine_adapter.Initialize(error)) {
     return false;
   }
   impl_->mutation_appearance_features = AppearanceFeatureService(
-      AppearanceFeatureService::Config{impl_->legacy_identity_config.reid_backend,
-                                       impl_->legacy_identity_config.reid_model_path,
-                                       impl_->legacy_identity_config.reid_input_width,
-                                       impl_->legacy_identity_config.reid_input_height,
+      AppearanceFeatureService::Config{impl_->adapter_config.reid_backend,
+                                       impl_->adapter_config.reid_model_path,
+                                       impl_->adapter_config.reid_input_width,
+                                       impl_->adapter_config.reid_input_height,
                                        16,
                                        8},
       AppearanceFeatureService::Profile::kIdentity);
@@ -196,8 +196,8 @@ bool IdentityManager::Initialize(std::string *error) {
 }
 
 void IdentityManager::Reset() {
-  LegacyIdentityMatcher::ResetRuntimeState(&impl_->identity_runtime_state);
-  impl_->legacy_identity_matcher.ResetAdapter();
+  IdentityAssignmentEngineAdapter::ResetRuntimeState(&impl_->identity_runtime_state);
+  impl_->identity_assignment_engine_adapter.ResetAdapter();
   impl_->mutation_appearance_features = AppearanceFeatureService();
   impl_->last_score_debug_rows.clear();
   impl_->last_phase3_shadow_debug_rows.clear();
@@ -217,12 +217,12 @@ IdentityManagerResult IdentityManager::Update(const std::vector<TrackletObservat
                                               const PrimaryTargetResult &primary, const cv::Mat *frame) {
   const std::vector<Track> tracks = TracksFromObservations(observations);
   const auto prev_raw_to_semantic = raw_to_semantic_id_;
-  raw_to_semantic_id_ = impl_->legacy_identity_matcher.Update(tracks, primary, frame);
+  raw_to_semantic_id_ = impl_->identity_assignment_engine_adapter.Update(tracks, primary, frame);
   impl_->last_score_debug_rows.clear();
-  const auto &legacy_debug_rows = impl_->legacy_identity_matcher.LastScoreDebugRows();
-  impl_->last_score_debug_rows.reserve(legacy_debug_rows.size());
-  for (const auto &row : legacy_debug_rows) {
-    impl_->last_score_debug_rows.push_back(FromLegacyDebugRow(row));
+  const auto &adapter_debug_rows = impl_->identity_assignment_engine_adapter.LastScoreDebugRows();
+  impl_->last_score_debug_rows.reserve(adapter_debug_rows.size());
+  for (const auto &row : adapter_debug_rows) {
+    impl_->last_score_debug_rows.push_back(FromAdapterDebugRow(row));
   }
 
   impl_->last_phase3_shadow_debug_rows.clear();
@@ -242,8 +242,8 @@ IdentityManagerResult IdentityManager::Update(const std::vector<TrackletObservat
     row.hypothesis_status = TrackletHypothesisStatusToDebugString(hypothesis.status);
     impl_->last_phase3_shadow_debug_rows.push_back(std::move(row));
   }
-  for (const auto &legacy_pairwise_row : impl_->legacy_identity_matcher.LastPairwiseAssignmentDebugRows()) {
-    Phase3ShadowDebugRow row = FromLegacyPairwiseDebugRow(legacy_pairwise_row);
+  for (const auto &adapter_pairwise_row : impl_->identity_assignment_engine_adapter.LastPairwiseAssignmentDebugRows()) {
+    Phase3ShadowDebugRow row = FromAdapterPairwiseDebugRow(adapter_pairwise_row);
     row.frame_idx = current_frame_idx;
     row.event_idx = event_idx++;
     impl_->last_phase3_shadow_debug_rows.push_back(std::move(row));
@@ -255,12 +255,12 @@ IdentityManagerResult IdentityManager::Update(const std::vector<TrackletObservat
     observations_by_raw_track_id[obs.raw_track_id] = obs;
   }
 
-  const auto refresh_legacy_debug_rows = [&]() {
+  const auto refresh_adapter_debug_rows = [&]() {
     impl_->last_score_debug_rows.clear();
-    const auto &rows = impl_->legacy_identity_matcher.LastScoreDebugRows();
+    const auto &rows = impl_->identity_assignment_engine_adapter.LastScoreDebugRows();
     impl_->last_score_debug_rows.reserve(rows.size());
     for (const auto &row : rows) {
-      impl_->last_score_debug_rows.push_back(FromLegacyDebugRow(row));
+      impl_->last_score_debug_rows.push_back(FromAdapterDebugRow(row));
     }
   };
 
@@ -277,26 +277,26 @@ IdentityManagerResult IdentityManager::Update(const std::vector<TrackletObservat
         [&](const int raw_track_id) {
           impl_->mutation_applier.ApplyPhase5BirthAllocation(tracks, raw_track_id, frame);
         },
-        [&]() { refresh_legacy_debug_rows(); });
+        [&]() { refresh_adapter_debug_rows(); });
   };
 
-  const auto build_result_from_legacy = [&]() {
+  const auto build_result_from_adapter = [&]() {
     IdentityObservationProjection::Input input;
-    input.snapshots = impl_->legacy_identity_matcher.IdentitySnapshots();
+    input.snapshots = impl_->identity_assignment_engine_adapter.IdentitySnapshots();
     input.observations_by_raw_track_id = observations_by_raw_track_id;
     input.debug_rows = impl_->last_score_debug_rows;
     input.mode = CurrentMode();
-    input.primary_semantic_id = impl_->legacy_identity_matcher.CurrentPrimarySemanticId();
-    input.feature_update_frozen = impl_->legacy_identity_matcher.IsFeatureUpdateFrozen();
+    input.primary_semantic_id = impl_->identity_assignment_engine_adapter.CurrentPrimarySemanticId();
+    input.feature_update_frozen = impl_->identity_assignment_engine_adapter.IsFeatureUpdateFrozen();
     input.max_missing_frames = impl_->config.max_missing_frames;
     return IdentityObservationProjection::Build(input);
   };
 
   apply_phase5_birth_manager();
-  IdentityManagerResult result = build_result_from_legacy();
+  IdentityManagerResult result = build_result_from_adapter();
   const auto refresh_outputs = [&]() {
-    refresh_legacy_debug_rows();
-    result = build_result_from_legacy();
+    refresh_adapter_debug_rows();
+    result = build_result_from_adapter();
   };
 
   Phase4HandoffCoordinator::PairwiseInput pairwise_input;
@@ -360,7 +360,7 @@ IdentityManagerResult IdentityManager::Update(const std::vector<TrackletObservat
     }
 
     std::unordered_map<int, int> missing_frames_by_semantic_id;
-    for (const auto &snapshot : impl_->legacy_identity_matcher.IdentitySnapshots()) {
+    for (const auto &snapshot : impl_->identity_assignment_engine_adapter.IdentitySnapshots()) {
       missing_frames_by_semantic_id[snapshot.semantic_id] = snapshot.missing_frames;
     }
 
@@ -598,10 +598,10 @@ IdentityManagerResult IdentityManager::Update(const std::vector<TrackletObservat
 }
 
 IdentityManager::Mode IdentityManager::CurrentMode() const {
-  return FromLegacyMode(impl_->legacy_identity_matcher.CurrentMode());
+  return FromLegacyMode(impl_->identity_assignment_engine_adapter.CurrentMode());
 }
 
-bool IdentityManager::IsFeatureUpdateFrozen() const { return impl_->legacy_identity_matcher.IsFeatureUpdateFrozen(); }
+bool IdentityManager::IsFeatureUpdateFrozen() const { return impl_->identity_assignment_engine_adapter.IsFeatureUpdateFrozen(); }
 
 const std::vector<IdentityManager::ScoreDebugRow> &IdentityManager::LastScoreDebugRows() const {
   return impl_->last_score_debug_rows;

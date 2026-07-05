@@ -67,7 +67,7 @@ set(MODULE_SOURCES
   src/modules/raw_semantic_binding_store.cpp
   src/modules/legacy_identity_store.cpp
   src/modules/identity_runtime_mutation_applier.cpp
-  src/modules/legacy_identity_matcher.cpp
+  src/modules/identity_assignment_engine_adapter.cpp
   src/modules/identity_observation_projection.cpp
   src/modules/identity_manager.cpp
   src/modules/visualizer_recorder.cpp
@@ -138,12 +138,12 @@ if(BUILD_TESTING)
     ament_target_dependencies(test_primary_recovery_debug rclcpp)
   endif()
 
-  ament_add_gtest(test_legacy_identity_matcher test/test_legacy_identity_matcher.cpp)
-  if(TARGET test_legacy_identity_matcher)
-    target_compile_features(test_legacy_identity_matcher PUBLIC cxx_std_17)
-    target_include_directories(test_legacy_identity_matcher PRIVATE include src/modules)
-    target_link_libraries(test_legacy_identity_matcher ${PROJECT_NAME}_modules)
-    ament_target_dependencies(test_legacy_identity_matcher rclcpp)
+  ament_add_gtest(test_identity_assignment_engine_adapter test/test_identity_assignment_engine_adapter.cpp)
+  if(TARGET test_identity_assignment_engine_adapter)
+    target_compile_features(test_identity_assignment_engine_adapter PUBLIC cxx_std_17)
+    target_include_directories(test_identity_assignment_engine_adapter PRIVATE include src/modules)
+    target_link_libraries(test_identity_assignment_engine_adapter ${PROJECT_NAME}_modules)
+    ament_target_dependencies(test_identity_assignment_engine_adapter rclcpp)
   endif()
 
   ament_add_gtest(test_identity_manager test/test_identity_manager.cpp)

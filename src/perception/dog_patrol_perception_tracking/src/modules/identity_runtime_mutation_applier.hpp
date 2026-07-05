@@ -4,15 +4,15 @@
 
 #include <opencv2/core/mat.hpp>
 
-#include "legacy_identity_matcher.hpp"
+#include "identity_assignment_engine_adapter.hpp"
 #include "phase4_direct_apply_helper.hpp"
 
 namespace vision_demo_host {
 
 class IdentityRuntimeMutationApplier {
  public:
-  IdentityRuntimeMutationApplier(LegacyIdentityMatcher::Config config,
-                                 LegacyIdentityMatcher::RuntimeState *runtime_state,
+  IdentityRuntimeMutationApplier(IdentityAssignmentEngineAdapter::Config config,
+                                 IdentityAssignmentEngineAdapter::RuntimeState *runtime_state,
                                  AppearanceFeatureService *appearance_features);
 
   bool ApplyPhase4MergedSplitHandoff(const std::vector<Track> &tracks,
@@ -43,8 +43,8 @@ class IdentityRuntimeMutationApplier {
                                   const cv::Mat *frame = nullptr);
 
  private:
-  using RuntimeState = LegacyIdentityMatcher::RuntimeState;
-  using ScoreDebugRow = LegacyIdentityMatcher::ScoreDebugRow;
+  using RuntimeState = IdentityAssignmentEngineAdapter::RuntimeState;
+  using ScoreDebugRow = IdentityAssignmentEngineAdapter::ScoreDebugRow;
 
   std::vector<float> ExtractFeature(const cv::Mat &frame, const Track &track) const;
   ReliableGeometryCost::State ReliableGeometryState(const LegacyIdentityRecord &identity) const;
@@ -72,7 +72,7 @@ class IdentityRuntimeMutationApplier {
                                 const std::vector<Phase4DirectApplyHelper::Action> &actions,
                                 const cv::Mat *frame);
 
-  LegacyIdentityMatcher::Config config_;
+  IdentityAssignmentEngineAdapter::Config config_;
   RuntimeState *runtime_state_{nullptr};
   AppearanceFeatureService *appearance_features_{nullptr};
 };

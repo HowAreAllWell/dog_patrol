@@ -22,7 +22,7 @@ bool AssociationEvidenceWeakForIdentity(const AssociationEvidence &association) 
 }  // namespace
 
 IdentityRuntimeMutationApplier::IdentityRuntimeMutationApplier(
-    LegacyIdentityMatcher::Config config,
+    IdentityAssignmentEngineAdapter::Config config,
     RuntimeState *runtime_state,
     AppearanceFeatureService *appearance_features)
     : config_(std::move(config)),

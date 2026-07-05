@@ -6,7 +6,6 @@
 
 #include <opencv2/core/mat.hpp>
 
-#include "legacy_identity_matcher.hpp"
 #include "occlusion_group_shadow_lifecycle.hpp"
 #include "vision_demo_host/modules/identity_manager.hpp"
 
