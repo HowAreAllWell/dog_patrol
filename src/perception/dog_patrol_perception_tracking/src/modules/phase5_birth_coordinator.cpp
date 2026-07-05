@@ -177,11 +177,7 @@ void Phase5BirthCoordinator::AppendShadowLifecycleRows(const ShadowRowsInput &in
           pending_it != input.shadow_by_raw_track_id->end() &&
           pending_it->second.requires_stability;
       AppendRow(score, observation, "new_birth_candidate_allocated",
-                promoted_after_stability
-                    ? "small_stable_new_person_promoted"
-                    : (score.stage == "phase5_new_semantic"
-                           ? "phase5_birth_manager_allocated"
-                           : "new_semantic_allocated"),
+                promoted_after_stability ? "small_stable_new_person_promoted" : "phase5_birth_manager_allocated",
                 "allocated", stable_frames, input.current_frame_idx,
                 input.next_event_idx, input.phase3_rows);
       input.shadow_by_raw_track_id->erase(score.raw_track_id);

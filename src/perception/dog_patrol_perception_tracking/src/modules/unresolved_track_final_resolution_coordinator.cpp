@@ -159,7 +159,6 @@ UnresolvedTrackFinalResolutionCoordinator::Resolve(const Input &input) {
         LooksLikeDuplicateSplitOfAssignedIdentity(track, *input.tracks, result.assigned_track_to_sid,
                                                   *input.prev_raw_to_semantic);
     birth_input.hide_reason = birth_input.duplicate_split ? "" : NewSemanticBirthHideReason(track);
-    birth_input.phase5_birth_manager_enabled = input.config.disable_legacy_birth_allocation;
     birth_input.small_person_requires_stability = ShouldQuickConfirmSmallNewPerson(track);
     const auto birth_result = input.evaluate_birth ? input.evaluate_birth(birth_input) : BirthManager::Result{};
 
@@ -177,6 +176,14 @@ UnresolvedTrackFinalResolutionCoordinator::Resolve(const Input &input) {
       row.margin = birth_result.debug_row.margin;
       row.accepted = birth_result.debug_row.accepted;
       row.reject_reason = birth_result.debug_row.reject_reason;
+      if (input.config.defer_small_phase5_birth_allocation &&
+          birth_input.small_person_requires_stability &&
+          birth_result.stable_observation_count > 0 &&
+          birth_result.stable_observation_count < 2 &&
+          row.stage == "phase5_birth_candidate" &&
+          row.reject_reason == "phase5_birth_manager_pending") {
+        row.reject_reason = "small_new_person_pending";
+      }
       result.debug_rows.push_back(std::move(row));
     }
   }

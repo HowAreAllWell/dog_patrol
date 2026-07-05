@@ -9,8 +9,6 @@ class BirthCandidateDecision {
   enum class Action {
     kHideWithDebugRow,
     kPhase5Pending,
-    kLegacyPendingWithoutDebugRow,
-    kAllocateNewSemantic,
   };
 
   struct Config {
@@ -23,13 +21,12 @@ class BirthCandidateDecision {
     bool hold_for_ambiguous_recovery{false};
     bool duplicate_split{false};
     std::string hide_reason;
-    bool phase5_birth_manager_enabled{false};
     bool small_person_requires_stability{false};
     int stable_observation_count{0};
   };
 
   struct Decision {
-    Action action{Action::kAllocateNewSemantic};
+    Action action{Action::kPhase5Pending};
     int track_idx{-1};
     int raw_track_id{-1};
     int semantic_id{-1};

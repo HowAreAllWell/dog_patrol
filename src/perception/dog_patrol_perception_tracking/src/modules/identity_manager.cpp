@@ -41,7 +41,7 @@ LegacyIdentityMatcher::Config ToLegacyConfig(const IdentityManager::Config &conf
   out.min_assignment_margin = config.min_assignment_margin;
   out.stable_frames_before_feature_update = config.stable_frames_before_feature_update;
   out.merged_requires_overlap = config.merged_requires_overlap;
-  out.disable_legacy_birth_allocation = config.enable_phase5_birth_manager;
+  out.auto_apply_phase5_birth_allocations = false;
   out.reid_enable = config.reid_enable;
   out.reid_backend = config.reid_backend;
   out.reid_model_path = config.reid_model_path;
@@ -237,7 +237,7 @@ IdentityManagerResult IdentityManager::Update(const std::vector<TrackletObservat
 
   const auto apply_phase5_birth_manager = [&]() {
     Phase5BirthCoordinator::ApplyInput input;
-    input.enabled = impl_->config.enable_phase5_birth_manager;
+    input.enabled = true;
     input.current_frame_idx = current_frame_idx;
     input.observations_by_raw_track_id = &observations_by_raw_track_id;
     input.score_rows = &impl_->last_score_debug_rows;

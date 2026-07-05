@@ -31,7 +31,7 @@ TEST(BirthManagerTest, AmbiguousRecoveryPendingCreatesHiddenDebugRowWithoutAlloc
 
   EXPECT_EQ(result.decision.action, vision_demo_host::BirthCandidateDecision::Action::kHideWithDebugRow);
   EXPECT_TRUE(result.has_debug_row);
-  EXPECT_EQ(result.debug_row.stage, "birth_candidate");
+  EXPECT_EQ(result.debug_row.stage, "phase5_birth_candidate");
   EXPECT_EQ(result.debug_row.reject_reason, "ambiguous_recovery_pending");
   EXPECT_EQ(result.debug_row.semantic_id, -1);
   EXPECT_FALSE(result.allocated_semantic_id);
@@ -66,7 +66,7 @@ TEST(BirthManagerTest, DuplicateSplitAndMorphologyHiddenRowsDoNotAllocateSemanti
   EXPECT_EQ(allocation_calls, 0);
 }
 
-TEST(BirthManagerTest, LegacySmallPersonWaitsWithoutDebugRowThenPromotesAfterStableFrames) {
+TEST(BirthManagerTest, SmallPersonKeepsPhase5PendingRowForCoordinator) {
   BirthManager manager;
 
   auto input = BaseInput();
@@ -77,10 +77,11 @@ TEST(BirthManagerTest, LegacySmallPersonWaitsWithoutDebugRowThenPromotesAfterSta
     ++allocation_calls;
     return 41;
   });
-  EXPECT_EQ(first.decision.action,
-            vision_demo_host::BirthCandidateDecision::Action::kLegacyPendingWithoutDebugRow);
+  EXPECT_EQ(first.decision.action, vision_demo_host::BirthCandidateDecision::Action::kPhase5Pending);
   EXPECT_EQ(first.stable_observation_count, 1);
-  EXPECT_FALSE(first.has_debug_row);
+  EXPECT_TRUE(first.has_debug_row);
+  EXPECT_EQ(first.debug_row.stage, "phase5_birth_candidate");
+  EXPECT_EQ(first.debug_row.reject_reason, "phase5_birth_manager_pending");
   EXPECT_FALSE(first.allocated_semantic_id);
 
   input.frame_index += 1;
@@ -88,21 +89,19 @@ TEST(BirthManagerTest, LegacySmallPersonWaitsWithoutDebugRowThenPromotesAfterSta
     ++allocation_calls;
     return 42;
   });
-  EXPECT_EQ(second.decision.action,
-            vision_demo_host::BirthCandidateDecision::Action::kAllocateNewSemantic);
+  EXPECT_EQ(second.decision.action, vision_demo_host::BirthCandidateDecision::Action::kPhase5Pending);
   EXPECT_EQ(second.stable_observation_count, 2);
   EXPECT_TRUE(second.has_debug_row);
-  EXPECT_TRUE(second.allocated_semantic_id);
-  EXPECT_EQ(second.semantic_id, 42);
-  EXPECT_EQ(second.debug_row.stage, "new_semantic");
-  EXPECT_TRUE(second.debug_row.accepted);
-  EXPECT_EQ(allocation_calls, 1);
+  EXPECT_FALSE(second.allocated_semantic_id);
+  EXPECT_EQ(second.debug_row.stage, "phase5_birth_candidate");
+  EXPECT_EQ(second.debug_row.reject_reason, "phase5_birth_manager_pending");
+  EXPECT_FALSE(second.debug_row.accepted);
+  EXPECT_EQ(allocation_calls, 0);
 }
 
 TEST(BirthManagerTest, Phase5PendingCreatesDebugRowWithoutAllocating) {
   BirthManager manager;
   auto input = BaseInput();
-  input.phase5_birth_manager_enabled = true;
 
   int allocation_calls = 0;
   const auto result = manager.Evaluate(input, [&]() {
@@ -173,7 +172,6 @@ TEST(BirthManagerTest, HiddenAndPendingPathsNeverConsumeSemanticIds) {
 
   auto pending = BaseInput();
   pending.raw_track_id = 9;
-  pending.phase5_birth_manager_enabled = true;
   manager.Evaluate(pending, [&]() {
     ++allocation_calls;
     return 72;

@@ -30,7 +30,6 @@ class BirthManager {
     bool hold_for_ambiguous_recovery{false};
     bool duplicate_split{false};
     std::string hide_reason;
-    bool phase5_birth_manager_enabled{false};
     bool small_person_requires_stability{false};
   };
 

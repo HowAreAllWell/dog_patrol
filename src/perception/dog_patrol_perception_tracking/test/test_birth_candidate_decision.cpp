@@ -20,7 +20,6 @@ TEST(BirthCandidateDecisionTest, HoldsAmbiguousRecoveryBeforeOtherBirthRules) {
   input.hold_for_ambiguous_recovery = true;
   input.duplicate_split = true;
   input.hide_reason = "skinny_partial_hidden";
-  input.phase5_birth_manager_enabled = true;
 
   const auto decision = BirthCandidateDecision::Evaluate(input, BirthCandidateDecision::Config{});
 
@@ -43,7 +42,7 @@ TEST(BirthCandidateDecisionTest, HidesDuplicateSplitBeforeShapeFragments) {
   const auto decision = BirthCandidateDecision::Evaluate(input, BirthCandidateDecision::Config{});
 
   EXPECT_EQ(decision.action, BirthCandidateDecision::Action::kHideWithDebugRow);
-  EXPECT_EQ(decision.stage, "birth_candidate");
+  EXPECT_EQ(decision.stage, "phase5_birth_candidate");
   EXPECT_EQ(decision.reject_reason, "duplicate_split_hidden");
   EXPECT_FALSE(decision.selected);
   EXPECT_FALSE(decision.accepted);
@@ -55,13 +54,12 @@ TEST(BirthCandidateDecisionTest, HidesSkinnyAndWideFragmentsWithoutSelecting) {
   skinny.hide_reason = "skinny_partial_hidden";
   const auto skinny_decision = BirthCandidateDecision::Evaluate(skinny, BirthCandidateDecision::Config{});
   EXPECT_EQ(skinny_decision.action, BirthCandidateDecision::Action::kHideWithDebugRow);
-  EXPECT_EQ(skinny_decision.stage, "birth_candidate");
+  EXPECT_EQ(skinny_decision.stage, "phase5_birth_candidate");
   EXPECT_EQ(skinny_decision.reject_reason, "skinny_partial_hidden");
   EXPECT_FALSE(skinny_decision.selected);
   EXPECT_FALSE(skinny_decision.accepted);
 
   auto wide = BaseInput();
-  wide.phase5_birth_manager_enabled = true;
   wide.hide_reason = "wide_fragment_hidden";
   const auto wide_decision = BirthCandidateDecision::Evaluate(wide, BirthCandidateDecision::Config{});
   EXPECT_EQ(wide_decision.action, BirthCandidateDecision::Action::kHideWithDebugRow);
@@ -71,9 +69,8 @@ TEST(BirthCandidateDecisionTest, HidesSkinnyAndWideFragmentsWithoutSelecting) {
   EXPECT_FALSE(wide_decision.accepted);
 }
 
-TEST(BirthCandidateDecisionTest, Phase5ManagerLeavesAllocationPendingForManagerPath) {
+TEST(BirthCandidateDecisionTest, LeavesAllocationPendingForManagerPath) {
   auto input = BaseInput();
-  input.phase5_birth_manager_enabled = true;
   input.small_person_requires_stability = true;
   input.stable_observation_count = 2;
 
@@ -89,39 +86,40 @@ TEST(BirthCandidateDecisionTest, Phase5ManagerLeavesAllocationPendingForManagerP
   EXPECT_FALSE(decision.clear_pending_candidate);
 }
 
-TEST(BirthCandidateDecisionTest, LegacySmallPersonWaitsUntilStableBeforeAllocation) {
+TEST(BirthCandidateDecisionTest, SmallPersonLeavesStabilityDecisionToPhase5Coordinator) {
   auto input = BaseInput();
   input.small_person_requires_stability = true;
   input.stable_observation_count = 1;
 
   const auto pending = BirthCandidateDecision::Evaluate(input, BirthCandidateDecision::Config{});
 
-  EXPECT_EQ(pending.action, BirthCandidateDecision::Action::kLegacyPendingWithoutDebugRow);
-  EXPECT_EQ(pending.stage, "");
-  EXPECT_EQ(pending.reject_reason, "small_new_person_pending");
-  EXPECT_FALSE(pending.selected);
+  EXPECT_EQ(pending.action, BirthCandidateDecision::Action::kPhase5Pending);
+  EXPECT_EQ(pending.stage, "phase5_birth_candidate");
+  EXPECT_EQ(pending.reject_reason, "phase5_birth_manager_pending");
+  EXPECT_TRUE(pending.selected);
   EXPECT_FALSE(pending.accepted);
   EXPECT_FALSE(pending.clear_pending_candidate);
 
   input.stable_observation_count = 2;
   const auto promoted = BirthCandidateDecision::Evaluate(input, BirthCandidateDecision::Config{});
 
-  EXPECT_EQ(promoted.action, BirthCandidateDecision::Action::kAllocateNewSemantic);
-  EXPECT_EQ(promoted.stage, "new_semantic");
+  EXPECT_EQ(promoted.action, BirthCandidateDecision::Action::kPhase5Pending);
+  EXPECT_EQ(promoted.stage, "phase5_birth_candidate");
+  EXPECT_EQ(promoted.reject_reason, "phase5_birth_manager_pending");
   EXPECT_TRUE(promoted.selected);
-  EXPECT_TRUE(promoted.accepted);
+  EXPECT_FALSE(promoted.accepted);
   EXPECT_FLOAT_EQ(promoted.final_score, 0.0F);
   EXPECT_FLOAT_EQ(promoted.margin, 1.0F);
-  EXPECT_TRUE(promoted.clear_pending_candidate);
+  EXPECT_FALSE(promoted.clear_pending_candidate);
 }
 
-TEST(BirthCandidateDecisionTest, AllowsFullNewSemanticAllocationWhenNoBirthGateRejects) {
+TEST(BirthCandidateDecisionTest, KeepsFullNewSemanticAllocationPendingForBirthManager) {
   const auto decision = BirthCandidateDecision::Evaluate(BaseInput(), BirthCandidateDecision::Config{});
 
-  EXPECT_EQ(decision.action, BirthCandidateDecision::Action::kAllocateNewSemantic);
-  EXPECT_EQ(decision.stage, "new_semantic");
-  EXPECT_EQ(decision.reject_reason, "");
+  EXPECT_EQ(decision.action, BirthCandidateDecision::Action::kPhase5Pending);
+  EXPECT_EQ(decision.stage, "phase5_birth_candidate");
+  EXPECT_EQ(decision.reject_reason, "phase5_birth_manager_pending");
   EXPECT_TRUE(decision.selected);
-  EXPECT_TRUE(decision.accepted);
+  EXPECT_FALSE(decision.accepted);
   EXPECT_FALSE(decision.clear_pending_candidate);
 }

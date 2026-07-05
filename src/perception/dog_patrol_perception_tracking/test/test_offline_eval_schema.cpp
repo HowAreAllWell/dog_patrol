@@ -155,7 +155,6 @@ TEST(OfflineEvalSchemaTest, Phase3ShadowStateHelpDocumentsShadowOnlyContract) {
       "new_birth_candidate_allocated",
       "small_new_person_pending",
       "small_stable_new_person_promoted",
-      "new_semantic_allocated",
       "phase5_new_semantic",
       "phase5_birth_manager_allocated",
       "ambiguous_recovery_pending",
@@ -189,10 +188,6 @@ TEST(OfflineEvalSchemaTest, Phase3ShadowStateHelpDocumentsShadowOnlyContract) {
       "phase4_merged_single_blob_handoff",
       "merged_single_blob_handoff",
       "phase4_pairwise_assignment",
-      "--sid-enable-phase5-birth-manager",
-      "--sid-enable-phase5-birth-manager=false",
-      "rolls back to legacy-compatible birth allocation",
-      "LegacyIdentityMatcher birth_candidate/new_semantic",
       "tracklet_hypotheses.csv",
       "0-based",
       "Join candidate rows",
@@ -206,7 +201,6 @@ TEST(OfflineEvalSchemaTest, Phase3ShadowStateHelpDocumentsShadowOnlyContract) {
       "primary",
       "overlay",
       "UDP",
-      "LegacyIdentityMatcher",
   };
 
   const std::string help = vision_demo_host::tools::Phase3ShadowStateCsvHelp();

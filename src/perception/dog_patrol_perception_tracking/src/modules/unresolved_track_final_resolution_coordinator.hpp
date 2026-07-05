@@ -37,7 +37,7 @@ class UnresolvedTrackFinalResolutionCoordinator {
 
   struct Config {
     int max_missing_frames{180};
-    bool disable_legacy_birth_allocation{false};
+    bool defer_small_phase5_birth_allocation{false};
   };
 
   struct Input {

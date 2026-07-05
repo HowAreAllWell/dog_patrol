@@ -41,7 +41,7 @@ BirthManager::Result HiddenBirthResult(const BirthManager::Input &input, const s
   result.debug_row.track_idx = input.track_idx;
   result.debug_row.raw_track_id = input.raw_track_id;
   result.debug_row.semantic_id = -1;
-  result.debug_row.stage = input.phase5_birth_manager_enabled ? "phase5_birth_candidate" : "birth_candidate";
+  result.debug_row.stage = "phase5_birth_candidate";
   result.debug_row.reject_reason = reason;
   return result;
 }
@@ -63,7 +63,7 @@ BirthManager::Result Phase5PendingBirthResult(const BirthManager::Input &input) 
 
 BirthManager::Result AcceptedBirthResult(const BirthManager::Input &input, const int semantic_id) {
   BirthManager::Result result;
-  result.decision.action = BirthCandidateDecision::Action::kAllocateNewSemantic;
+  result.decision.action = BirthCandidateDecision::Action::kPhase5Pending;
   result.has_debug_row = true;
   result.allocated_semantic_id = true;
   result.semantic_id = semantic_id;
@@ -131,15 +131,7 @@ UnresolvedTrackFinalResolutionCoordinator::Input BaseInput(
     if (!birth_input.hide_reason.empty()) {
       return HiddenBirthResult(birth_input, birth_input.hide_reason);
     }
-    if (birth_input.phase5_birth_manager_enabled) {
-      return Phase5PendingBirthResult(birth_input);
-    }
-    if (birth_input.small_person_requires_stability) {
-      BirthManager::Result result;
-      result.decision.action = BirthCandidateDecision::Action::kLegacyPendingWithoutDebugRow;
-      return result;
-    }
-    return AcceptedBirthResult(birth_input, 90);
+    return Phase5PendingBirthResult(birth_input);
   };
   return input;
 }
@@ -205,7 +197,7 @@ TEST(UnresolvedTrackFinalResolutionCoordinatorTest, AmbiguousRecoverySelectedMar
       prev_raw_to_semantic, score_debug_rows, identities));
 
   EXPECT_TRUE(result.assigned_track_to_sid.empty());
-  const auto *row = FindRow(result.debug_rows, "birth_candidate", "ambiguous_recovery_pending");
+  const auto *row = FindRow(result.debug_rows, "phase5_birth_candidate", "ambiguous_recovery_pending");
   ASSERT_NE(row, nullptr);
   EXPECT_EQ(row->semantic_id, -1);
   EXPECT_FALSE(row->accepted);
@@ -250,7 +242,7 @@ TEST(UnresolvedTrackFinalResolutionCoordinatorTest, DuplicateSplitIsHiddenBefore
       tracks, person_track_indices, person_features, assigned_track_to_sid, sid_used, active_semantic_ids,
       prev_raw_to_semantic, score_debug_rows, identities));
 
-  const auto *row = FindRow(result.debug_rows, "birth_candidate", "duplicate_split_hidden");
+  const auto *row = FindRow(result.debug_rows, "phase5_birth_candidate", "duplicate_split_hidden");
   ASSERT_NE(row, nullptr);
   EXPECT_EQ(row->raw_track_id, 11);
   EXPECT_FALSE(row->accepted);
@@ -275,12 +267,12 @@ TEST(UnresolvedTrackFinalResolutionCoordinatorTest, SkinnyAndWideMorphologyAreHi
       tracks, person_track_indices, person_features, assigned_track_to_sid, sid_used, active_semantic_ids,
       prev_raw_to_semantic, score_debug_rows, identities));
 
-  EXPECT_NE(FindRow(result.debug_rows, "birth_candidate", "skinny_partial_hidden"), nullptr);
-  EXPECT_NE(FindRow(result.debug_rows, "birth_candidate", "wide_fragment_hidden"), nullptr);
+  EXPECT_NE(FindRow(result.debug_rows, "phase5_birth_candidate", "skinny_partial_hidden"), nullptr);
+  EXPECT_NE(FindRow(result.debug_rows, "phase5_birth_candidate", "wide_fragment_hidden"), nullptr);
   EXPECT_TRUE(result.assigned_track_to_sid.empty());
 }
 
-TEST(UnresolvedTrackFinalResolutionCoordinatorTest, SmallNewPersonRemainsPendingWithoutDebugRow) {
+TEST(UnresolvedTrackFinalResolutionCoordinatorTest, SmallNewPersonRemainsPendingWithPhase5DebugRow) {
   const std::vector<Track> tracks{PersonTrack(31, cv::Rect2f(0, 0, 40, 160))};
   const std::vector<int> person_track_indices{0};
   const std::vector<std::vector<float>> person_features{{0.90F}};
@@ -295,16 +287,17 @@ TEST(UnresolvedTrackFinalResolutionCoordinatorTest, SmallNewPersonRemainsPending
                          active_semantic_ids, prev_raw_to_semantic, score_debug_rows, identities);
   input.evaluate_birth = [&](const BirthManager::Input &birth_input) {
     captured_birth_input = birth_input;
-    BirthManager::Result result;
-    result.decision.action = BirthCandidateDecision::Action::kLegacyPendingWithoutDebugRow;
-    return result;
+    return Phase5PendingBirthResult(birth_input);
   };
 
   const auto result = UnresolvedTrackFinalResolutionCoordinator::Resolve(input);
 
   EXPECT_TRUE(captured_birth_input.small_person_requires_stability);
   EXPECT_TRUE(result.assigned_track_to_sid.empty());
-  EXPECT_TRUE(result.debug_rows.empty());
+  const auto *row = FindRow(result.debug_rows, "phase5_birth_candidate", "phase5_birth_manager_pending");
+  ASSERT_NE(row, nullptr);
+  EXPECT_TRUE(row->selected);
+  EXPECT_FALSE(row->accepted);
 }
 
 TEST(UnresolvedTrackFinalResolutionCoordinatorTest, Phase5PendingUsesPhase5BirthCandidateRowWithoutAssignment) {
@@ -319,8 +312,6 @@ TEST(UnresolvedTrackFinalResolutionCoordinatorTest, Phase5PendingUsesPhase5Birth
   const std::unordered_map<int, LegacyIdentityRecord> identities;
   auto input = BaseInput(tracks, person_track_indices, person_features, assigned_track_to_sid, sid_used,
                          active_semantic_ids, prev_raw_to_semantic, score_debug_rows, identities);
-  input.config.disable_legacy_birth_allocation = true;
-
   const auto result = UnresolvedTrackFinalResolutionCoordinator::Resolve(input);
 
   EXPECT_TRUE(result.assigned_track_to_sid.empty());
@@ -343,13 +334,15 @@ TEST(UnresolvedTrackFinalResolutionCoordinatorTest, AcceptedBirthAssignmentOutpu
   auto input = BaseInput(tracks, person_track_indices, person_features, assigned_track_to_sid, sid_used,
                          active_semantic_ids, prev_raw_to_semantic, score_debug_rows, identities);
   input.evaluate_birth = [](const BirthManager::Input &birth_input) {
-    return AcceptedBirthResult(birth_input, 123);
+    BirthManager::Result result = AcceptedBirthResult(birth_input, 123);
+    result.debug_row.stage = "phase5_new_semantic";
+    return result;
   };
 
   const auto result = UnresolvedTrackFinalResolutionCoordinator::Resolve(input);
 
   ASSERT_EQ(result.assigned_track_to_sid.at(0), 123);
-  const auto *row = FindRow(result.debug_rows, "new_semantic");
+  const auto *row = FindRow(result.debug_rows, "phase5_new_semantic");
   ASSERT_NE(row, nullptr);
   EXPECT_EQ(row->semantic_id, 123);
   EXPECT_TRUE(row->selected);

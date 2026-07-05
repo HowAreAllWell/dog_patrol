@@ -72,7 +72,6 @@ struct Options {
   float sid_min_assignment_margin{0.08F};
   int sid_stable_frames_before_feature_update{3};
   bool sid_merged_requires_overlap{true};
-  bool sid_enable_phase5_birth_manager{true};
   bool sid_reid_enable{true};  // compatibility input, runtime forces true.
   std::string sid_reid_backend{"light"};
   std::string sid_reid_model_path{};
@@ -215,7 +214,6 @@ void PrintUsage() {
       << "  --sid-min-assignment-margin <f>        (default: 0.08)\n"
       << "  --sid-stable-frames-before-feature-update <n> (default: 3)\n"
       << "  --sid-merged-requires-overlap <true|false> (default: true)\n"
-      << "  --sid-enable-phase5-birth-manager <true|false> (default: true; false rolls back to legacy-compatible birth allocation)\n"
       << "  --sid-reid-enable <true|false>         (compat-only; runtime forces true)\n"
       << "  --sid-reid-backend <light|osnet_onnx> (default: light)\n"
       << "  --sid-reid-model-path <path>           (default: \"\")\n"
@@ -608,15 +606,6 @@ bool ParseArgs(int argc, char **argv, Options *opt, std::string *error) {
         return false;
       }
       opt->sid_merged_requires_overlap = v;
-    } else if (arg == "--sid-enable-phase5-birth-manager") {
-      bool v = false;
-      if (!ParseBool(need(arg), &v)) {
-        if (error != nullptr) {
-          *error = "Invalid value for --sid-enable-phase5-birth-manager";
-        }
-        return false;
-      }
-      opt->sid_enable_phase5_birth_manager = v;
     } else if (arg == "--sid-reid-enable") {
       bool v = true;
       if (!ParseBool(need(arg), &v)) {
@@ -876,7 +865,6 @@ DatasetMetrics EvaluateOne(const Options &opt, const std::filesystem::path &data
   sid_cfg.min_assignment_margin = std::max(0.0F, opt.sid_min_assignment_margin);
   sid_cfg.stable_frames_before_feature_update = std::max(1, opt.sid_stable_frames_before_feature_update);
   sid_cfg.merged_requires_overlap = opt.sid_merged_requires_overlap;
-  sid_cfg.enable_phase5_birth_manager = opt.sid_enable_phase5_birth_manager;
   if (!opt.sid_reid_enable) {
     std::cout << "[offline_eval] reid is mandatory; override --sid-reid-enable=false to true" << std::endl;
   }

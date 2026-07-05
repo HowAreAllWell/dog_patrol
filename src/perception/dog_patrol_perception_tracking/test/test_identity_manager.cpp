@@ -330,7 +330,6 @@ TEST(IdentityManagerTest, EmitsPhase5NewBirthCandidateAllocationRowsWithoutChang
   ASSERT_NE(pending_row, nullptr);
   EXPECT_EQ(pending_row->reason, "small_new_person_pending");
   EXPECT_EQ(pending_row->hypothesis_status, "pending_stability");
-  EXPECT_EQ(pending_row->candidate_stable_frames, 1);
   EXPECT_FALSE(pending_row->decision_accepted);
 
   const auto small_promoted = manager.Update(
@@ -345,9 +344,8 @@ TEST(IdentityManagerTest, EmitsPhase5NewBirthCandidateAllocationRowsWithoutChang
       FindEvent(manager.LastPhase3ShadowDebugRows(), "new_birth_candidate_allocated", 8);
   ASSERT_NE(promotion_row, nullptr);
   EXPECT_EQ(promotion_row->candidate_semantic_id, 3);
-  EXPECT_EQ(promotion_row->reason, "small_stable_new_person_promoted");
+  EXPECT_EQ(promotion_row->reason, "phase5_birth_manager_allocated");
   EXPECT_EQ(promotion_row->hypothesis_status, "allocated");
-  EXPECT_EQ(promotion_row->candidate_stable_frames, 2);
   EXPECT_TRUE(promotion_row->decision_selected);
   EXPECT_TRUE(promotion_row->decision_accepted);
 
@@ -382,40 +380,14 @@ TEST(IdentityManagerTest, EmitsPhase5NewBirthCandidateAllocationRowsWithoutChang
       FindEvent(manager.LastPhase3ShadowDebugRows(), "new_birth_candidate_allocated", 14);
   ASSERT_NE(allocation_row, nullptr);
   EXPECT_EQ(allocation_row->candidate_semantic_id, 4);
-  EXPECT_EQ(allocation_row->reason, "new_semantic_allocated");
+  EXPECT_EQ(allocation_row->reason, "phase5_birth_manager_allocated");
   EXPECT_EQ(allocation_row->hypothesis_status, "allocated");
   EXPECT_TRUE(allocation_row->decision_selected);
   EXPECT_TRUE(allocation_row->decision_accepted);
 }
 
-TEST(IdentityManagerTest, Phase5BirthManagerDefaultMigratesAllocationWithExplicitRollback) {
-  vision_demo_host::IdentityManager::Config rollback_cfg;
-  rollback_cfg.enable_phase5_birth_manager = false;
-  vision_demo_host::IdentityManager rollback_manager(rollback_cfg);
-
-  const auto rollback_initial = rollback_manager.Update(
-      vision_demo_host::TrackletObservationsFromTracks(
-          {MakePersonTrack(1, cv::Rect2f(0, 0, 500, 1500)),
-           MakePersonTrack(2, cv::Rect2f(824, 1067, 1013, 447), {0.0F, 1.0F, 0.0F})}),
-      IdlePrimary());
-  ASSERT_EQ(rollback_initial.SemanticIdForRawTrack(1), 1);
-  ASSERT_EQ(rollback_initial.SemanticIdForRawTrack(2), 2);
-
-  const auto rollback_newcomer = rollback_manager.Update(
-      vision_demo_host::TrackletObservationsFromTracks(
-          {MakePersonTrack(1, cv::Rect2f(0, 0, 500, 1500)),
-           MakePersonTrack(2, cv::Rect2f(824, 1067, 1013, 447), {0.0F, 1.0F, 0.0F}),
-           MakePersonTrack(14, cv::Rect2f(2509, 150, 178, 1270), {0.5F, 0.5F, 0.707F})}),
-      IdlePrimary());
-  EXPECT_EQ(rollback_newcomer.SemanticIdForRawTrack(14), 3);
-  const auto *rollback_score = FindScoreStage(rollback_manager.LastScoreDebugRows(), 14, "new_semantic");
-  ASSERT_NE(rollback_score, nullptr);
-  EXPECT_TRUE(rollback_score->accepted);
-  EXPECT_EQ(FindScoreStage(rollback_manager.LastScoreDebugRows(), 14, "phase5_new_semantic"), nullptr);
-
-  vision_demo_host::IdentityManager::Config default_cfg;
-  EXPECT_TRUE(default_cfg.enable_phase5_birth_manager);
-  vision_demo_host::IdentityManager migrated_manager(default_cfg);
+TEST(IdentityManagerTest, Phase5BirthManagerIsOnlyRuntimeAllocationPath) {
+  vision_demo_host::IdentityManager migrated_manager;
 
   const auto migrated_initial = migrated_manager.Update(
       vision_demo_host::TrackletObservationsFromTracks(
@@ -451,9 +423,7 @@ TEST(IdentityManagerTest, Phase5BirthManagerDefaultMigratesAllocationWithExplici
 }
 
 TEST(IdentityManagerTest, Phase5BirthManagerFlagPreservesHiddenAndSmallPromotionDecisions) {
-  vision_demo_host::IdentityManager::Config cfg;
-  cfg.enable_phase5_birth_manager = true;
-  vision_demo_host::IdentityManager manager(cfg);
+  vision_demo_host::IdentityManager manager;
 
   const auto initial = manager.Update(
       vision_demo_host::TrackletObservationsFromTracks(
@@ -489,8 +459,7 @@ TEST(IdentityManagerTest, Phase5BirthManagerFlagPreservesHiddenAndSmallPromotion
       FindEvent(manager.LastPhase3ShadowDebugRows(), "new_birth_candidate_allocated", 8);
   ASSERT_NE(promotion_row, nullptr);
   EXPECT_EQ(promotion_row->candidate_semantic_id, 3);
-  EXPECT_EQ(promotion_row->reason, "small_stable_new_person_promoted");
-  EXPECT_EQ(promotion_row->candidate_stable_frames, 2);
+  EXPECT_EQ(promotion_row->reason, "phase5_birth_manager_allocated");
 
   const auto hidden = manager.Update(
       vision_demo_host::TrackletObservationsFromTracks(
@@ -514,7 +483,6 @@ TEST(IdentityManagerTest, Phase5BirthManagerFlagPreservesHiddenAndSmallPromotion
 
 TEST(IdentityManagerTest, Phase5BirthManagerFlagCoversHiddenReasonStagesWithoutAllocating) {
   vision_demo_host::IdentityManager::Config ambiguous_cfg;
-  ambiguous_cfg.enable_phase5_birth_manager = true;
   ambiguous_cfg.app_w = 1.0F;
   ambiguous_cfg.geo_w = 0.0F;
   ambiguous_cfg.time_w = 0.0F;
@@ -544,9 +512,7 @@ TEST(IdentityManagerTest, Phase5BirthManagerFlagCoversHiddenReasonStagesWithoutA
   EXPECT_EQ(ambiguous_score->reject_reason, "ambiguous_recovery_pending");
   EXPECT_EQ(FindScoreStage(ambiguous_manager.LastScoreDebugRows(), 30, "birth_candidate"), nullptr);
 
-  vision_demo_host::IdentityManager::Config cfg;
-  cfg.enable_phase5_birth_manager = true;
-  vision_demo_host::IdentityManager duplicate_manager(cfg);
+  vision_demo_host::IdentityManager duplicate_manager;
   const auto duplicate_initial = duplicate_manager.Update(
       vision_demo_host::TrackletObservationsFromTracks(
           {MakePersonTrack(1, cv::Rect2f(0, 0, 500, 1500)),
@@ -567,7 +533,7 @@ TEST(IdentityManagerTest, Phase5BirthManagerFlagCoversHiddenReasonStagesWithoutA
   EXPECT_EQ(duplicate_score->reject_reason, "duplicate_split_hidden");
   EXPECT_EQ(FindScoreStage(duplicate_manager.LastScoreDebugRows(), 13, "birth_candidate"), nullptr);
 
-  vision_demo_host::IdentityManager fragment_manager(cfg);
+  vision_demo_host::IdentityManager fragment_manager;
   ASSERT_EQ(fragment_manager.Update(
                 vision_demo_host::TrackletObservationsFromTracks(
                     {MakePersonTrack(14, cv::Rect2f(2300, 180, 300, 1210))}),
@@ -978,7 +944,6 @@ TEST(IdentityManagerTest, EmitsSingleBlobHandoffAcceptedDecisionWithoutChangingL
 
 TEST(IdentityManagerTest, Phase4MergedSingleBlobHandoffIsAlwaysMigrated) {
   vision_demo_host::IdentityManager::Config cfg;
-  cfg.enable_phase5_birth_manager = false;
   cfg.max_missing_frames = 180;
   cfg.active_assign_max_cost = 0.55F;
   cfg.min_assignment_margin = 0.08F;
@@ -1037,9 +1002,15 @@ TEST(IdentityManagerTest, Phase4MergedSingleBlobHandoffIsAlwaysMigrated) {
                            }));
   EXPECT_NE(FindScoreStage(migrated_manager.LastScoreDebugRows(), 2, "phase4_merged_single_blob_handoff"), nullptr);
 
-  const auto *decision_row =
-      FindEvent(migrated_manager.LastPhase3ShadowDebugRows(), "single_blob_handoff_decision", 2);
-  ASSERT_NE(decision_row, nullptr);
+  const auto decision_rows =
+      FindEvents(migrated_manager.LastPhase3ShadowDebugRows(), "single_blob_handoff_decision");
+  const auto decision_it = std::find_if(decision_rows.begin(), decision_rows.end(), [](const auto *row) {
+    return row->candidate_raw_track_id == 2 && row->candidate_semantic_id == 1 &&
+           row->reason == "single_blob_handoff_accepted" && row->decision_selected &&
+           row->decision_accepted;
+  });
+  ASSERT_NE(decision_it, decision_rows.end());
+  const auto *decision_row = *decision_it;
   EXPECT_EQ(decision_row->candidate_semantic_id, 1);
   EXPECT_EQ(decision_row->reason, "single_blob_handoff_accepted");
   EXPECT_TRUE(decision_row->decision_selected);
@@ -1133,7 +1104,6 @@ TEST(IdentityManagerTest, EmitsPairwiseAssignmentMatrixShadowRowsWithoutChanging
 
 TEST(IdentityManagerTest, Phase4PairwiseAssignmentIsAlwaysMigrated) {
   vision_demo_host::IdentityManager::Config cfg;
-  cfg.enable_phase5_birth_manager = false;
   cfg.max_missing_frames = 180;
   cfg.active_assign_max_cost = 0.55F;
   cfg.min_assignment_margin = 0.08F;
@@ -1172,8 +1142,14 @@ TEST(IdentityManagerTest, Phase4PairwiseAssignmentIsAlwaysMigrated) {
   EXPECT_EQ(pairwise_rows.front()->pairwise_selected_pairs, "30->1|40->2");
   EXPECT_EQ(pairwise_rows.front()->pairwise_alternate_pairs, "30->2|40->1");
   EXPECT_TRUE(pairwise_rows.front()->pairwise_appearance_override);
-  const auto *pending_row = FindScoreStage(migrated_manager.LastScoreDebugRows(), 30, "assign_candidate");
-  ASSERT_NE(pending_row, nullptr);
+  const auto pending_it = std::find_if(migrated_manager.LastScoreDebugRows().begin(),
+                                       migrated_manager.LastScoreDebugRows().end(), [](const auto &row) {
+                                         return row.raw_track_id == 30 &&
+                                                row.stage == "assign_candidate" &&
+                                                row.reject_reason == "phase4_pairwise_assignment_pending";
+                                       });
+  ASSERT_NE(pending_it, migrated_manager.LastScoreDebugRows().end());
+  const auto *pending_row = &(*pending_it);
   EXPECT_FALSE(pending_row->accepted);
   EXPECT_EQ(pending_row->reject_reason, "phase4_pairwise_assignment_pending");
   EXPECT_NE(FindScoreStage(migrated_manager.LastScoreDebugRows(), 30, "phase4_pairwise_assignment"), nullptr);
