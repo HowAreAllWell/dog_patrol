@@ -95,8 +95,8 @@ bool IdentityRuntimeStore::MarkCarrierMissingForHandoff(const int semantic_id) {
   return true;
 }
 
-std::vector<LegacyIdentitySnapshot> IdentityRuntimeStore::Snapshots() const {
-  std::vector<LegacyIdentitySnapshot> snapshots;
+std::vector<IdentityRuntimeSnapshot> IdentityRuntimeStore::Snapshots() const {
+  std::vector<IdentityRuntimeSnapshot> snapshots;
   snapshots.reserve(identities_by_semantic_id_.size());
   for (const auto &[semantic_id, identity] : identities_by_semantic_id_) {
     snapshots.push_back(IdentityRuntimeRecordLifecycle::BuildSnapshot(semantic_id, identity));

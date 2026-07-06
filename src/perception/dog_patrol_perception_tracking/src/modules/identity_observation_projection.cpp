@@ -22,7 +22,7 @@ const IdentityManager::ScoreDebugRow *FindBestDebugRow(
   return fallback;
 }
 
-IdentityState StateFromSnapshot(const LegacyIdentitySnapshot &snapshot, const IdentityManager::Mode mode,
+IdentityState StateFromSnapshot(const IdentityRuntimeSnapshot &snapshot, const IdentityManager::Mode mode,
                                 const int max_missing_frames) {
   if (snapshot.seen_this_frame) {
     return IdentityState::kActive;

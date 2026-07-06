@@ -5,7 +5,7 @@
 #include "vision_demo_host/modules/association_utils.hpp"
 
 #include "identity_runtime_record.hpp"
-#include "legacy_identity_snapshot.hpp"
+#include "identity_runtime_snapshot.hpp"
 
 namespace vision_demo_host {
 
@@ -71,8 +71,8 @@ class IdentityRuntimeRecordLifecycle {
     }
   }
 
-  static LegacyIdentitySnapshot BuildSnapshot(const int semantic_id, const IdentityRuntimeRecord &record) {
-    LegacyIdentitySnapshot snapshot;
+  static IdentityRuntimeSnapshot BuildSnapshot(const int semantic_id, const IdentityRuntimeRecord &record) {
+    IdentityRuntimeSnapshot snapshot;
     snapshot.semantic_id = semantic_id;
     snapshot.class_id = record.class_id;
     snapshot.bbox = record.last_bbox;

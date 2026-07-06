@@ -51,15 +51,15 @@ IdentityAssignmentEngineAdapter::Config ToAdapterConfig(const IdentityManager::C
   return out;
 }
 
-IdentityManager::Mode FromLegacyMode(const LegacyIdentityMode mode) {
+IdentityManager::Mode FromLifecycleMode(const IdentityLifecycleMode mode) {
   switch (mode) {
-    case LegacyIdentityMode::kMerged:
+    case IdentityLifecycleMode::kMerged:
       return IdentityManager::Mode::kMerged;
-    case LegacyIdentityMode::kSplitRecovery:
+    case IdentityLifecycleMode::kSplitRecovery:
       return IdentityManager::Mode::kSplitRecovery;
-    case LegacyIdentityMode::kNormalResumed:
+    case IdentityLifecycleMode::kNormalResumed:
       return IdentityManager::Mode::kNormalResumed;
-    case LegacyIdentityMode::kNormal:
+    case IdentityLifecycleMode::kNormal:
     default:
       return IdentityManager::Mode::kNormal;
   }
@@ -68,7 +68,7 @@ IdentityManager::Mode FromLegacyMode(const LegacyIdentityMode mode) {
 IdentityManager::ScoreDebugRow FromAdapterDebugRow(const IdentityAssignmentEngineAdapter::ScoreDebugRow &row) {
   IdentityManager::ScoreDebugRow out;
   out.frame_idx = row.frame_idx;
-  out.mode = FromLegacyMode(row.mode);
+  out.mode = FromLifecycleMode(row.mode);
   out.track_idx = row.track_idx;
   out.raw_track_id = row.raw_track_id;
   out.semantic_id = row.semantic_id;
@@ -598,7 +598,7 @@ IdentityManagerResult IdentityManager::Update(const std::vector<TrackletObservat
 }
 
 IdentityManager::Mode IdentityManager::CurrentMode() const {
-  return FromLegacyMode(impl_->identity_assignment_engine_adapter.CurrentMode());
+  return FromLifecycleMode(impl_->identity_assignment_engine_adapter.CurrentMode());
 }
 
 bool IdentityManager::IsFeatureUpdateFrozen() const { return impl_->identity_assignment_engine_adapter.IsFeatureUpdateFrozen(); }

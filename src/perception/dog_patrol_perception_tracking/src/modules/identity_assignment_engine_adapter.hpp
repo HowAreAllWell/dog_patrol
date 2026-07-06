@@ -15,8 +15,8 @@
 #include "birth_manager.hpp"
 #include "birth_candidate_store.hpp"
 #include "identity_runtime_record.hpp"
-#include "legacy_identity_mode.hpp"
-#include "legacy_identity_snapshot.hpp"
+#include "identity_lifecycle_mode.hpp"
+#include "identity_runtime_snapshot.hpp"
 #include "identity_runtime_store.hpp"
 #include "occlusion_mode_state.hpp"
 #include "raw_semantic_binding_store.hpp"
@@ -31,7 +31,7 @@ class IdentityAssignmentEngineAdapter {
  public:
   struct ScoreDebugRow {
     int frame_idx{-1};
-    LegacyIdentityMode mode{LegacyIdentityMode::kNormal};
+    IdentityLifecycleMode mode{IdentityLifecycleMode::kNormal};
     int track_idx{-1};
     int raw_track_id{-1};
     int semantic_id{-1};
@@ -51,11 +51,11 @@ class IdentityAssignmentEngineAdapter {
     std::string geometry_update_reason;
   };
 
-  using IdentitySnapshot = LegacyIdentitySnapshot;
+  using IdentitySnapshot = IdentityRuntimeSnapshot;
 
   struct PairwiseAssignmentDebugRow {
     int frame_idx{-1};
-    LegacyIdentityMode mode{LegacyIdentityMode::kNormal};
+    IdentityLifecycleMode mode{IdentityLifecycleMode::kNormal};
     std::string selected_pairs;
     std::string alternate_pairs;
     float selected_final_cost{0.0F};
@@ -121,7 +121,7 @@ class IdentityAssignmentEngineAdapter {
 
   int SemanticIdForRawTrack(int raw_track_id) const;
   int CurrentPrimarySemanticId() const { return runtime_state_->current_primary_semantic_id; }
-  LegacyIdentityMode CurrentMode() const { return runtime_state_->occlusion_mode.mode; }
+  IdentityLifecycleMode CurrentMode() const { return runtime_state_->occlusion_mode.mode; }
   bool IsFeatureUpdateFrozen() const { return runtime_state_->occlusion_mode.feature_update_frozen; }
   const std::vector<ScoreDebugRow> &LastScoreDebugRows() const { return runtime_state_->last_score_debug_rows; }
   const std::vector<PairwiseAssignmentDebugRow> &LastPairwiseAssignmentDebugRows() const {

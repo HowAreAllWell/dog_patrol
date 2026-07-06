@@ -4,7 +4,7 @@
 #include <vector>
 
 #include "vision_demo_host/modules/identity_manager.hpp"
-#include "legacy_identity_snapshot.hpp"
+#include "identity_runtime_snapshot.hpp"
 
 namespace vision_demo_host {
 
@@ -20,7 +20,7 @@ class IdentityObservationProjection {
   };
 
   struct Input {
-    std::vector<LegacyIdentitySnapshot> snapshots;
+    std::vector<IdentityRuntimeSnapshot> snapshots;
     std::unordered_map<int, TrackletObservation> observations_by_raw_track_id;
     std::vector<IdentityManager::ScoreDebugRow> debug_rows;
     IdentityManager::Mode mode{IdentityManager::Mode::kNormal};

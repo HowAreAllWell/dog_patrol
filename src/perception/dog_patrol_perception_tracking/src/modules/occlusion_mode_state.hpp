@@ -1,6 +1,6 @@
 #pragma once
 
-#include "legacy_identity_mode.hpp"
+#include "identity_lifecycle_mode.hpp"
 
 namespace vision_demo_host {
 
@@ -17,7 +17,7 @@ class OcclusionModeState {
     bool prev_had_overlap{false};
     int merged_frames{0};
     int split_stable_count{0};
-    LegacyIdentityMode mode{LegacyIdentityMode::kNormal};
+    IdentityLifecycleMode mode{IdentityLifecycleMode::kNormal};
     bool feature_update_frozen{false};
   };
 

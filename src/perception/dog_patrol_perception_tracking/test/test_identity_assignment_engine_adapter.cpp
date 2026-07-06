@@ -53,7 +53,7 @@ bool HasSelectedRejectReason(
   });
 }
 
-std::vector<vision_demo_host::LegacyIdentitySnapshot> MakeTwoIdentitySeed(
+std::vector<vision_demo_host::IdentityRuntimeSnapshot> MakeTwoIdentitySeed(
     vision_demo_host::IdentityAssignmentEngineAdapter *assigner) {
   const auto initial = assigner->Update(
       {MakePersonTrack(1, cv::Rect2f(0, 0, 100, 300), {1.0F, 0.0F, 0.0F}),
@@ -716,7 +716,7 @@ TEST(IdentityAssignmentEngineAdapterTest, MergedSingleBlobKeepsRawContinuityWhen
       {MakePersonTrack(1, cv::Rect2f(11, 0, 100, 100), {0.0F, 1.0F, 0.0F})},
       LockedPrimary(1));
 
-  ASSERT_EQ(assigner.CurrentMode(), vision_demo_host::LegacyIdentityMode::kMerged);
+  ASSERT_EQ(assigner.CurrentMode(), vision_demo_host::IdentityLifecycleMode::kMerged);
   ASSERT_EQ(merged.count(1), 1U);
   EXPECT_EQ(merged.at(1), 1);
   EXPECT_TRUE(std::any_of(assigner.LastScoreDebugRows().begin(), assigner.LastScoreDebugRows().end(),
@@ -763,7 +763,7 @@ TEST(IdentityAssignmentEngineAdapterTest, MergedSingleBlobRejectsMissingPrimaryW
         LockedPrimary(1));
     ASSERT_EQ(only_other.at(2), 2);
   }
-  ASSERT_EQ(assigner.CurrentMode(), vision_demo_host::LegacyIdentityMode::kMerged);
+  ASSERT_EQ(assigner.CurrentMode(), vision_demo_host::IdentityLifecycleMode::kMerged);
 
   const auto newcomer = assigner.Update(
       {MakePersonTrack(14, cv::Rect2f(2509, 150, 178, 1270), {0.4F, 0.0F, 0.916515F})},
@@ -842,7 +842,7 @@ TEST(IdentityAssignmentEngineAdapterTest, MergedSingleBlobKeepsNonPrimaryRawCont
       {MakePersonTrack(2, cv::Rect2f(11, 0, 100, 100), {0.0F, 1.0F, 0.0F})},
       LockedPrimary(1));
 
-  ASSERT_EQ(assigner.CurrentMode(), vision_demo_host::LegacyIdentityMode::kMerged);
+  ASSERT_EQ(assigner.CurrentMode(), vision_demo_host::IdentityLifecycleMode::kMerged);
   ASSERT_EQ(merged.count(2), 1U);
   EXPECT_EQ(merged.at(2), 2);
 }
@@ -892,7 +892,7 @@ TEST(IdentityAssignmentEngineAdapterTest, MergedSingleBlobKeepsContinuityForPhas
       {MakePersonTrack(2, cv::Rect2f(560, 240, 200, 560), primary_feature)},
       LockedPrimary(1));
 
-  ASSERT_EQ(assigner.CurrentMode(), vision_demo_host::LegacyIdentityMode::kMerged);
+  ASSERT_EQ(assigner.CurrentMode(), vision_demo_host::IdentityLifecycleMode::kMerged);
   ASSERT_EQ(handoff.count(2), 1U);
   EXPECT_EQ(handoff.at(2), 2);
   EXPECT_NE(std::find_if(assigner.LastScoreDebugRows().begin(), assigner.LastScoreDebugRows().end(),
@@ -942,7 +942,7 @@ TEST(IdentityAssignmentEngineAdapterTest, MergedSplitHandoffNoLongerAppliesInsid
        MakePersonTrack(7, cv::Rect2f(736, 204, 177, 555), secondary_feature)},
       LockedPrimary(1));
 
-  ASSERT_EQ(assigner.CurrentMode(), vision_demo_host::LegacyIdentityMode::kMerged);
+  ASSERT_EQ(assigner.CurrentMode(), vision_demo_host::IdentityLifecycleMode::kMerged);
   ASSERT_EQ(split.count(2), 1U);
   ASSERT_EQ(split.count(7), 1U);
   EXPECT_EQ(split.at(2), 1);
@@ -989,7 +989,7 @@ TEST(IdentityAssignmentEngineAdapterTest, EarlyMergedSplitHandoffNoLongerApplies
        MakePersonTrack(7, cv::Rect2f(717, 210, 164, 551), secondary_feature)},
       LockedPrimary(1));
 
-  ASSERT_EQ(assigner.CurrentMode(), vision_demo_host::LegacyIdentityMode::kMerged);
+  ASSERT_EQ(assigner.CurrentMode(), vision_demo_host::IdentityLifecycleMode::kMerged);
   ASSERT_EQ(split.count(2), 1U);
   ASSERT_EQ(split.count(7), 1U);
   EXPECT_EQ(split.at(2), 1);

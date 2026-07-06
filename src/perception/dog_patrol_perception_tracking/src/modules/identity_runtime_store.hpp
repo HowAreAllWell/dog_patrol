@@ -5,7 +5,7 @@
 #include <vector>
 
 #include "identity_runtime_record.hpp"
-#include "legacy_identity_snapshot.hpp"
+#include "identity_runtime_snapshot.hpp"
 
 namespace vision_demo_host {
 
@@ -28,7 +28,7 @@ class IdentityRuntimeStore {
   void ProtectUnseenActivePeople(int occlusion_protect_frames);
   bool MarkCarrierMissingForHandoff(int semantic_id);
 
-  std::vector<LegacyIdentitySnapshot> Snapshots() const;
+  std::vector<IdentityRuntimeSnapshot> Snapshots() const;
 
  private:
   std::unordered_map<int, IdentityRuntimeRecord> identities_by_semantic_id_;

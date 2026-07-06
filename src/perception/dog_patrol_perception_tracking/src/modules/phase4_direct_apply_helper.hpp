@@ -9,7 +9,7 @@
 #include <opencv2/core/mat.hpp>
 
 #include "vision_demo_host/modules/feature_update_policy.hpp"
-#include "legacy_identity_mode.hpp"
+#include "identity_lifecycle_mode.hpp"
 #include "identity_runtime_record.hpp"
 #include "vision_demo_host/types.hpp"
 
@@ -29,7 +29,7 @@ class Phase4DirectApplyHelper {
     const std::vector<Track> *tracks{nullptr};
     const cv::Mat *frame{nullptr};
     int frame_index{-1};
-    LegacyIdentityMode mode{LegacyIdentityMode::kNormal};
+    IdentityLifecycleMode mode{IdentityLifecycleMode::kNormal};
     std::vector<Action> actions;
     std::vector<ScoreDebugRowT> *debug_rows{nullptr};
     std::function<bool(int)> contains_semantic_id;

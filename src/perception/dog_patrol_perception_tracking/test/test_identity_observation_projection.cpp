@@ -9,11 +9,11 @@ using vision_demo_host::ClassId;
 using vision_demo_host::IdentityManager;
 using vision_demo_host::IdentityObservationProjection;
 using vision_demo_host::IdentityState;
-using vision_demo_host::LegacyIdentitySnapshot;
+using vision_demo_host::IdentityRuntimeSnapshot;
 using vision_demo_host::TrackletObservation;
 
-LegacyIdentitySnapshot MakeSnapshot(const int semantic_id, const bool seen_this_frame, const int missing_frames) {
-  LegacyIdentitySnapshot snapshot;
+IdentityRuntimeSnapshot MakeSnapshot(const int semantic_id, const bool seen_this_frame, const int missing_frames) {
+  IdentityRuntimeSnapshot snapshot;
   snapshot.semantic_id = semantic_id;
   snapshot.class_id = ClassId::kPerson;
   snapshot.confidence = 0.6F + static_cast<float>(semantic_id) * 0.1F;

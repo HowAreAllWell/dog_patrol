@@ -23,7 +23,7 @@ TEST(OcclusionModeStateTest, EntersMergedModeFromTwoPersonToOnePersonOverlap) {
   input.has_overlap = false;
 
   const auto next = OcclusionModeState::Advance(DefaultConfig(), state, input);
-  EXPECT_EQ(next.mode, LegacyIdentityMode::kMerged);
+  EXPECT_EQ(next.mode, IdentityLifecycleMode::kMerged);
   EXPECT_EQ(next.merged_frames, 1);
   EXPECT_EQ(next.split_stable_count, 0);
   EXPECT_EQ(next.prev_visible_person_count, 1);
@@ -35,7 +35,7 @@ TEST(OcclusionModeStateTest, HoldsMergedModeForMergeHoldFrames) {
   OcclusionModeState::State state;
   state.prev_visible_person_count = 1;
   state.prev_had_overlap = true;
-  state.mode = LegacyIdentityMode::kMerged;
+  state.mode = IdentityLifecycleMode::kMerged;
   state.merged_frames = 1;
 
   OcclusionModeState::Input input;
@@ -43,14 +43,14 @@ TEST(OcclusionModeStateTest, HoldsMergedModeForMergeHoldFrames) {
   input.has_overlap = false;
 
   const auto next = OcclusionModeState::Advance(DefaultConfig(), state, input);
-  EXPECT_EQ(next.mode, LegacyIdentityMode::kMerged);
+  EXPECT_EQ(next.mode, IdentityLifecycleMode::kMerged);
   EXPECT_EQ(next.merged_frames, 2);
   EXPECT_TRUE(next.feature_update_frozen);
 }
 
 TEST(OcclusionModeStateTest, EntersSplitRecoveryAfterMergeHoldOnTwoVisiblePeople) {
   OcclusionModeState::State state;
-  state.mode = LegacyIdentityMode::kMerged;
+  state.mode = IdentityLifecycleMode::kMerged;
   state.merged_frames = 2;
 
   OcclusionModeState::Input input;
@@ -58,14 +58,14 @@ TEST(OcclusionModeStateTest, EntersSplitRecoveryAfterMergeHoldOnTwoVisiblePeople
   input.has_overlap = false;
 
   const auto next = OcclusionModeState::Advance(DefaultConfig(), state, input);
-  EXPECT_EQ(next.mode, LegacyIdentityMode::kSplitRecovery);
+  EXPECT_EQ(next.mode, IdentityLifecycleMode::kSplitRecovery);
   EXPECT_EQ(next.split_stable_count, 0);
   EXPECT_TRUE(next.feature_update_frozen);
 }
 
 TEST(OcclusionModeStateTest, StableSplitRecoveryReturnsToNormal) {
   OcclusionModeState::State state;
-  state.mode = LegacyIdentityMode::kSplitRecovery;
+  state.mode = IdentityLifecycleMode::kSplitRecovery;
   state.split_stable_count = 2;
 
   OcclusionModeState::Input input;
@@ -73,7 +73,7 @@ TEST(OcclusionModeStateTest, StableSplitRecoveryReturnsToNormal) {
   input.has_overlap = false;
 
   const auto next = OcclusionModeState::Advance(DefaultConfig(), state, input);
-  EXPECT_EQ(next.mode, LegacyIdentityMode::kNormal);
+  EXPECT_EQ(next.mode, IdentityLifecycleMode::kNormal);
   EXPECT_EQ(next.merged_frames, 0);
   EXPECT_EQ(next.split_stable_count, 0);
   EXPECT_FALSE(next.feature_update_frozen);
@@ -81,7 +81,7 @@ TEST(OcclusionModeStateTest, StableSplitRecoveryReturnsToNormal) {
 
 TEST(OcclusionModeStateTest, OverlapResetsSplitStability) {
   OcclusionModeState::State state;
-  state.mode = LegacyIdentityMode::kSplitRecovery;
+  state.mode = IdentityLifecycleMode::kSplitRecovery;
   state.split_stable_count = 2;
 
   OcclusionModeState::Input input;
@@ -89,7 +89,7 @@ TEST(OcclusionModeStateTest, OverlapResetsSplitStability) {
   input.has_overlap = true;
 
   const auto next = OcclusionModeState::Advance(DefaultConfig(), state, input);
-  EXPECT_EQ(next.mode, LegacyIdentityMode::kSplitRecovery);
+  EXPECT_EQ(next.mode, IdentityLifecycleMode::kSplitRecovery);
   EXPECT_EQ(next.split_stable_count, 0);
   EXPECT_TRUE(next.feature_update_frozen);
 }
@@ -105,20 +105,20 @@ TEST(OcclusionModeStateTest, FreezeTracksMergedSplitAndOverlapStates) {
   EXPECT_TRUE(merged.feature_update_frozen);
 
   OcclusionModeState::State split_seed;
-  split_seed.mode = LegacyIdentityMode::kMerged;
+  split_seed.mode = IdentityLifecycleMode::kMerged;
   split_seed.merged_frames = 2;
   OcclusionModeState::Input split_input;
   split_input.visible_person_count = 2;
   split_input.has_overlap = false;
   const auto split = OcclusionModeState::Advance(DefaultConfig(), split_seed, split_input);
-  EXPECT_EQ(split.mode, LegacyIdentityMode::kSplitRecovery);
+  EXPECT_EQ(split.mode, IdentityLifecycleMode::kSplitRecovery);
   EXPECT_TRUE(split.feature_update_frozen);
 
   OcclusionModeState::Input overlap_input;
   overlap_input.visible_person_count = 2;
   overlap_input.has_overlap = true;
   const auto overlapped = OcclusionModeState::Advance(DefaultConfig(), OcclusionModeState::State{}, overlap_input);
-  EXPECT_EQ(overlapped.mode, LegacyIdentityMode::kNormal);
+  EXPECT_EQ(overlapped.mode, IdentityLifecycleMode::kNormal);
   EXPECT_TRUE(overlapped.feature_update_frozen);
 }
 

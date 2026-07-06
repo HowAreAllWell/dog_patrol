@@ -36,7 +36,7 @@ constexpr float kBigCost = ActiveAssignmentSolver::kBigCost;
 
 IdentityAssignmentEngineAdapter::ScoreDebugRow MakeInactiveRecoverDebugRow(
     const int frame_index,
-    const LegacyIdentityMode mode,
+    const IdentityLifecycleMode mode,
     const InactiveRecoverySolver::CandidateDecision &candidate) {
   IdentityAssignmentEngineAdapter::ScoreDebugRow row;
   row.frame_idx = frame_index;
@@ -53,7 +53,7 @@ IdentityAssignmentEngineAdapter::ScoreDebugRow MakeInactiveRecoverDebugRow(
   return row;
 }
 
-IdentityAssignmentEngineAdapter::ScoreDebugRow MakeScoreDebugRow(const int frame_index, const LegacyIdentityMode mode,
+IdentityAssignmentEngineAdapter::ScoreDebugRow MakeScoreDebugRow(const int frame_index, const IdentityLifecycleMode mode,
                                                        const AssignmentCandidateBuilder::DebugRow &debug_row) {
   IdentityAssignmentEngineAdapter::ScoreDebugRow row;
   row.frame_idx = frame_index;
@@ -75,7 +75,7 @@ IdentityAssignmentEngineAdapter::ScoreDebugRow MakeScoreDebugRow(const int frame
 
 IdentityAssignmentEngineAdapter::ScoreDebugRow MakeScoreDebugRow(
     const int frame_index,
-    const LegacyIdentityMode mode,
+    const IdentityLifecycleMode mode,
     const MergedSingleBlobAssignmentDecision::CandidateRow &debug_row) {
   IdentityAssignmentEngineAdapter::ScoreDebugRow row;
   row.frame_idx = frame_index;
@@ -97,7 +97,7 @@ IdentityAssignmentEngineAdapter::ScoreDebugRow MakeScoreDebugRow(
 
 IdentityAssignmentEngineAdapter::ScoreDebugRow MakeRawContinuityDebugRow(
     const int frame_index,
-    const LegacyIdentityMode mode,
+    const IdentityLifecycleMode mode,
     const RawContinuityDecision::Decision &decision) {
   IdentityAssignmentEngineAdapter::ScoreDebugRow row;
   row.frame_idx = frame_index;
@@ -146,15 +146,15 @@ bool AssociationEvidenceWeakForIdentity(const AssociationEvidence &association) 
 
 }  // namespace
 
-std::string LegacyIdentityModeToString(const LegacyIdentityMode mode) {
+std::string IdentityLifecycleModeToString(const IdentityLifecycleMode mode) {
   switch (mode) {
-    case LegacyIdentityMode::kNormal:
+    case IdentityLifecycleMode::kNormal:
       return "NORMAL";
-    case LegacyIdentityMode::kMerged:
+    case IdentityLifecycleMode::kMerged:
       return "MERGED";
-    case LegacyIdentityMode::kSplitRecovery:
+    case IdentityLifecycleMode::kSplitRecovery:
       return "SPLIT_RECOVERY";
-    case LegacyIdentityMode::kNormalResumed:
+    case IdentityLifecycleMode::kNormalResumed:
       return "NORMAL_RESUMED";
     default:
       return "UNKNOWN";
@@ -185,7 +185,7 @@ void IdentityAssignmentEngineAdapter::ResetRuntimeState(RuntimeState *runtime_st
   runtime_state->occlusion_mode.prev_had_overlap = false;
   runtime_state->occlusion_mode.merged_frames = 0;
   runtime_state->occlusion_mode.split_stable_count = 0;
-  runtime_state->occlusion_mode.mode = LegacyIdentityMode::kNormal;
+  runtime_state->occlusion_mode.mode = IdentityLifecycleMode::kNormal;
   runtime_state->occlusion_mode.feature_update_frozen = false;
   runtime_state->last_score_debug_rows.clear();
   runtime_state->last_pairwise_assignment_debug_rows.clear();
@@ -587,7 +587,7 @@ const std::unordered_map<int, int> &IdentityAssignmentEngineAdapter::Update(cons
       person_features[i] = ExtractFeature(*feature_frame, track);
     }
   }
-  if (runtime_state_->occlusion_mode.mode == LegacyIdentityMode::kMerged && person_track_indices.size() == 1) {
+  if (runtime_state_->occlusion_mode.mode == IdentityLifecycleMode::kMerged && person_track_indices.size() == 1) {
     const int track_idx = person_track_indices[0];
     const Track &track = tracks[static_cast<std::size_t>(track_idx)];
     const auto continuity_it = prev_raw_to_semantic.find(track.id);
@@ -1078,7 +1078,7 @@ const std::unordered_map<int, int> &IdentityAssignmentEngineAdapter::Update(cons
   executor_config.frame_idx = runtime_state_->frame_index;
   executor_config.occlusion_protect_frames = config_.occlusion_protect_frames;
   executor_config.protect_unseen_active_people =
-      runtime_state_->occlusion_mode.mode == LegacyIdentityMode::kMerged || runtime_state_->occlusion_mode.mode == LegacyIdentityMode::kSplitRecovery || has_overlap;
+      runtime_state_->occlusion_mode.mode == IdentityLifecycleMode::kMerged || runtime_state_->occlusion_mode.mode == IdentityLifecycleMode::kSplitRecovery || has_overlap;
 
   AssignmentApplicationExecutor<ScoreDebugRow>::Execute(
       application_plan, planned_track_indices, tracks, feature_index_by_track_idx, person_features,
