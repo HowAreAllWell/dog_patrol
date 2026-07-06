@@ -10,6 +10,15 @@ namespace vision_demo_host {
 
 class IdentityObservationProjection {
  public:
+  enum class TargetLifecycle {
+    kVisibleIdentity,
+    kOccludedIdentity,
+    kMergedGroup,
+    kSplitCandidate,
+    kNewBirthCandidate,
+    kLostIdentity,
+  };
+
   struct Input {
     std::vector<LegacyIdentitySnapshot> snapshots;
     std::unordered_map<int, TrackletObservation> observations_by_raw_track_id;
@@ -21,6 +30,11 @@ class IdentityObservationProjection {
   };
 
   static IdentityManagerResult Build(const Input &input);
+  static TargetLifecycle ProjectTargetLifecycle(
+      const IdentityObservation &identity, IdentityManager::Mode mode,
+      const std::vector<IdentityManager::Phase3ShadowDebugRow> &phase3_rows = {});
 };
+
+std::string TargetLifecycleToString(IdentityObservationProjection::TargetLifecycle lifecycle);
 
 }  // namespace vision_demo_host

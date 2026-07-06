@@ -22,6 +22,7 @@ struct IdentityOfflineMetrics {
   std::map<std::string, std::size_t> primary_reject_reason_counts;
   std::map<std::string, std::size_t> primary_recovery_reason_counts;
   std::map<std::string, std::size_t> identity_state_counts;
+  std::map<std::string, std::size_t> target_lifecycle_counts;
   std::map<std::string, std::size_t> assignment_stage_counts;
   std::map<std::string, std::size_t> assignment_reject_reason_counts;
   std::map<std::string, std::size_t> feature_update_reason_counts;

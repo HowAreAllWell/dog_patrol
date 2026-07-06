@@ -1,5 +1,7 @@
 #include "vision_demo_host/tools/identity_offline_metrics.hpp"
 
+#include "identity_observation_projection.hpp"
+
 #include <algorithm>
 #include <fstream>
 #include <sstream>
@@ -79,6 +81,53 @@ bool StartsWith(const std::string &value, const std::string &prefix) {
 bool IsBirthStage(const std::string &stage) {
   return stage == "birth_candidate" || stage == "new_semantic" || stage == "phase5_birth_candidate" ||
          stage == "phase5_new_semantic";
+}
+
+IdentityState IdentityStateFromString(const std::string &state) {
+  if (state == "ACTIVE" || state == "VISIBLE") {
+    return IdentityState::kActive;
+  }
+  if (state == "OCCLUDED") {
+    return IdentityState::kOccluded;
+  }
+  if (state == "INACTIVE") {
+    return IdentityState::kInactive;
+  }
+  if (state == "LOST") {
+    return IdentityState::kLost;
+  }
+  if (state == "MERGED") {
+    return IdentityState::kMerged;
+  }
+  if (state == "SPLIT_RECOVERY") {
+    return IdentityState::kSplitRecovery;
+  }
+  return IdentityState::kUnknown;
+}
+
+IdentityManager::Mode IdentityModeFromString(const std::string &mode) {
+  if (mode == "MERGED") {
+    return IdentityManager::Mode::kMerged;
+  }
+  if (mode == "SPLIT_RECOVERY") {
+    return IdentityManager::Mode::kSplitRecovery;
+  }
+  if (mode == "NORMAL_RESUMED") {
+    return IdentityManager::Mode::kNormalResumed;
+  }
+  return IdentityManager::Mode::kNormal;
+}
+
+int ParseIntOrDefault(const std::string &value, const int fallback) {
+  try {
+    return std::stoi(value);
+  } catch (...) {
+    return fallback;
+  }
+}
+
+bool ParseBoolCsv(const std::string &value) {
+  return value == "1" || value == "true" || value == "TRUE";
 }
 
 void MarkUnavailable(IdentityOfflineMetrics *metrics, const std::string &filename, const std::string &note) {
@@ -185,12 +234,74 @@ void WriteCountMapMd(std::ostream &os, const std::string &title, const std::map<
   os << "\n";
 }
 
+std::map<int, IdentityManager::Mode> ReadFrameModes(const std::filesystem::path &dir) {
+  std::map<int, IdentityManager::Mode> modes;
+  std::ifstream ifs(dir / kPerFrameCsv);
+  if (!ifs.is_open()) {
+    return modes;
+  }
+  std::string line;
+  if (!std::getline(ifs, line)) {
+    return modes;
+  }
+  const auto index = HeaderIndex(SplitCsvLine(line));
+  while (std::getline(ifs, line)) {
+    if (Trim(line).empty()) {
+      continue;
+    }
+    const auto row = SplitCsvLine(line);
+    const int frame_idx = ParseIntOrDefault(Field(row, index, "frame_idx"), -1);
+    if (frame_idx >= 0) {
+      modes[frame_idx] = IdentityModeFromString(Field(row, index, "sid_mode"));
+    }
+  }
+  return modes;
+}
+
+std::map<int, std::vector<IdentityManager::Phase3ShadowDebugRow>> ReadPhase3RowsByFrame(
+    const std::filesystem::path &dir) {
+  std::map<int, std::vector<IdentityManager::Phase3ShadowDebugRow>> rows_by_frame;
+  std::ifstream ifs(dir / kPhase3ShadowCsv);
+  if (!ifs.is_open()) {
+    return rows_by_frame;
+  }
+  std::string line;
+  if (!std::getline(ifs, line)) {
+    return rows_by_frame;
+  }
+  const auto index = HeaderIndex(SplitCsvLine(line));
+  while (std::getline(ifs, line)) {
+    if (Trim(line).empty()) {
+      continue;
+    }
+    const auto row = SplitCsvLine(line);
+    const int frame_idx = ParseIntOrDefault(Field(row, index, "frame_idx"), -1);
+    if (frame_idx < 0) {
+      continue;
+    }
+    IdentityManager::Phase3ShadowDebugRow debug_row;
+    debug_row.event_type = Field(row, index, "event_type");
+    debug_row.semantic_ids = Field(row, index, "semantic_ids");
+    debug_row.carrier_semantic_id = ParseIntOrDefault(Field(row, index, "carrier_semantic_id"), -1);
+    debug_row.carrier_raw_track_id = ParseIntOrDefault(Field(row, index, "carrier_raw_track_id"), -1);
+    debug_row.candidate_raw_track_id = ParseIntOrDefault(Field(row, index, "candidate_raw_track_id"), -1);
+    debug_row.candidate_semantic_id = ParseIntOrDefault(Field(row, index, "candidate_semantic_id"), -1);
+    debug_row.reason = Field(row, index, "reason");
+    debug_row.related_raw_track_id = ParseIntOrDefault(Field(row, index, "related_raw_track_id"), -1);
+    debug_row.hypothesis_status = Field(row, index, "hypothesis_status");
+    rows_by_frame[frame_idx].push_back(std::move(debug_row));
+  }
+  return rows_by_frame;
+}
+
 }  // namespace
 
 IdentityOfflineMetrics BuildIdentityOfflineMetrics(const std::filesystem::path &dataset_result_dir,
                                                    const std::string &dataset_name) {
   IdentityOfflineMetrics metrics;
   metrics.dataset_name = dataset_name;
+  const auto frame_modes = ReadFrameModes(dataset_result_dir);
+  const auto phase3_rows_by_frame = ReadPhase3RowsByFrame(dataset_result_dir);
   for (const std::string filename :
        {kPerFrameCsv, kIdentitiesCsv, kSidScoresCsv, kPhase3ShadowCsv, kTrackletHypothesesCsv}) {
     MarkUnavailable(&metrics, filename, "unavailable: file not written");
@@ -209,6 +320,25 @@ IdentityOfflineMetrics BuildIdentityOfflineMetrics(const std::filesystem::path &
             CountIfPresent(Field(row, index, "identity_state"), &metrics.identity_state_counts);
             CountIfPresent(Field(row, index, "assignment_stage"), &metrics.assignment_stage_counts);
             CountIfPresent(Field(row, index, "assignment_reject_reason"), &metrics.assignment_reject_reason_counts);
+            IdentityObservation identity;
+            const int frame_idx = ParseIntOrDefault(Field(row, index, "frame_idx"), -1);
+            identity.semantic_id = ParseIntOrDefault(Field(row, index, "semantic_id"), -1);
+            identity.state = IdentityStateFromString(Field(row, index, "identity_state"));
+            identity.visible = ParseBoolCsv(Field(row, index, "visible"));
+            const int raw_track_id = ParseIntOrDefault(Field(row, index, "supporting_raw_track_id"), -1);
+            if (raw_track_id > 0) {
+              identity.supporting_raw_track_id = raw_track_id;
+            }
+            identity.missing_frames = ParseIntOrDefault(Field(row, index, "missing_frames"), 0);
+            const auto mode_it = frame_modes.find(frame_idx);
+            const auto rows_it = phase3_rows_by_frame.find(frame_idx);
+            const auto lifecycle = IdentityObservationProjection::ProjectTargetLifecycle(
+                identity,
+                mode_it == frame_modes.end() ? IdentityManager::Mode::kNormal : mode_it->second,
+                rows_it == phase3_rows_by_frame.end()
+                    ? std::vector<IdentityManager::Phase3ShadowDebugRow>{}
+                    : rows_it->second);
+            CountIfPresent(TargetLifecycleToString(lifecycle), &metrics.target_lifecycle_counts);
           });
 
   ReadCsv(dataset_result_dir, kSidScoresCsv, &metrics,
@@ -275,6 +405,7 @@ bool WriteIdentityOfflineMetricsFiles(const std::filesystem::path &dataset_resul
   WriteCountMapJson(json, "primary_reject_reason_counts", metrics.primary_reject_reason_counts, true);
   WriteCountMapJson(json, "primary_recovery_reason_counts", metrics.primary_recovery_reason_counts, true);
   WriteCountMapJson(json, "identity_state_counts", metrics.identity_state_counts, true);
+  WriteCountMapJson(json, "target_lifecycle_counts", metrics.target_lifecycle_counts, true);
   WriteCountMapJson(json, "assignment_stage_counts", metrics.assignment_stage_counts, true);
   WriteCountMapJson(json, "assignment_reject_reason_counts", metrics.assignment_reject_reason_counts, true);
   WriteCountMapJson(json, "feature_update_reason_counts", metrics.feature_update_reason_counts, true);
@@ -306,6 +437,7 @@ bool WriteIdentityOfflineMetricsFiles(const std::filesystem::path &dataset_resul
   WriteCountMapMd(md, "Primary Reject Reasons", metrics.primary_reject_reason_counts);
   WriteCountMapMd(md, "Primary Recovery Reasons", metrics.primary_recovery_reason_counts);
   WriteCountMapMd(md, "Identity States", metrics.identity_state_counts);
+  WriteCountMapMd(md, "Target Lifecycle", metrics.target_lifecycle_counts);
   WriteCountMapMd(md, "Assignment Stages", metrics.assignment_stage_counts);
   WriteCountMapMd(md, "Assignment Reject Reasons", metrics.assignment_reject_reason_counts);
   WriteCountMapMd(md, "Feature Update Reasons", metrics.feature_update_reason_counts);
@@ -326,7 +458,9 @@ std::string IdentityOfflineMetricsHelp() {
       "  Inputs are per_frame.csv, identities.csv, sid_scores.csv, phase3_shadow_state.csv, and\n"
       "  tracklet_hypotheses.csv. Missing optional inputs are marked unavailable with zero-count distributions.\n"
       "  Metrics include primary states such as PENDING_RECOVERY, primary decision/reject/recovery reasons,\n"
-      "  identity states, assignment stages/reject reasons, feature_update_reason, geometry_update_reason,\n"
+      "  identity states, target lifecycle counts (VisibleIdentity, OccludedIdentity, MergedGroup,\n"
+      "  SplitCandidate, NewBirthCandidate, LostIdentity), assignment stages/reject reasons,\n"
+      "  feature_update_reason, geometry_update_reason,\n"
       "  Phase 3 shadow event_type counts, NewBirthCandidate hidden/pending/allocated reasons,\n"
       "  Phase 4 handoff event counts, and tracklet hypothesis status/reason distributions.\n";
 }

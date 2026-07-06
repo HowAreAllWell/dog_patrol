@@ -166,4 +166,75 @@ TEST(IdentityObservationProjectionTest, VisibleSupportingObservationOverridesSna
   EXPECT_EQ(result.SemanticIdForRawTrack(77), 9);
 }
 
+TEST(IdentityObservationProjectionTest, ProjectsVisibleOccludedAndLostTargetLifecycle) {
+  vision_demo_host::IdentityObservation visible;
+  visible.semantic_id = 1;
+  visible.state = IdentityState::kActive;
+  visible.visible = true;
+  EXPECT_EQ(TargetLifecycleToString(IdentityObservationProjection::ProjectTargetLifecycle(
+                visible, IdentityManager::Mode::kNormal)),
+            "VisibleIdentity");
+
+  vision_demo_host::IdentityObservation occluded;
+  occluded.semantic_id = 2;
+  occluded.state = IdentityState::kOccluded;
+  occluded.visible = false;
+  EXPECT_EQ(TargetLifecycleToString(IdentityObservationProjection::ProjectTargetLifecycle(
+                occluded, IdentityManager::Mode::kNormal)),
+            "OccludedIdentity");
+
+  vision_demo_host::IdentityObservation lost;
+  lost.semantic_id = 3;
+  lost.state = IdentityState::kInactive;
+  lost.visible = false;
+  EXPECT_EQ(TargetLifecycleToString(IdentityObservationProjection::ProjectTargetLifecycle(
+                lost, IdentityManager::Mode::kNormal)),
+            "LostIdentity");
+}
+
+TEST(IdentityObservationProjectionTest, ProjectsMergedAndSplitEvidenceWithoutChangingPublicState) {
+  vision_demo_host::IdentityObservation merged;
+  merged.semantic_id = 4;
+  merged.state = IdentityState::kOccluded;
+  merged.visible = false;
+  IdentityManager::Phase3ShadowDebugRow merged_row;
+  merged_row.event_type = "merged_group_update";
+  merged_row.semantic_ids = "4|5";
+
+  EXPECT_EQ(TargetLifecycleToString(IdentityObservationProjection::ProjectTargetLifecycle(
+                merged, IdentityManager::Mode::kNormal, {merged_row})),
+            "MergedGroup");
+  EXPECT_EQ(merged.state, IdentityState::kOccluded);
+
+  vision_demo_host::IdentityObservation split;
+  split.semantic_id = 6;
+  split.state = IdentityState::kActive;
+  split.visible = true;
+  split.supporting_raw_track_id = 42;
+  IdentityManager::Phase3ShadowDebugRow split_row;
+  split_row.event_type = "split_candidate_enter";
+  split_row.related_raw_track_id = 42;
+
+  EXPECT_EQ(TargetLifecycleToString(IdentityObservationProjection::ProjectTargetLifecycle(
+                split, IdentityManager::Mode::kNormal, {split_row})),
+            "SplitCandidate");
+  EXPECT_EQ(split.state, IdentityState::kActive);
+}
+
+TEST(IdentityObservationProjectionTest, ProjectsNewBirthCandidateEvidenceBeforeFallbackState) {
+  vision_demo_host::IdentityObservation birth;
+  birth.semantic_id = 7;
+  birth.state = IdentityState::kLost;
+  birth.visible = false;
+  birth.supporting_raw_track_id = 77;
+  IdentityManager::Phase3ShadowDebugRow birth_row;
+  birth_row.event_type = "new_birth_candidate_hidden";
+  birth_row.candidate_raw_track_id = 77;
+
+  EXPECT_EQ(TargetLifecycleToString(IdentityObservationProjection::ProjectTargetLifecycle(
+                birth, IdentityManager::Mode::kNormal, {birth_row})),
+            "NewBirthCandidate");
+  EXPECT_EQ(birth.state, IdentityState::kLost);
+}
+
 }  // namespace

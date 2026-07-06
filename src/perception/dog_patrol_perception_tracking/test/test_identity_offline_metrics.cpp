@@ -37,7 +37,8 @@ TEST(IdentityOfflineMetricsTest, AggregatesIdentityAcceptanceDistributionsFromDe
             "assignment_accepted,assignment_reject_reason\n"
             "0,1,VISIBLE,1,10,0,0.90,1,2,3,4,0,1,0,0,0,assign_candidate,1,\n"
             "1,1,MERGED,0,-1,0,0.10,1,2,3,4,1,1,1,0,0,inactive_recover_candidate,0,"
-            "missing_appearance_gate_reject\n");
+            "missing_appearance_gate_reject\n"
+            "1,3,LOST,0,12,0,0.10,1,2,3,4,12,0,0,0,0,,0,\n");
   WriteText(dir / "sid_scores.csv",
             vision_demo_host::tools::SidScoresCsvHeader() +
                 "\n"
@@ -72,6 +73,9 @@ TEST(IdentityOfflineMetricsTest, AggregatesIdentityAcceptanceDistributionsFromDe
   EXPECT_EQ(metrics.primary_recovery_reason_counts.at("low_score"), 1);
   EXPECT_EQ(metrics.identity_state_counts.at("VISIBLE"), 1);
   EXPECT_EQ(metrics.identity_state_counts.at("MERGED"), 1);
+  EXPECT_EQ(metrics.target_lifecycle_counts.at("VisibleIdentity"), 1);
+  EXPECT_EQ(metrics.target_lifecycle_counts.at("MergedGroup"), 1);
+  EXPECT_EQ(metrics.target_lifecycle_counts.at("NewBirthCandidate"), 1);
   EXPECT_EQ(metrics.assignment_stage_counts.at("assign_candidate"), 2);
   EXPECT_EQ(metrics.assignment_reject_reason_counts.at("missing_appearance_gate_reject"), 1);
   EXPECT_EQ(metrics.feature_update_reason_counts.at("allowed_update"), 1);
@@ -104,5 +108,6 @@ TEST(IdentityOfflineMetricsTest, MarksMissingOptionalDebugInputsUnavailable) {
   EXPECT_FALSE(metrics.inputs.at("tracklet_hypotheses.csv").available);
   EXPECT_EQ(metrics.primary_state_counts.at("OCCLUDED"), 1);
   EXPECT_TRUE(metrics.identity_state_counts.empty());
+  EXPECT_TRUE(metrics.target_lifecycle_counts.empty());
   EXPECT_TRUE(metrics.phase4_handoff_event_counts.empty());
 }
