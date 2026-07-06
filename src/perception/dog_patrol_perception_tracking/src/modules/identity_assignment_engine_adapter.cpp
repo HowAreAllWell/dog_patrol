@@ -23,6 +23,7 @@
 #include "inactive_recovery_input_collector.hpp"
 #include "inactive_recovery_solver.hpp"
 #include "identity_runtime_mutation_applier.hpp"
+#include "identity_runtime_lifecycle_coordinator.hpp"
 #include "identity_runtime_record_lifecycle.hpp"
 #include "merged_single_blob_assignment_decision.hpp"
 #include "raw_continuity_decision.hpp"
@@ -501,10 +502,6 @@ float IdentityAssignmentEngineAdapter::RecoverThresholdForSemantic(const Identit
 
 bool IdentityAssignmentEngineAdapter::CanRecoverInactiveIdentity(const IdentityRuntimeRecord &identity) const {
   return identity.occlusion_protect_remaining <= 0;
-}
-
-void IdentityAssignmentEngineAdapter::AgeAndPruneIdentities() {
-  runtime_state_->identity_store.AgeOneFrame();
 }
 
 const std::unordered_map<int, int> &IdentityAssignmentEngineAdapter::Update(const std::vector<Track> &tracks,
@@ -1099,7 +1096,8 @@ const std::unordered_map<int, int> &IdentityAssignmentEngineAdapter::Update(cons
         UpsertIdentity(track, semantic_id, feature, update_policy, assignment_cost, assignment_margin);
       });
 
-  AgeAndPruneIdentities();
+  IdentityRuntimeLifecycleCoordinator::ApplyEndFrameAging(
+      IdentityRuntimeLifecycleCoordinator::EndFrameInput{&runtime_state_->identity_store});
 
   runtime_state_->occlusion_mode.prev_visible_person_count = visible_person_count;
   runtime_state_->occlusion_mode.prev_had_overlap = has_overlap;

@@ -171,7 +171,6 @@ class IdentityAssignmentEngineAdapter {
                                   const std::vector<float> &feature) const;
   float RecoverThresholdForSemantic(const IdentityRuntimeRecord &identity) const;
   bool CanRecoverInactiveIdentity(const IdentityRuntimeRecord &identity) const;
-  void AgeAndPruneIdentities();
 
   Config config_;
   RuntimeState *runtime_state_{nullptr};

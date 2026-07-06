@@ -120,6 +120,32 @@ TEST(IdentityAssignmentEngineAdapterTest, AdapterCanOperateOnExternallyOwnedRunt
   EXPECT_TRUE(reader.LastScoreDebugRows().empty());
 }
 
+TEST(IdentityAssignmentEngineAdapterTest, EndFrameLifecycleAgingUpdatesRuntimeSnapshots) {
+  vision_demo_host::IdentityAssignmentEngineAdapter::Config cfg;
+  cfg.max_missing_frames = 1;
+  vision_demo_host::IdentityAssignmentEngineAdapter::RuntimeState assigner_runtime_state;
+  vision_demo_host::IdentityAssignmentEngineAdapter assigner(cfg, &assigner_runtime_state);
+
+  const auto first = assigner.Update(
+      {MakePersonTrack(7, cv::Rect2f(0, 0, 50, 50))}, IdlePrimary());
+  ASSERT_EQ(first.at(7), 1);
+  ASSERT_EQ(assigner.IdentitySnapshots().size(), 1U);
+  EXPECT_EQ(assigner.IdentitySnapshots().front().missing_frames, 0);
+  EXPECT_TRUE(assigner.IdentitySnapshots().front().seen_this_frame);
+
+  const auto second = assigner.Update({}, IdlePrimary());
+  EXPECT_TRUE(second.empty());
+  ASSERT_EQ(assigner.IdentitySnapshots().size(), 1U);
+  EXPECT_EQ(assigner.IdentitySnapshots().front().semantic_id, 1);
+  EXPECT_EQ(assigner.IdentitySnapshots().front().missing_frames, 1);
+  EXPECT_FALSE(assigner.IdentitySnapshots().front().seen_this_frame);
+  EXPECT_EQ(assigner.IdentitySnapshots().front().supporting_raw_track_id, -1);
+
+  assigner.Update({}, IdlePrimary());
+  ASSERT_EQ(assigner.IdentitySnapshots().size(), 1U);
+  EXPECT_EQ(assigner.IdentitySnapshots().front().missing_frames, 2);
+}
+
 TEST(IdentityAssignmentEngineAdapterTest, AssignmentCostOverMaxRejectsAndAllocatesNewSemanticId) {
   vision_demo_host::IdentityAssignmentEngineAdapter::Config cfg;
   cfg.active_assign_max_cost = 0.10F;

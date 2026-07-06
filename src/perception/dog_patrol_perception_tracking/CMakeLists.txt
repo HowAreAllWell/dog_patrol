@@ -66,6 +66,7 @@ set(MODULE_SOURCES
   src/modules/unresolved_track_final_resolution_coordinator.cpp
   src/modules/raw_semantic_binding_store.cpp
   src/modules/identity_runtime_store.cpp
+  src/modules/identity_runtime_lifecycle_coordinator.cpp
   src/modules/identity_runtime_mutation_applier.cpp
   src/modules/identity_assignment_engine_adapter.cpp
   src/modules/identity_observation_projection.cpp
@@ -192,6 +193,14 @@ if(BUILD_TESTING)
     target_include_directories(test_identity_record_lifecycle PRIVATE include src/modules)
     target_link_libraries(test_identity_record_lifecycle ${PROJECT_NAME}_modules)
     ament_target_dependencies(test_identity_record_lifecycle rclcpp)
+  endif()
+
+  ament_add_gtest(test_identity_runtime_lifecycle_coordinator test/test_identity_runtime_lifecycle_coordinator.cpp)
+  if(TARGET test_identity_runtime_lifecycle_coordinator)
+    target_compile_features(test_identity_runtime_lifecycle_coordinator PUBLIC cxx_std_17)
+    target_include_directories(test_identity_runtime_lifecycle_coordinator PRIVATE include src/modules)
+    target_link_libraries(test_identity_runtime_lifecycle_coordinator ${PROJECT_NAME}_modules)
+    ament_target_dependencies(test_identity_runtime_lifecycle_coordinator rclcpp)
   endif()
 
   ament_add_gtest(test_feature_bank_cost test/test_feature_bank_cost.cpp)
