@@ -36,6 +36,9 @@ class PrimaryTargetManager {
   bool IsVisibleIdentity(const IdentityObservation &identity) const;
   bool IsVisiblePrimarySane(const Track &track, std::string *reject_reason) const;
   Track TrackFromIdentityObservation(const IdentityObservation &identity) const;
+  PrimaryTargetResult EnterPendingRecovery(const std::string &decision_reason);
+  PrimaryTargetResult EnterOccluded(const std::string &decision_reason);
+  PrimaryTargetResult EnterLost(const std::string &decision_reason, int missing_frames);
 
   Config config_;
   PrimaryTargetResult state_{};

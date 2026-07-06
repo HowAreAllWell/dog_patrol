@@ -21,7 +21,9 @@ inline std::string PerFrameCsvHelp() {
       "  Existing fields keep their order. Phase 7 appended primary_recovery_reason and\n"
       "  primary_supporting_raw_track_id_debug so PENDING_RECOVERY frames can be reviewed without changing UDP.\n"
       "  primary_recovery_reason is the compact token used by the video overlay. Tokens include center_jump,\n"
-      "  low_score, assoc_gate, merged, split_recovery, and fallback pending.\n";
+      "  low_score, assoc_gate, merged, split_recovery, and fallback pending.\n"
+      "  primary_decision_reason includes pending_recovery_hold_missing_identity_evidence when the configured\n"
+      "  pending_recovery_frames window keeps recovery state briefly before ordinary occlusion.\n";
 }
 
 inline std::string TrackletHypothesesCsvHeader() {

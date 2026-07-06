@@ -27,6 +27,7 @@ TEST(OfflineEvalSchemaTest, PerFrameCsvHelpDocumentsPendingRecoveryReasonTokens)
       "merged",
       "split_recovery",
       "pending",
+      "pending_recovery_hold_missing_identity_evidence",
       "appended",
       "UDP",
   };

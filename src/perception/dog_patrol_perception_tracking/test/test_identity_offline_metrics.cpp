@@ -30,7 +30,9 @@ TEST(IdentityOfflineMetricsTest, AggregatesIdentityAcceptanceDistributionsFromDe
                 "\n"
                 "0,2,1,LOCKED,1,10,0.000000,NORMAL,0,1,locked_primary,,,\n"
                 "1,2,1,PENDING_RECOVERY,1,-1,0.000000,MERGED,1,1,pending_recovery_from_identity_state,"
-                "visible_primary_low_score_update,low_score,10\n");
+                "visible_primary_low_score_update,low_score,10\n"
+                "2,2,1,PENDING_RECOVERY,1,-1,0.000000,MERGED,1,1,"
+                "pending_recovery_hold_missing_identity_evidence,,pending,10\n");
   WriteText(dir / "identities.csv",
             "frame_idx,semantic_id,identity_state,visible,supporting_raw_track_id,class_id,score,x,y,w,h,"
             "missing_frames,primary,occlusion_suspect,low_score_update,just_recovered,assignment_stage,"
@@ -67,10 +69,12 @@ TEST(IdentityOfflineMetricsTest, AggregatesIdentityAcceptanceDistributionsFromDe
 
   EXPECT_TRUE(metrics.inputs.at("per_frame.csv").available);
   EXPECT_EQ(metrics.primary_state_counts.at("LOCKED"), 1);
-  EXPECT_EQ(metrics.primary_state_counts.at("PENDING_RECOVERY"), 1);
+  EXPECT_EQ(metrics.primary_state_counts.at("PENDING_RECOVERY"), 2);
   EXPECT_EQ(metrics.primary_decision_reason_counts.at("pending_recovery_from_identity_state"), 1);
+  EXPECT_EQ(metrics.primary_decision_reason_counts.at("pending_recovery_hold_missing_identity_evidence"), 1);
   EXPECT_EQ(metrics.primary_reject_reason_counts.at("visible_primary_low_score_update"), 1);
   EXPECT_EQ(metrics.primary_recovery_reason_counts.at("low_score"), 1);
+  EXPECT_EQ(metrics.primary_recovery_reason_counts.at("pending"), 1);
   EXPECT_EQ(metrics.identity_state_counts.at("VISIBLE"), 1);
   EXPECT_EQ(metrics.identity_state_counts.at("MERGED"), 1);
   EXPECT_EQ(metrics.target_lifecycle_counts.at("VisibleIdentity"), 1);

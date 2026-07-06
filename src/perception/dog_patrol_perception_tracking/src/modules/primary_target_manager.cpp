@@ -84,6 +84,34 @@ Track PrimaryTargetManager::TrackFromIdentityObservation(const IdentityObservati
   return track;
 }
 
+PrimaryTargetResult PrimaryTargetManager::EnterPendingRecovery(const std::string &decision_reason) {
+  pending_recovery_frames_ = std::min(pending_recovery_frames_ + 1, config_.pending_recovery_frames);
+  state_.state = PrimaryState::kPendingRecovery;
+  last_decision_reason_ = decision_reason;
+  return state_;
+}
+
+PrimaryTargetResult PrimaryTargetManager::EnterOccluded(const std::string &decision_reason) {
+  pending_recovery_frames_ = 0;
+  state_.state = PrimaryState::kOccluded;
+  last_decision_reason_ = decision_reason;
+  return state_;
+}
+
+PrimaryTargetResult PrimaryTargetManager::EnterLost(const std::string &decision_reason, const int missing_frames) {
+  bound_raw_track_id_ = -1;
+  primary_target_id_ = -1;
+  last_primary_track_ = std::nullopt;
+  pending_recovery_frames_ = 0;
+  state_.primary_track = std::nullopt;
+  state_.primary_target_id = -1;
+  state_.raw_track_id = -1;
+  state_.missing_frames = missing_frames;
+  state_.state = PrimaryState::kLost;
+  last_decision_reason_ = decision_reason;
+  return state_;
+}
+
 bool PrimaryTargetManager::IsVisiblePrimarySane(const Track &track, std::string *reject_reason) const {
   auto reject = [&](const std::string &reason) {
     if (reject_reason != nullptr) {
@@ -147,13 +175,14 @@ PrimaryTargetResult PrimaryTargetManager::Update(const std::vector<IdentityObser
       last_reject_reason_ = reject_reason;
       if (current_primary_id > 0) {
         primary_target_id_ = current_primary_id;
-        state_.missing_frames = std::min(state_.missing_frames + 1, config_.lost_threshold_frames);
+        state_.missing_frames = std::max(state_.missing_frames + 1, visible_primary_identity->missing_frames);
         state_.primary_track = std::nullopt;
         state_.raw_track_id = -1;
         state_.primary_target_id = primary_target_id_;
-        state_.state = PrimaryState::kPendingRecovery;
-        last_decision_reason_ = "pending_recovery_visible_primary_sanity_rejected";
-        return state_;
+        if (state_.missing_frames > config_.lost_threshold_frames) {
+          return EnterLost("lost_after_pending_recovery_threshold", state_.missing_frames);
+        }
+        return EnterPendingRecovery("pending_recovery_visible_primary_sanity_rejected");
       }
       last_decision_reason_ = "visible_primary_sanity_rejected_no_primary";
     } else {
@@ -182,27 +211,24 @@ PrimaryTargetResult PrimaryTargetManager::Update(const std::vector<IdentityObser
 
     if (current_primary_identity->state == IdentityState::kLost ||
         current_primary_identity->state == IdentityState::kInactive) {
-      bound_raw_track_id_ = -1;
-      primary_target_id_ = -1;
-      last_primary_track_ = std::nullopt;
-      pending_recovery_frames_ = 0;
-      state_.primary_target_id = -1;
-      state_.missing_frames = std::max(state_.missing_frames, current_primary_identity->missing_frames);
-      state_.state = PrimaryState::kLost;
-      last_decision_reason_ = "lost_from_identity_state";
-      return state_;
+      return EnterLost("lost_from_identity_state", std::max(state_.missing_frames, current_primary_identity->missing_frames));
+    }
+
+    if (state_.missing_frames > config_.lost_threshold_frames) {
+      return EnterLost("lost_after_threshold", state_.missing_frames);
     }
 
     if (current_primary_identity->state == IdentityState::kMerged ||
         current_primary_identity->state == IdentityState::kSplitRecovery) {
-      state_.state = PrimaryState::kPendingRecovery;
-      last_decision_reason_ = "pending_recovery_from_identity_state";
-      return state_;
+      return EnterPendingRecovery("pending_recovery_from_identity_state");
     }
 
-    state_.state = PrimaryState::kOccluded;
-    last_decision_reason_ = "occluded_from_identity_state";
-    return state_;
+    if (state_.state == PrimaryState::kPendingRecovery && pending_recovery_frames_ > 0 &&
+        pending_recovery_frames_ < config_.pending_recovery_frames) {
+      return EnterPendingRecovery("pending_recovery_hold_missing_identity_evidence");
+    }
+
+    return EnterOccluded("occluded_from_identity_state");
   }
 
   if (primary_target_id_ > 0 || bound_raw_track_id_ > 0 || state_.state == PrimaryState::kLocked ||
@@ -213,21 +239,14 @@ PrimaryTargetResult PrimaryTargetManager::Update(const std::vector<IdentityObser
     state_.primary_target_id = (primary_target_id_ > 0) ? primary_target_id_ : -1;
 
     if (state_.missing_frames <= config_.lost_threshold_frames) {
-      state_.state = PrimaryState::kOccluded;
-      last_decision_reason_ = "occluded_within_lost_threshold";
-      return state_;
+      if (state_.state == PrimaryState::kPendingRecovery && pending_recovery_frames_ > 0 &&
+          pending_recovery_frames_ < config_.pending_recovery_frames) {
+        return EnterPendingRecovery("pending_recovery_hold_missing_identity_evidence");
+      }
+      return EnterOccluded("occluded_within_lost_threshold");
     }
 
-    bound_raw_track_id_ = -1;
-    primary_target_id_ = -1;
-    last_primary_track_ = std::nullopt;
-    pending_recovery_frames_ = 0;
-    state_.primary_track = std::nullopt;
-    state_.primary_target_id = -1;
-    state_.raw_track_id = -1;
-    state_.state = PrimaryState::kLost;
-    last_decision_reason_ = "lost_after_threshold";
-    return state_;
+    return EnterLost("lost_after_threshold", state_.missing_frames);
   }
 
   auto new_identity = SelectLargestValidPersonIdentity(identities);
