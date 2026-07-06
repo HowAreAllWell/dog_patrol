@@ -47,7 +47,7 @@ ActiveAssignmentInputCollector::Result ActiveAssignmentInputCollector::Collect(c
 
     AssignmentCandidateBuilder::ActiveCandidateInput builder_candidate;
     builder_candidate.semantic_id = semantic_id;
-    const LegacyIdentityRecord *identity = input.find_identity ? input.find_identity(semantic_id) : nullptr;
+    const IdentityRuntimeRecord *identity = input.find_identity ? input.find_identity(semantic_id) : nullptr;
     builder_candidate.missing_frames = identity == nullptr ? 0 : identity->missing_frames;
     result.builder_candidates.push_back(std::move(builder_candidate));
   }
@@ -63,7 +63,7 @@ ActiveAssignmentInputCollector::Result ActiveAssignmentInputCollector::Collect(c
     const std::vector<float> &feature = result.selected_features[track_row];
     for (std::size_t candidate_col = 0; candidate_col < result.free_semantic_ids.size(); ++candidate_col) {
       const int semantic_id = result.free_semantic_ids[candidate_col];
-      const LegacyIdentityRecord *identity = input.find_identity(semantic_id);
+      const IdentityRuntimeRecord *identity = input.find_identity(semantic_id);
       if (identity == nullptr) {
         continue;
       }

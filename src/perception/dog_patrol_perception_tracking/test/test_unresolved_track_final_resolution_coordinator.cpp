@@ -11,7 +11,7 @@ namespace {
 using vision_demo_host::BirthCandidateDecision;
 using vision_demo_host::BirthManager;
 using vision_demo_host::ClassId;
-using vision_demo_host::LegacyIdentityRecord;
+using vision_demo_host::IdentityRuntimeRecord;
 using vision_demo_host::Track;
 using vision_demo_host::UnresolvedTrackFinalResolutionCoordinator;
 
@@ -26,8 +26,8 @@ Track PersonTrack(const int raw_track_id, const cv::Rect2f &bbox, const bool occ
   return track;
 }
 
-LegacyIdentityRecord Identity(const int semantic_id, const int missing_frames = 0) {
-  LegacyIdentityRecord identity;
+IdentityRuntimeRecord Identity(const int semantic_id, const int missing_frames = 0) {
+  IdentityRuntimeRecord identity;
   identity.semantic_id = semantic_id;
   identity.class_id = ClassId::kPerson;
   identity.missing_frames = missing_frames;
@@ -86,7 +86,7 @@ UnresolvedTrackFinalResolutionCoordinator::Input BaseInput(
     const std::vector<int> &active_semantic_ids,
     const std::unordered_map<int, int> &prev_raw_to_semantic,
     const std::vector<UnresolvedTrackFinalResolutionCoordinator::DebugRow> &score_debug_rows,
-    const std::unordered_map<int, LegacyIdentityRecord> &identities) {
+    const std::unordered_map<int, IdentityRuntimeRecord> &identities) {
   UnresolvedTrackFinalResolutionCoordinator::Input input;
   input.frame_index = 17;
   input.tracks = &tracks;
@@ -97,14 +97,14 @@ UnresolvedTrackFinalResolutionCoordinator::Input BaseInput(
   input.active_semantic_ids = &active_semantic_ids;
   input.prev_raw_to_semantic = &prev_raw_to_semantic;
   input.score_debug_rows = &score_debug_rows;
-  input.find_identity = [&](const int semantic_id) -> const LegacyIdentityRecord * {
+  input.find_identity = [&](const int semantic_id) -> const IdentityRuntimeRecord * {
     const auto it = identities.find(semantic_id);
     return it == identities.end() ? nullptr : &it->second;
   };
-  input.active_assignment_max_cost = [](const LegacyIdentityRecord &, const vision_demo_host::AssociationEvidence &) {
+  input.active_assignment_max_cost = [](const IdentityRuntimeRecord &, const vision_demo_host::AssociationEvidence &) {
     return 0.55F;
   };
-  input.score_evidence = [](const Track &, const LegacyIdentityRecord &identity, const std::vector<float> &feature) {
+  input.score_evidence = [](const Track &, const IdentityRuntimeRecord &identity, const std::vector<float> &feature) {
     UnresolvedTrackFinalResolutionCoordinator::ScoreEvidence evidence;
     evidence.app_cost = feature.empty() ? 0.20F : feature[0];
     evidence.geo_cost = feature.size() < 2U ? 0.10F : feature[1];
@@ -117,7 +117,7 @@ UnresolvedTrackFinalResolutionCoordinator::Input BaseInput(
     return evidence;
   };
   input.looks_like_merged_side_reappearance =
-      [](const Track &, const LegacyIdentityRecord &, const std::vector<Track> &, int,
+      [](const Track &, const IdentityRuntimeRecord &, const std::vector<Track> &, int,
          const std::unordered_map<int, int> &, float app_cost) {
         return app_cost <= 0.20F;
       };
@@ -157,7 +157,7 @@ TEST(UnresolvedTrackFinalResolutionCoordinatorTest, OcclusionSuspectUnresolvedTr
   const std::vector<int> active_semantic_ids;
   const std::unordered_map<int, int> prev_raw_to_semantic;
   const std::vector<UnresolvedTrackFinalResolutionCoordinator::DebugRow> score_debug_rows;
-  const std::unordered_map<int, LegacyIdentityRecord> identities;
+  const std::unordered_map<int, IdentityRuntimeRecord> identities;
   int birth_calls = 0;
   auto input = BaseInput(tracks, person_track_indices, person_features, assigned_track_to_sid, sid_used,
                          active_semantic_ids, prev_raw_to_semantic, score_debug_rows, identities);
@@ -190,7 +190,7 @@ TEST(UnresolvedTrackFinalResolutionCoordinatorTest, AmbiguousRecoverySelectedMar
   reject_row.stage = "assign_candidate";
   reject_row.reject_reason = "assignment_margin_reject";
   const std::vector<UnresolvedTrackFinalResolutionCoordinator::DebugRow> score_debug_rows{reject_row};
-  const std::unordered_map<int, LegacyIdentityRecord> identities{{7, Identity(7, 4)}};
+  const std::unordered_map<int, IdentityRuntimeRecord> identities{{7, Identity(7, 4)}};
 
   const auto result = UnresolvedTrackFinalResolutionCoordinator::Resolve(BaseInput(
       tracks, person_track_indices, person_features, assigned_track_to_sid, sid_used, active_semantic_ids,
@@ -212,7 +212,7 @@ TEST(UnresolvedTrackFinalResolutionCoordinatorTest, SideRecoverySuppressesLegacy
   const std::vector<int> active_semantic_ids{11, 12};
   const std::unordered_map<int, int> prev_raw_to_semantic;
   const std::vector<UnresolvedTrackFinalResolutionCoordinator::DebugRow> score_debug_rows;
-  const std::unordered_map<int, LegacyIdentityRecord> identities{{11, Identity(11, 3)}, {12, Identity(12, 2)}};
+  const std::unordered_map<int, IdentityRuntimeRecord> identities{{11, Identity(11, 3)}, {12, Identity(12, 2)}};
 
   const auto result = UnresolvedTrackFinalResolutionCoordinator::Resolve(BaseInput(
       tracks, person_track_indices, person_features, assigned_track_to_sid, sid_used, active_semantic_ids,
@@ -236,7 +236,7 @@ TEST(UnresolvedTrackFinalResolutionCoordinatorTest, DuplicateSplitIsHiddenBefore
   const std::vector<int> active_semantic_ids;
   const std::unordered_map<int, int> prev_raw_to_semantic{{10, 1}};
   const std::vector<UnresolvedTrackFinalResolutionCoordinator::DebugRow> score_debug_rows;
-  const std::unordered_map<int, LegacyIdentityRecord> identities;
+  const std::unordered_map<int, IdentityRuntimeRecord> identities;
 
   const auto result = UnresolvedTrackFinalResolutionCoordinator::Resolve(BaseInput(
       tracks, person_track_indices, person_features, assigned_track_to_sid, sid_used, active_semantic_ids,
@@ -261,7 +261,7 @@ TEST(UnresolvedTrackFinalResolutionCoordinatorTest, SkinnyAndWideMorphologyAreHi
   const std::vector<int> active_semantic_ids;
   const std::unordered_map<int, int> prev_raw_to_semantic;
   const std::vector<UnresolvedTrackFinalResolutionCoordinator::DebugRow> score_debug_rows;
-  const std::unordered_map<int, LegacyIdentityRecord> identities;
+  const std::unordered_map<int, IdentityRuntimeRecord> identities;
 
   const auto result = UnresolvedTrackFinalResolutionCoordinator::Resolve(BaseInput(
       tracks, person_track_indices, person_features, assigned_track_to_sid, sid_used, active_semantic_ids,
@@ -281,7 +281,7 @@ TEST(UnresolvedTrackFinalResolutionCoordinatorTest, SmallNewPersonRemainsPending
   const std::vector<int> active_semantic_ids;
   const std::unordered_map<int, int> prev_raw_to_semantic;
   const std::vector<UnresolvedTrackFinalResolutionCoordinator::DebugRow> score_debug_rows;
-  const std::unordered_map<int, LegacyIdentityRecord> identities;
+  const std::unordered_map<int, IdentityRuntimeRecord> identities;
   BirthManager::Input captured_birth_input;
   auto input = BaseInput(tracks, person_track_indices, person_features, assigned_track_to_sid, sid_used,
                          active_semantic_ids, prev_raw_to_semantic, score_debug_rows, identities);
@@ -309,7 +309,7 @@ TEST(UnresolvedTrackFinalResolutionCoordinatorTest, Phase5PendingUsesPhase5Birth
   const std::vector<int> active_semantic_ids;
   const std::unordered_map<int, int> prev_raw_to_semantic;
   const std::vector<UnresolvedTrackFinalResolutionCoordinator::DebugRow> score_debug_rows;
-  const std::unordered_map<int, LegacyIdentityRecord> identities;
+  const std::unordered_map<int, IdentityRuntimeRecord> identities;
   auto input = BaseInput(tracks, person_track_indices, person_features, assigned_track_to_sid, sid_used,
                          active_semantic_ids, prev_raw_to_semantic, score_debug_rows, identities);
   const auto result = UnresolvedTrackFinalResolutionCoordinator::Resolve(input);
@@ -330,7 +330,7 @@ TEST(UnresolvedTrackFinalResolutionCoordinatorTest, AcceptedBirthAssignmentOutpu
   const std::vector<int> active_semantic_ids;
   const std::unordered_map<int, int> prev_raw_to_semantic;
   const std::vector<UnresolvedTrackFinalResolutionCoordinator::DebugRow> score_debug_rows;
-  const std::unordered_map<int, LegacyIdentityRecord> identities;
+  const std::unordered_map<int, IdentityRuntimeRecord> identities;
   auto input = BaseInput(tracks, person_track_indices, person_features, assigned_track_to_sid, sid_used,
                          active_semantic_ids, prev_raw_to_semantic, score_debug_rows, identities);
   input.evaluate_birth = [](const BirthManager::Input &birth_input) {

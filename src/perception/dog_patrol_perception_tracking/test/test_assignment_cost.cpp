@@ -6,14 +6,14 @@
 #include <opencv2/core/types.hpp>
 
 #include "assignment_cost.hpp"
-#include "legacy_identity_record.hpp"
+#include "identity_runtime_record.hpp"
 #include "vision_demo_host/types.hpp"
 
 namespace {
 
 using vision_demo_host::AssignmentCost;
 using vision_demo_host::ClassId;
-using vision_demo_host::LegacyIdentityRecord;
+using vision_demo_host::IdentityRuntimeRecord;
 using vision_demo_host::Track;
 
 Track PersonTrack(const cv::Rect2f &bbox) {
@@ -24,8 +24,8 @@ Track PersonTrack(const cv::Rect2f &bbox) {
   return track;
 }
 
-LegacyIdentityRecord IdentityRecord(const cv::Rect2f &bbox) {
-  LegacyIdentityRecord record;
+IdentityRuntimeRecord IdentityRecord(const cv::Rect2f &bbox) {
+  IdentityRuntimeRecord record;
   record.semantic_id = 1;
   record.class_id = ClassId::kPerson;
   record.last_bbox = bbox;

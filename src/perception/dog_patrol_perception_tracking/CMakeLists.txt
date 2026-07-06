@@ -65,7 +65,7 @@ set(MODULE_SOURCES
   src/modules/inactive_recovery_input_collector.cpp
   src/modules/unresolved_track_final_resolution_coordinator.cpp
   src/modules/raw_semantic_binding_store.cpp
-  src/modules/legacy_identity_store.cpp
+  src/modules/identity_runtime_store.cpp
   src/modules/identity_runtime_mutation_applier.cpp
   src/modules/identity_assignment_engine_adapter.cpp
   src/modules/identity_observation_projection.cpp
@@ -178,7 +178,7 @@ if(BUILD_TESTING)
     ament_target_dependencies(test_feature_geometry_update_state rclcpp)
   endif()
 
-  ament_add_gtest(test_legacy_identity_record test/test_legacy_identity_record.cpp)
+  ament_add_gtest(test_legacy_identity_record test/test_identity_runtime_record.cpp)
   if(TARGET test_legacy_identity_record)
     target_compile_features(test_legacy_identity_record PUBLIC cxx_std_17)
     target_include_directories(test_legacy_identity_record PRIVATE include src/modules)
@@ -186,7 +186,7 @@ if(BUILD_TESTING)
     ament_target_dependencies(test_legacy_identity_record rclcpp)
   endif()
 
-  ament_add_gtest(test_identity_record_lifecycle test/test_legacy_identity_record_lifecycle.cpp)
+  ament_add_gtest(test_identity_record_lifecycle test/test_identity_runtime_record_lifecycle.cpp)
   if(TARGET test_identity_record_lifecycle)
     target_compile_features(test_identity_record_lifecycle PUBLIC cxx_std_17)
     target_include_directories(test_identity_record_lifecycle PRIVATE include src/modules)
@@ -370,7 +370,7 @@ if(BUILD_TESTING)
     ament_target_dependencies(test_active_assignment_input_collector rclcpp)
   endif()
 
-  ament_add_gtest(test_legacy_identity_store test/test_legacy_identity_store.cpp)
+  ament_add_gtest(test_legacy_identity_store test/test_identity_runtime_store.cpp)
   if(TARGET test_legacy_identity_store)
     target_compile_features(test_legacy_identity_store PUBLIC cxx_std_17)
     target_include_directories(test_legacy_identity_store PRIVATE include src/modules)

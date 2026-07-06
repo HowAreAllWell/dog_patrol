@@ -23,7 +23,7 @@
 #include "inactive_recovery_input_collector.hpp"
 #include "inactive_recovery_solver.hpp"
 #include "identity_runtime_mutation_applier.hpp"
-#include "legacy_identity_record_lifecycle.hpp"
+#include "identity_runtime_record_lifecycle.hpp"
 #include "merged_single_blob_assignment_decision.hpp"
 #include "raw_continuity_decision.hpp"
 #include "unresolved_track_final_resolution_coordinator.hpp"
@@ -210,7 +210,7 @@ std::vector<float> IdentityAssignmentEngineAdapter::ExtractFeature(const cv::Mat
   return appearance_features_.ExtractIdentityFeature(frame, track.bbox);
 }
 
-ReliableGeometryCost::State IdentityAssignmentEngineAdapter::ReliableGeometryState(const LegacyIdentityRecord &identity) const {
+ReliableGeometryCost::State IdentityAssignmentEngineAdapter::ReliableGeometryState(const IdentityRuntimeRecord &identity) const {
   ReliableGeometryCost::State state;
   state.latest_bbox = identity.last_bbox;
   state.latest_center = identity.last_center;
@@ -222,7 +222,7 @@ ReliableGeometryCost::State IdentityAssignmentEngineAdapter::ReliableGeometrySta
   return state;
 }
 
-bool IdentityAssignmentEngineAdapter::PassesMissingIdentityGate(const Track &track, const LegacyIdentityRecord &identity,
+bool IdentityAssignmentEngineAdapter::PassesMissingIdentityGate(const Track &track, const IdentityRuntimeRecord &identity,
                                                        const float app_cost, const float geo_cost) const {
   ReliableGeometryCost::MissingGateConfig gate_config;
   gate_config.min_area_ratio = config_.missing_assign_min_area_ratio;
@@ -234,13 +234,13 @@ bool IdentityAssignmentEngineAdapter::PassesMissingIdentityGate(const Track &tra
                                                         geo_cost, gate_config);
 }
 
-bool IdentityAssignmentEngineAdapter::PassesMissingAppearanceGate(const LegacyIdentityRecord &identity, const float app_cost,
+bool IdentityAssignmentEngineAdapter::PassesMissingAppearanceGate(const IdentityRuntimeRecord &identity, const float app_cost,
                                                          const float geo_cost) const {
   return ReliableGeometryCost::PassesShortMissingAppearanceGate(
       ReliableGeometryState(identity), app_cost, geo_cost, config_.missing_assign_max_app_cost);
 }
 
-void IdentityAssignmentEngineAdapter::ComputeCosts(const Track &track, const LegacyIdentityRecord &identity, const std::vector<float> &feature,
+void IdentityAssignmentEngineAdapter::ComputeCosts(const Track &track, const IdentityRuntimeRecord &identity, const std::vector<float> &feature,
                                       float *app, float *geo, float *tim, float *final) const {
   AssignmentCost::Config cost_config;
   cost_config.max_missing_frames = config_.max_missing_frames;
@@ -262,14 +262,14 @@ void IdentityAssignmentEngineAdapter::ComputeCosts(const Track &track, const Leg
   }
 }
 
-float IdentityAssignmentEngineAdapter::AssignmentScore(const Track &track, const LegacyIdentityRecord &identity,
+float IdentityAssignmentEngineAdapter::AssignmentScore(const Track &track, const IdentityRuntimeRecord &identity,
                                           const std::vector<float> &feature) const {
   float final = 0.0F;
   ComputeCosts(track, identity, feature, nullptr, nullptr, nullptr, &final);
   return final;
 }
 
-float IdentityAssignmentEngineAdapter::ActiveAssignmentMaxCost(const LegacyIdentityRecord &identity,
+float IdentityAssignmentEngineAdapter::ActiveAssignmentMaxCost(const IdentityRuntimeRecord &identity,
                                                      const AssociationEvidence &association) const {
   float max_cost = std::clamp(config_.active_assign_max_cost, 0.0F, 1.0F);
   if (identity.missing_frames > 0 && identity.missing_frames <= std::max(1, config_.max_missing_frames) &&
@@ -298,7 +298,7 @@ bool IdentityAssignmentEngineAdapter::IsReliableObservation(const Track &track, 
 }
 
 FeatureUpdatePolicy::Decision IdentityAssignmentEngineAdapter::EvaluateUpdatePolicy(
-    const Track &track, const std::vector<Track> &tracks, const int self_idx, const LegacyIdentityRecord *identity,
+    const Track &track, const std::vector<Track> &tracks, const int self_idx, const IdentityRuntimeRecord *identity,
     const bool accepted, const float assignment_cost, const float assignment_margin,
     const bool force_geometry_update) const {
   const bool overlapping = TrackOverlapsAny(track, tracks, self_idx);
@@ -316,16 +316,16 @@ FeatureUpdatePolicy::Decision IdentityAssignmentEngineAdapter::EvaluateUpdatePol
   return FeatureUpdatePolicy::Decide(input);
 }
 
-void IdentityAssignmentEngineAdapter::UpdateIdentityObservation(LegacyIdentityRecord *identity, const Track &track,
+void IdentityAssignmentEngineAdapter::UpdateIdentityObservation(IdentityRuntimeRecord *identity, const Track &track,
                                                    const float assignment_cost,
                                                    const float assignment_margin) const {
-  LegacyIdentityRecordLifecycle::ApplyObservation(track, runtime_state_->frame_index, assignment_cost, assignment_margin, identity);
+  IdentityRuntimeRecordLifecycle::ApplyObservation(track, runtime_state_->frame_index, assignment_cost, assignment_margin, identity);
 }
 
 void IdentityAssignmentEngineAdapter::UpsertIdentity(const Track &track, const int semantic_id, const std::vector<float> &feature,
                                         const FeatureUpdatePolicy::Decision &update_policy,
                                         const float assignment_cost, const float assignment_margin) {
-  LegacyIdentityRecord &id = runtime_state_->identity_store.Upsert(semantic_id);
+  IdentityRuntimeRecord &id = runtime_state_->identity_store.Upsert(semantic_id);
   id.semantic_id = semantic_id;
   UpdateIdentityObservation(&id, track, assignment_cost, assignment_margin);
 
@@ -409,7 +409,7 @@ bool IdentityAssignmentEngineAdapter::TrackOverlapsAny(const Track &track, const
 }
 
 bool IdentityAssignmentEngineAdapter::LooksLikeMergedSideReappearance(
-    const Track &candidate, const LegacyIdentityRecord &identity, const std::vector<Track> &tracks, const int candidate_idx,
+    const Track &candidate, const IdentityRuntimeRecord &identity, const std::vector<Track> &tracks, const int candidate_idx,
     const std::unordered_map<int, int> &track_idx_to_sid, const float app_cost) const {
   if (identity.missing_frames < std::max(1, config_.merge_hold_frames) ||
       identity.missing_frames > std::max(1, config_.max_missing_frames) ||
@@ -490,7 +490,7 @@ int IdentityAssignmentEngineAdapter::SelectBestSemanticForMerged(const std::vect
   return best_id;
 }
 
-float IdentityAssignmentEngineAdapter::RecoverThresholdForSemantic(const LegacyIdentityRecord &identity) const {
+float IdentityAssignmentEngineAdapter::RecoverThresholdForSemantic(const IdentityRuntimeRecord &identity) const {
   float threshold = std::clamp(config_.recover_sim_thresh_strict, 0.0F, 1.0F);
   if (identity.missing_frames > std::max(1, config_.max_missing_frames) &&
       identity.missing_frames <= std::max(1, config_.recover_relaxed_max_missing_frames)) {
@@ -499,7 +499,7 @@ float IdentityAssignmentEngineAdapter::RecoverThresholdForSemantic(const LegacyI
   return threshold;
 }
 
-bool IdentityAssignmentEngineAdapter::CanRecoverInactiveIdentity(const LegacyIdentityRecord &identity) const {
+bool IdentityAssignmentEngineAdapter::CanRecoverInactiveIdentity(const IdentityRuntimeRecord &identity) const {
   return identity.occlusion_protect_remaining <= 0;
 }
 
@@ -771,11 +771,11 @@ const std::unordered_map<int, int> &IdentityAssignmentEngineAdapter::Update(cons
       const auto it = sid_used.find(semantic_id);
       return it != sid_used.end() && it->second;
     };
-    active_input.find_identity = [&](const int semantic_id) -> const LegacyIdentityRecord * {
+    active_input.find_identity = [&](const int semantic_id) -> const IdentityRuntimeRecord * {
       return runtime_state_->identity_store.Find(semantic_id);
     };
     active_input.score_evidence = [&](const Track &track,
-                                      const LegacyIdentityRecord &identity,
+                                      const IdentityRuntimeRecord &identity,
                                       const std::vector<float> &feature) {
       ActiveAssignmentInputCollector::ScoreEvidence evidence;
       ComputeCosts(track, identity, feature, &evidence.app_cost, &evidence.geo_cost, &evidence.time_cost,
@@ -855,14 +855,14 @@ const std::unordered_map<int, int> &IdentityAssignmentEngineAdapter::Update(cons
       const auto it = sid_used.find(semantic_id);
       return it != sid_used.end() && it->second;
     };
-    recovery_input.find_identity = [&](const int semantic_id) -> const LegacyIdentityRecord * {
+    recovery_input.find_identity = [&](const int semantic_id) -> const IdentityRuntimeRecord * {
       return runtime_state_->identity_store.Find(semantic_id);
     };
-    recovery_input.can_recover_identity = [&](const LegacyIdentityRecord &identity) {
+    recovery_input.can_recover_identity = [&](const IdentityRuntimeRecord &identity) {
       return CanRecoverInactiveIdentity(identity);
     };
     recovery_input.score_evidence =
-        [&](const Track &track, const LegacyIdentityRecord &identity, const std::vector<float> &feature) {
+        [&](const Track &track, const IdentityRuntimeRecord &identity, const std::vector<float> &feature) {
           InactiveRecoveryInputCollector::ScoreEvidence evidence;
           ComputeCosts(track, identity, feature, &evidence.app_cost, &evidence.geo_cost, nullptr, nullptr);
           evidence.similarity = 1.0F - evidence.app_cost;
@@ -936,22 +936,22 @@ const std::unordered_map<int, int> &IdentityAssignmentEngineAdapter::Update(cons
     final_resolution_input.config.max_missing_frames = config_.max_missing_frames;
     final_resolution_input.config.defer_small_phase5_birth_allocation =
         config_.auto_apply_phase5_birth_allocations;
-    final_resolution_input.find_identity = [&](const int semantic_id) -> const LegacyIdentityRecord * {
+    final_resolution_input.find_identity = [&](const int semantic_id) -> const IdentityRuntimeRecord * {
       return runtime_state_->identity_store.Find(semantic_id);
     };
     final_resolution_input.active_assignment_max_cost =
-        [&](const LegacyIdentityRecord &identity, const AssociationEvidence &association) {
+        [&](const IdentityRuntimeRecord &identity, const AssociationEvidence &association) {
           return ActiveAssignmentMaxCost(identity, association);
         };
     final_resolution_input.score_evidence =
-        [&](const Track &track, const LegacyIdentityRecord &identity, const std::vector<float> &feature) {
+        [&](const Track &track, const IdentityRuntimeRecord &identity, const std::vector<float> &feature) {
           UnresolvedTrackFinalResolutionCoordinator::ScoreEvidence evidence;
           ComputeCosts(track, identity, feature, &evidence.app_cost, &evidence.geo_cost, &evidence.time_cost,
                        &evidence.final_score);
           return evidence;
         };
     final_resolution_input.looks_like_merged_side_reappearance =
-        [&](const Track &candidate, const LegacyIdentityRecord &identity, const std::vector<Track> &all_tracks,
+        [&](const Track &candidate, const IdentityRuntimeRecord &identity, const std::vector<Track> &all_tracks,
             const int candidate_idx, const std::unordered_map<int, int> &assigned_track_to_sid,
             const float app_cost) {
           return LooksLikeMergedSideReappearance(candidate, identity, all_tracks, candidate_idx,
@@ -1087,7 +1087,7 @@ const std::unordered_map<int, int> &IdentityAssignmentEngineAdapter::Update(cons
       application_plan, planned_track_indices, tracks, feature_index_by_track_idx, person_features,
       &runtime_state_->last_score_debug_rows, &runtime_state_->identity_store, &runtime_state_->raw_semantic_bindings, executor_config,
       [&](const Track &track, const int track_idx, const int semantic_id,
-          const LegacyIdentityRecord *identity, const float assignment_cost,
+          const IdentityRuntimeRecord *identity, const float assignment_cost,
           const float assignment_margin, const bool force_geometry_update) {
         (void)semantic_id;
         return EvaluateUpdatePolicy(track, tracks, track_idx, identity, true, assignment_cost,

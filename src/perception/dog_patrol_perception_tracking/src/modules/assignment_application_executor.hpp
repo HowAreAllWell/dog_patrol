@@ -7,8 +7,8 @@
 #include <vector>
 
 #include "assignment_application_plan.hpp"
-#include "legacy_identity_record.hpp"
-#include "legacy_identity_store.hpp"
+#include "identity_runtime_record.hpp"
+#include "identity_runtime_store.hpp"
 #include "raw_semantic_binding_store.hpp"
 #include "vision_demo_host/modules/feature_update_policy.hpp"
 #include "vision_demo_host/types.hpp"
@@ -25,7 +25,7 @@ class AssignmentApplicationExecutor {
   };
 
   using EvaluateUpdatePolicyFn = std::function<FeatureUpdatePolicy::Decision(
-      const Track &, int, int, const LegacyIdentityRecord *, float, float, bool)>;
+      const Track &, int, int, const IdentityRuntimeRecord *, float, float, bool)>;
   using UpsertIdentityFn = std::function<void(const Track &, int, const std::vector<float> &,
                                               const FeatureUpdatePolicy::Decision &, float, float)>;
 
@@ -35,7 +35,7 @@ class AssignmentApplicationExecutor {
                       const std::unordered_map<int, std::size_t> &feature_index_by_track_idx,
                       const std::vector<std::vector<float>> &person_features,
                       std::vector<DebugRowT> *debug_rows,
-                      LegacyIdentityStore *identity_store,
+                      IdentityRuntimeStore *identity_store,
                       RawSemanticBindingStore *raw_semantic_bindings,
                       const Config &config,
                       const EvaluateUpdatePolicyFn &evaluate_update_policy,

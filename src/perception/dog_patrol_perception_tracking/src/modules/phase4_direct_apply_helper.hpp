@@ -10,7 +10,7 @@
 
 #include "vision_demo_host/modules/feature_update_policy.hpp"
 #include "legacy_identity_mode.hpp"
-#include "legacy_identity_record.hpp"
+#include "identity_runtime_record.hpp"
 #include "vision_demo_host/types.hpp"
 
 namespace vision_demo_host {
@@ -33,12 +33,12 @@ class Phase4DirectApplyHelper {
     std::vector<Action> actions;
     std::vector<ScoreDebugRowT> *debug_rows{nullptr};
     std::function<bool(int)> contains_semantic_id;
-    std::function<const LegacyIdentityRecord *(int)> find_identity;
+    std::function<const IdentityRuntimeRecord *(int)> find_identity;
     std::function<std::vector<float>(const cv::Mat &, const Track &)> extract_feature;
-    std::function<void(const Track &, const LegacyIdentityRecord &, const std::vector<float> &,
+    std::function<void(const Track &, const IdentityRuntimeRecord &, const std::vector<float> &,
                        float *, float *, float *, float *)>
         compute_costs;
-    std::function<FeatureUpdatePolicy::Decision(const Track &, int, const LegacyIdentityRecord *,
+    std::function<FeatureUpdatePolicy::Decision(const Track &, int, const IdentityRuntimeRecord *,
                                                 float, float, bool)>
         evaluate_update_policy;
     std::function<void(const Track &, int, const std::vector<float> &,

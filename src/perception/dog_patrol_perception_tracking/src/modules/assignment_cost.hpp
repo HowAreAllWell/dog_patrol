@@ -2,7 +2,7 @@
 
 #include <vector>
 
-#include "legacy_identity_record.hpp"
+#include "identity_runtime_record.hpp"
 #include "vision_demo_host/types.hpp"
 
 namespace vision_demo_host {
@@ -23,7 +23,7 @@ class AssignmentCost {
     float final{0.0F};
   };
 
-  static Result Compute(const Track &track, const LegacyIdentityRecord &identity,
+  static Result Compute(const Track &track, const IdentityRuntimeRecord &identity,
                         const std::vector<float> &feature, const Config &config);
 };
 

@@ -6,7 +6,7 @@
 
 #include "assignment_application_executor.hpp"
 #include "assignment_application_plan.hpp"
-#include "legacy_identity_store.hpp"
+#include "identity_runtime_store.hpp"
 #include "raw_semantic_binding_store.hpp"
 #include "vision_demo_host/modules/feature_update_policy.hpp"
 #include "vision_demo_host/types.hpp"
@@ -16,7 +16,7 @@ namespace {
 using vision_demo_host::AssignmentApplicationExecutor;
 using vision_demo_host::AssignmentApplicationPlan;
 using vision_demo_host::FeatureUpdatePolicy;
-using vision_demo_host::LegacyIdentityStore;
+using vision_demo_host::IdentityRuntimeStore;
 using vision_demo_host::RawSemanticBindingStore;
 using vision_demo_host::Track;
 
@@ -82,7 +82,7 @@ TEST(AssignmentApplicationExecutorTest, AppliesAcceptedMutationsProtectsOcclusio
       TestDebugRow{9, 0, 7, 101, true, false, false, "", ""},
       TestDebugRow{9, 2, 8, 108, false, false, false, "", ""},
   };
-  LegacyIdentityStore store;
+  IdentityRuntimeStore store;
   auto &existing = store.Upsert(3);
   existing.semantic_id = 3;
   existing.class_id = vision_demo_host::ClassId::kPerson;
@@ -100,7 +100,7 @@ TEST(AssignmentApplicationExecutorTest, AppliesAcceptedMutationsProtectsOcclusio
 
   AssignmentApplicationExecutor<TestDebugRow>::Execute(
       plan, {0}, tracks, feature_index, features, &rows, &store, &bindings, config,
-      [](const Track &, int, int, const vision_demo_host::LegacyIdentityRecord *, float, float, bool) {
+      [](const Track &, int, int, const vision_demo_host::IdentityRuntimeRecord *, float, float, bool) {
         FeatureUpdatePolicy::Decision decision;
         decision.feature_update_allowed = true;
         decision.geometry_update_allowed = true;
@@ -137,7 +137,7 @@ TEST(AssignmentApplicationExecutorTest, SideRecoveryForcesGeometryUpdate) {
   std::unordered_map<int, std::size_t> feature_index{{0, 0}};
   std::vector<std::vector<float>> features{{0.0F, 1.0F, 0.0F}};
   std::vector<TestDebugRow> rows{TestDebugRow{4, 0, 11, 201, true, false, false, "", ""}};
-  LegacyIdentityStore store;
+  IdentityRuntimeStore store;
   RawSemanticBindingStore bindings;
 
   bool forced_geometry = false;
@@ -146,7 +146,7 @@ TEST(AssignmentApplicationExecutorTest, SideRecoveryForcesGeometryUpdate) {
 
   AssignmentApplicationExecutor<TestDebugRow>::Execute(
       plan, {0}, tracks, feature_index, features, &rows, &store, &bindings, config,
-      [&](const Track &, int, int, const vision_demo_host::LegacyIdentityRecord *, float, float,
+      [&](const Track &, int, int, const vision_demo_host::IdentityRuntimeRecord *, float, float,
           const bool force_geometry_update) {
         forced_geometry = force_geometry_update;
         FeatureUpdatePolicy::Decision decision;

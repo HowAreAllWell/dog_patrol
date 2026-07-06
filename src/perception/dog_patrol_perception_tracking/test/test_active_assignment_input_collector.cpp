@@ -12,7 +12,7 @@ using vision_demo_host::ActiveAssignmentInputCollector;
 using vision_demo_host::ActiveAssignmentSolver;
 using vision_demo_host::AssignmentCandidateBuilder;
 using vision_demo_host::ClassId;
-using vision_demo_host::LegacyIdentityRecord;
+using vision_demo_host::IdentityRuntimeRecord;
 using vision_demo_host::Track;
 
 Track PersonTrack(const int raw_track_id, const bool occlusion_suspect = false) {
@@ -27,8 +27,8 @@ Track PersonTrack(const int raw_track_id, const bool occlusion_suspect = false) 
   return track;
 }
 
-LegacyIdentityRecord Identity(const int semantic_id, const int missing_frames = 0) {
-  LegacyIdentityRecord identity;
+IdentityRuntimeRecord Identity(const int semantic_id, const int missing_frames = 0) {
+  IdentityRuntimeRecord identity;
   identity.semantic_id = semantic_id;
   identity.class_id = ClassId::kPerson;
   identity.missing_frames = missing_frames;
@@ -42,7 +42,7 @@ ActiveAssignmentInputCollector::Input BaseInput(
     const std::unordered_map<int, int> &assigned_track_to_sid,
     const std::vector<int> &active_semantic_ids,
     const std::unordered_map<int, bool> &used_semantic_ids,
-    const std::unordered_map<int, LegacyIdentityRecord> &identities) {
+    const std::unordered_map<int, IdentityRuntimeRecord> &identities) {
   ActiveAssignmentInputCollector::Input input;
   input.tracks = &tracks;
   input.person_track_indices = &person_track_indices;
@@ -53,11 +53,11 @@ ActiveAssignmentInputCollector::Input BaseInput(
     const auto it = used_semantic_ids.find(semantic_id);
     return it != used_semantic_ids.end() && it->second;
   };
-  input.find_identity = [&](const int semantic_id) -> const LegacyIdentityRecord * {
+  input.find_identity = [&](const int semantic_id) -> const IdentityRuntimeRecord * {
     const auto it = identities.find(semantic_id);
     return it == identities.end() ? nullptr : &it->second;
   };
-  input.score_evidence = [](const Track &, const LegacyIdentityRecord &, const std::vector<float> &feature) {
+  input.score_evidence = [](const Track &, const IdentityRuntimeRecord &, const std::vector<float> &feature) {
     ActiveAssignmentInputCollector::ScoreEvidence evidence;
     evidence.app_cost = feature.empty() ? 0.90F : feature[0];
     evidence.geo_cost = feature.size() < 2U ? 0.80F : feature[1];
@@ -77,7 +77,7 @@ TEST(ActiveAssignmentInputCollectorTest, FiltersAlreadyAssignedTracksAndKeepsFea
   const std::unordered_map<int, int> assigned_track_to_sid{{1, 7}};
   const std::vector<int> active_semantic_ids{10};
   const std::unordered_map<int, bool> used_semantic_ids;
-  const std::unordered_map<int, LegacyIdentityRecord> identities{{10, Identity(10)}};
+  const std::unordered_map<int, IdentityRuntimeRecord> identities{{10, Identity(10)}};
 
   const auto result = ActiveAssignmentInputCollector::Collect(BaseInput(
       tracks, person_track_indices, person_features, assigned_track_to_sid, active_semantic_ids,
@@ -104,7 +104,7 @@ TEST(ActiveAssignmentInputCollectorTest, FiltersUsedSemanticIds) {
   const std::unordered_map<int, int> assigned_track_to_sid;
   const std::vector<int> active_semantic_ids{10, 11};
   const std::unordered_map<int, bool> used_semantic_ids{{10, true}};
-  const std::unordered_map<int, LegacyIdentityRecord> identities{{10, Identity(10)}, {11, Identity(11, 4)}};
+  const std::unordered_map<int, IdentityRuntimeRecord> identities{{10, Identity(10)}, {11, Identity(11, 4)}};
 
   const auto result = ActiveAssignmentInputCollector::Collect(BaseInput(
       tracks, person_track_indices, person_features, assigned_track_to_sid, active_semantic_ids,
@@ -126,7 +126,7 @@ TEST(ActiveAssignmentInputCollectorTest, ExcludesOcclusionSuspectTracks) {
   const std::unordered_map<int, int> assigned_track_to_sid;
   const std::vector<int> active_semantic_ids{10};
   const std::unordered_map<int, bool> used_semantic_ids;
-  const std::unordered_map<int, LegacyIdentityRecord> identities{{10, Identity(10)}};
+  const std::unordered_map<int, IdentityRuntimeRecord> identities{{10, Identity(10)}};
 
   const auto result = ActiveAssignmentInputCollector::Collect(BaseInput(
       tracks, person_track_indices, person_features, assigned_track_to_sid, active_semantic_ids,
@@ -145,10 +145,10 @@ TEST(ActiveAssignmentInputCollectorTest, PropagatesMissingGateRejectEvidenceToBu
   const std::unordered_map<int, int> assigned_track_to_sid;
   const std::vector<int> active_semantic_ids{10, 11};
   const std::unordered_map<int, bool> used_semantic_ids;
-  const std::unordered_map<int, LegacyIdentityRecord> identities{{10, Identity(10)}, {11, Identity(11)}};
+  const std::unordered_map<int, IdentityRuntimeRecord> identities{{10, Identity(10)}, {11, Identity(11)}};
   auto input = BaseInput(tracks, person_track_indices, person_features, assigned_track_to_sid,
                          active_semantic_ids, used_semantic_ids, identities);
-  input.score_evidence = [](const Track &, const LegacyIdentityRecord &identity, const std::vector<float> &) {
+  input.score_evidence = [](const Track &, const IdentityRuntimeRecord &identity, const std::vector<float> &) {
     ActiveAssignmentInputCollector::ScoreEvidence evidence;
     evidence.final_score = identity.semantic_id == 10 ? 0.20F : 0.30F;
     evidence.passes_missing_identity_gate = identity.semantic_id != 10;
@@ -176,10 +176,10 @@ TEST(ActiveAssignmentInputCollectorTest, PropagatesAcceptedCandidateScoresAndPai
   const std::unordered_map<int, int> assigned_track_to_sid;
   const std::vector<int> active_semantic_ids{10};
   const std::unordered_map<int, bool> used_semantic_ids;
-  const std::unordered_map<int, LegacyIdentityRecord> identities{{10, Identity(10)}};
+  const std::unordered_map<int, IdentityRuntimeRecord> identities{{10, Identity(10)}};
   auto input = BaseInput(tracks, person_track_indices, person_features, assigned_track_to_sid,
                          active_semantic_ids, used_semantic_ids, identities);
-  input.score_evidence = [](const Track &, const LegacyIdentityRecord &, const std::vector<float> &) {
+  input.score_evidence = [](const Track &, const IdentityRuntimeRecord &, const std::vector<float> &) {
     ActiveAssignmentInputCollector::ScoreEvidence evidence;
     evidence.app_cost = 0.14F;
     evidence.geo_cost = 0.24F;

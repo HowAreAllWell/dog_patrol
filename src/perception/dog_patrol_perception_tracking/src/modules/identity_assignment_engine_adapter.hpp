@@ -14,10 +14,10 @@
 #include "assignment_candidate_builder.hpp"
 #include "birth_manager.hpp"
 #include "birth_candidate_store.hpp"
-#include "legacy_identity_record.hpp"
+#include "identity_runtime_record.hpp"
 #include "legacy_identity_mode.hpp"
 #include "legacy_identity_snapshot.hpp"
-#include "legacy_identity_store.hpp"
+#include "identity_runtime_store.hpp"
 #include "occlusion_mode_state.hpp"
 #include "raw_semantic_binding_store.hpp"
 #include "semantic_id_allocator.hpp"
@@ -105,7 +105,7 @@ class IdentityAssignmentEngineAdapter {
     OcclusionModeState::State occlusion_mode{};
     std::vector<ScoreDebugRow> last_score_debug_rows;
     std::vector<PairwiseAssignmentDebugRow> last_pairwise_assignment_debug_rows;
-    LegacyIdentityStore identity_store;
+    IdentityRuntimeStore identity_store;
     RawSemanticBindingStore raw_semantic_bindings;
     BirthManager birth_manager;
   };
@@ -142,35 +142,35 @@ class IdentityAssignmentEngineAdapter {
   };
 
   std::vector<float> ExtractFeature(const cv::Mat &frame, const Track &track) const;
-  ReliableGeometryCost::State ReliableGeometryState(const LegacyIdentityRecord &identity) const;
-  bool PassesMissingIdentityGate(const Track &track, const LegacyIdentityRecord &identity, float app_cost, float geo_cost) const;
-  bool PassesMissingAppearanceGate(const LegacyIdentityRecord &identity, float app_cost, float geo_cost) const;
-  void ComputeCosts(const Track &track, const LegacyIdentityRecord &identity, const std::vector<float> &feature, float *app,
+  ReliableGeometryCost::State ReliableGeometryState(const IdentityRuntimeRecord &identity) const;
+  bool PassesMissingIdentityGate(const Track &track, const IdentityRuntimeRecord &identity, float app_cost, float geo_cost) const;
+  bool PassesMissingAppearanceGate(const IdentityRuntimeRecord &identity, float app_cost, float geo_cost) const;
+  void ComputeCosts(const Track &track, const IdentityRuntimeRecord &identity, const std::vector<float> &feature, float *app,
                     float *geo, float *tim, float *final) const;
-  float AssignmentScore(const Track &track, const LegacyIdentityRecord &identity, const std::vector<float> &feature) const;
-  float ActiveAssignmentMaxCost(const LegacyIdentityRecord &identity, const AssociationEvidence &association) const;
+  float AssignmentScore(const Track &track, const IdentityRuntimeRecord &identity, const std::vector<float> &feature) const;
+  float ActiveAssignmentMaxCost(const IdentityRuntimeRecord &identity, const AssociationEvidence &association) const;
 
   void UpsertIdentity(const Track &track, int semantic_id, const std::vector<float> &feature,
                       const FeatureUpdatePolicy::Decision &update_policy, float assignment_cost,
                       float assignment_margin);
   bool IsReliableObservation(const Track &track, bool allow_feat_update, float assignment_cost, float assignment_margin) const;
   FeatureUpdatePolicy::Decision EvaluateUpdatePolicy(const Track &track, const std::vector<Track> &tracks,
-                                                     int self_idx, const LegacyIdentityRecord *identity, bool accepted,
+                                                     int self_idx, const IdentityRuntimeRecord *identity, bool accepted,
                                                      float assignment_cost, float assignment_margin,
                                                      bool force_geometry_update = false) const;
-  void UpdateIdentityObservation(LegacyIdentityRecord *identity, const Track &track, float assignment_cost, float assignment_margin) const;
+  void UpdateIdentityObservation(IdentityRuntimeRecord *identity, const Track &track, float assignment_cost, float assignment_margin) const;
   std::vector<Assignment> SolveAssignments(const AssignmentCandidateBuilder::ActiveBuildResult &build_result,
                                            const std::vector<Track> &tracks);
   bool TrackOverlapsAny(const Track &track, const std::vector<Track> &tracks, int self_idx) const;
-  bool LooksLikeMergedSideReappearance(const Track &candidate, const LegacyIdentityRecord &identity,
+  bool LooksLikeMergedSideReappearance(const Track &candidate, const IdentityRuntimeRecord &identity,
                                        const std::vector<Track> &tracks, int candidate_idx,
                                        const std::unordered_map<int, int> &track_idx_to_sid,
                                        float app_cost) const;
   int AllocateNewSemanticId();
   int SelectBestSemanticForMerged(const std::vector<int> &candidate_semantic_ids, const Track &track,
                                   const std::vector<float> &feature) const;
-  float RecoverThresholdForSemantic(const LegacyIdentityRecord &identity) const;
-  bool CanRecoverInactiveIdentity(const LegacyIdentityRecord &identity) const;
+  float RecoverThresholdForSemantic(const IdentityRuntimeRecord &identity) const;
+  bool CanRecoverInactiveIdentity(const IdentityRuntimeRecord &identity) const;
   void AgeAndPruneIdentities();
 
   Config config_;

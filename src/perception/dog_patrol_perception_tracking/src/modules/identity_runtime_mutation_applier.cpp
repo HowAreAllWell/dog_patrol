@@ -7,7 +7,7 @@
 #include "vision_demo_host/modules/association_utils.hpp"
 #include "vision_demo_host/modules/feature_geometry_update_state.hpp"
 #include "assignment_cost.hpp"
-#include "legacy_identity_record_lifecycle.hpp"
+#include "identity_runtime_record_lifecycle.hpp"
 
 namespace vision_demo_host {
 namespace {
@@ -41,7 +41,7 @@ std::vector<float> IdentityRuntimeMutationApplier::ExtractFeature(
 }
 
 ReliableGeometryCost::State IdentityRuntimeMutationApplier::ReliableGeometryState(
-    const LegacyIdentityRecord &identity) const {
+    const IdentityRuntimeRecord &identity) const {
   ReliableGeometryCost::State state;
   state.latest_bbox = identity.last_bbox;
   state.latest_center = identity.last_center;
@@ -87,7 +87,7 @@ bool IdentityRuntimeMutationApplier::IsReliableObservation(
 
 FeatureUpdatePolicy::Decision IdentityRuntimeMutationApplier::EvaluateUpdatePolicy(
     const Track &track, const std::vector<Track> &tracks, const int self_idx,
-    const LegacyIdentityRecord *identity, const bool accepted,
+    const IdentityRuntimeRecord *identity, const bool accepted,
     const float assignment_cost, const float assignment_margin,
     const bool force_geometry_update) const {
   const bool overlapping = TrackOverlapsAny(track, tracks, self_idx);
@@ -107,9 +107,9 @@ FeatureUpdatePolicy::Decision IdentityRuntimeMutationApplier::EvaluateUpdatePoli
 }
 
 void IdentityRuntimeMutationApplier::UpdateIdentityObservation(
-    LegacyIdentityRecord *identity, const Track &track, const float assignment_cost,
+    IdentityRuntimeRecord *identity, const Track &track, const float assignment_cost,
     const float assignment_margin) const {
-  LegacyIdentityRecordLifecycle::ApplyObservation(track, runtime_state_->frame_index,
+  IdentityRuntimeRecordLifecycle::ApplyObservation(track, runtime_state_->frame_index,
                                                   assignment_cost, assignment_margin, identity);
 }
 
@@ -117,7 +117,7 @@ void IdentityRuntimeMutationApplier::UpsertIdentity(
     const Track &track, const int semantic_id, const std::vector<float> &feature,
     const FeatureUpdatePolicy::Decision &update_policy, const float assignment_cost,
     const float assignment_margin) {
-  LegacyIdentityRecord &id = runtime_state_->identity_store.Upsert(semantic_id);
+  IdentityRuntimeRecord &id = runtime_state_->identity_store.Upsert(semantic_id);
   id.semantic_id = semantic_id;
   UpdateIdentityObservation(&id, track, assignment_cost, assignment_margin);
 
@@ -133,7 +133,7 @@ void IdentityRuntimeMutationApplier::UpsertIdentity(
 }
 
 void IdentityRuntimeMutationApplier::ComputeCosts(
-    const Track &track, const LegacyIdentityRecord &identity,
+    const Track &track, const IdentityRuntimeRecord &identity,
     const std::vector<float> &feature, float *app, float *geo, float *tim,
     float *final) const {
   AssignmentCost::Config cost_config;
@@ -182,13 +182,13 @@ bool IdentityRuntimeMutationApplier::ApplyPhase4DirectActions(
   input.extract_feature = [&](const cv::Mat &feature_frame, const Track &track) {
     return ExtractFeature(feature_frame, track);
   };
-  input.compute_costs = [&](const Track &track, const LegacyIdentityRecord &identity,
+  input.compute_costs = [&](const Track &track, const IdentityRuntimeRecord &identity,
                             const std::vector<float> &feature, float *app, float *geo,
                             float *tim, float *final) {
     ComputeCosts(track, identity, feature, app, geo, tim, final);
   };
   input.evaluate_update_policy =
-      [&](const Track &track, const int track_idx, const LegacyIdentityRecord *identity,
+      [&](const Track &track, const int track_idx, const IdentityRuntimeRecord *identity,
           const float assignment_cost, const float assignment_margin,
           const bool force_geometry_update) {
         return EvaluateUpdatePolicy(track, tracks, track_idx, identity, true,

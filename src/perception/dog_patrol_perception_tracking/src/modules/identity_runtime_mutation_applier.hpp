@@ -47,24 +47,24 @@ class IdentityRuntimeMutationApplier {
   using ScoreDebugRow = IdentityAssignmentEngineAdapter::ScoreDebugRow;
 
   std::vector<float> ExtractFeature(const cv::Mat &frame, const Track &track) const;
-  ReliableGeometryCost::State ReliableGeometryState(const LegacyIdentityRecord &identity) const;
+  ReliableGeometryCost::State ReliableGeometryState(const IdentityRuntimeRecord &identity) const;
   bool TrackOverlapsAny(const Track &track, const std::vector<Track> &tracks, int self_idx) const;
   bool IsReliableObservation(const Track &track, bool allow_feat_update,
                              float assignment_cost, float assignment_margin) const;
   FeatureUpdatePolicy::Decision EvaluateUpdatePolicy(const Track &track,
                                                      const std::vector<Track> &tracks,
                                                      int self_idx,
-                                                     const LegacyIdentityRecord *identity,
+                                                     const IdentityRuntimeRecord *identity,
                                                      bool accepted,
                                                      float assignment_cost,
                                                      float assignment_margin,
                                                      bool force_geometry_update = false) const;
-  void UpdateIdentityObservation(LegacyIdentityRecord *identity, const Track &track,
+  void UpdateIdentityObservation(IdentityRuntimeRecord *identity, const Track &track,
                                  float assignment_cost, float assignment_margin) const;
   void UpsertIdentity(const Track &track, int semantic_id, const std::vector<float> &feature,
                       const FeatureUpdatePolicy::Decision &update_policy,
                       float assignment_cost, float assignment_margin);
-  void ComputeCosts(const Track &track, const LegacyIdentityRecord &identity,
+  void ComputeCosts(const Track &track, const IdentityRuntimeRecord &identity,
                     const std::vector<float> &feature, float *app, float *geo,
                     float *tim, float *final) const;
   int AllocateNewSemanticId();

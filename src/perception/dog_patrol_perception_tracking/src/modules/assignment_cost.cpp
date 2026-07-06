@@ -8,7 +8,7 @@
 namespace vision_demo_host {
 namespace {
 
-ReliableGeometryCost::State ReliableGeometryState(const LegacyIdentityRecord &identity) {
+ReliableGeometryCost::State ReliableGeometryState(const IdentityRuntimeRecord &identity) {
   ReliableGeometryCost::State state;
   state.latest_bbox = identity.last_bbox;
   state.latest_center = identity.last_center;
@@ -23,7 +23,7 @@ ReliableGeometryCost::State ReliableGeometryState(const LegacyIdentityRecord &id
 }  // namespace
 
 AssignmentCost::Result AssignmentCost::Compute(const Track &track,
-                                               const LegacyIdentityRecord &identity,
+                                               const IdentityRuntimeRecord &identity,
                                                const std::vector<float> &feature,
                                                const Config &config) {
   Result result;

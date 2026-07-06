@@ -5,7 +5,7 @@
 #include <vector>
 
 #include "assignment_candidate_builder.hpp"
-#include "legacy_identity_record.hpp"
+#include "identity_runtime_record.hpp"
 #include "vision_demo_host/types.hpp"
 
 namespace vision_demo_host {
@@ -28,8 +28,8 @@ class ActiveAssignmentInputCollector {
     const std::unordered_map<int, int> *assigned_track_to_sid{nullptr};
     const std::vector<int> *active_semantic_ids{nullptr};
     std::function<bool(int)> semantic_id_used;
-    std::function<const LegacyIdentityRecord *(int)> find_identity;
-    std::function<ScoreEvidence(const Track &, const LegacyIdentityRecord &, const std::vector<float> &)>
+    std::function<const IdentityRuntimeRecord *(int)> find_identity;
+    std::function<ScoreEvidence(const Track &, const IdentityRuntimeRecord &, const std::vector<float> &)>
         score_evidence;
   };
 

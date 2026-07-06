@@ -6,7 +6,7 @@
 #include <vector>
 
 #include "birth_manager.hpp"
-#include "legacy_identity_record.hpp"
+#include "identity_runtime_record.hpp"
 #include "vision_demo_host/types.hpp"
 
 namespace vision_demo_host {
@@ -51,11 +51,11 @@ class UnresolvedTrackFinalResolutionCoordinator {
     const std::unordered_map<int, int> *prev_raw_to_semantic{nullptr};
     const std::vector<DebugRow> *score_debug_rows{nullptr};
     Config config;
-    std::function<const LegacyIdentityRecord *(int)> find_identity;
-    std::function<float(const LegacyIdentityRecord &, const AssociationEvidence &)> active_assignment_max_cost;
-    std::function<ScoreEvidence(const Track &, const LegacyIdentityRecord &, const std::vector<float> &)>
+    std::function<const IdentityRuntimeRecord *(int)> find_identity;
+    std::function<float(const IdentityRuntimeRecord &, const AssociationEvidence &)> active_assignment_max_cost;
+    std::function<ScoreEvidence(const Track &, const IdentityRuntimeRecord &, const std::vector<float> &)>
         score_evidence;
-    std::function<bool(const Track &, const LegacyIdentityRecord &, const std::vector<Track> &, int,
+    std::function<bool(const Track &, const IdentityRuntimeRecord &, const std::vector<Track> &, int,
                        const std::unordered_map<int, int> &, float)>
         looks_like_merged_side_reappearance;
     std::function<BirthManager::Result(const BirthManager::Input &)> evaluate_birth;

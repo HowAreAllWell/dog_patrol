@@ -12,7 +12,7 @@ using vision_demo_host::AssignmentCandidateBuilder;
 using vision_demo_host::ClassId;
 using vision_demo_host::InactiveRecoveryInputCollector;
 using vision_demo_host::InactiveRecoverySolver;
-using vision_demo_host::LegacyIdentityRecord;
+using vision_demo_host::IdentityRuntimeRecord;
 using vision_demo_host::Track;
 
 Track PersonTrack(const int raw_track_id, const bool occlusion_suspect = false) {
@@ -25,10 +25,10 @@ Track PersonTrack(const int raw_track_id, const bool occlusion_suspect = false) 
   return track;
 }
 
-LegacyIdentityRecord Identity(const int semantic_id,
+IdentityRuntimeRecord Identity(const int semantic_id,
                               const int missing_frames = 200,
                               const int occlusion_protect_remaining = 0) {
-  LegacyIdentityRecord identity;
+  IdentityRuntimeRecord identity;
   identity.semantic_id = semantic_id;
   identity.class_id = ClassId::kPerson;
   identity.missing_frames = missing_frames;
@@ -43,7 +43,7 @@ InactiveRecoveryInputCollector::Input BaseInput(
     const std::unordered_map<int, int> &assigned_track_to_sid,
     const std::vector<int> &inactive_semantic_ids,
     const std::unordered_map<int, bool> &used_semantic_ids,
-    const std::unordered_map<int, LegacyIdentityRecord> &identities) {
+    const std::unordered_map<int, IdentityRuntimeRecord> &identities) {
   InactiveRecoveryInputCollector::Input input;
   input.tracks = &tracks;
   input.person_track_indices = &person_track_indices;
@@ -54,14 +54,14 @@ InactiveRecoveryInputCollector::Input BaseInput(
     const auto it = used_semantic_ids.find(semantic_id);
     return it != used_semantic_ids.end() && it->second;
   };
-  input.find_identity = [&](const int semantic_id) -> const LegacyIdentityRecord * {
+  input.find_identity = [&](const int semantic_id) -> const IdentityRuntimeRecord * {
     const auto it = identities.find(semantic_id);
     return it == identities.end() ? nullptr : &it->second;
   };
-  input.can_recover_identity = [](const LegacyIdentityRecord &identity) {
+  input.can_recover_identity = [](const IdentityRuntimeRecord &identity) {
     return identity.occlusion_protect_remaining <= 0;
   };
-  input.score_evidence = [](const Track &, const LegacyIdentityRecord &identity, const std::vector<float> &feature) {
+  input.score_evidence = [](const Track &, const IdentityRuntimeRecord &identity, const std::vector<float> &feature) {
     InactiveRecoveryInputCollector::ScoreEvidence evidence;
     evidence.app_cost = feature.empty() ? 0.90F : feature[0];
     evidence.geo_cost = feature.size() < 2U ? 0.80F : feature[1];
@@ -81,7 +81,7 @@ TEST(InactiveRecoveryInputCollectorTest, FiltersAssignedAndOcclusionSuspectRecov
   const std::unordered_map<int, int> assigned_track_to_sid{{0, 7}};
   const std::vector<int> inactive_semantic_ids{10};
   const std::unordered_map<int, bool> used_semantic_ids;
-  const std::unordered_map<int, LegacyIdentityRecord> identities{{10, Identity(10)}};
+  const std::unordered_map<int, IdentityRuntimeRecord> identities{{10, Identity(10)}};
 
   const auto result = InactiveRecoveryInputCollector::Collect(BaseInput(
       tracks, person_track_indices, person_features, assigned_track_to_sid, inactive_semantic_ids,
@@ -105,7 +105,7 @@ TEST(InactiveRecoveryInputCollectorTest, FiltersUsedInactiveSemanticIds) {
   const std::unordered_map<int, int> assigned_track_to_sid;
   const std::vector<int> inactive_semantic_ids{10, 11};
   const std::unordered_map<int, bool> used_semantic_ids{{10, true}};
-  const std::unordered_map<int, LegacyIdentityRecord> identities{{10, Identity(10)}, {11, Identity(11)}};
+  const std::unordered_map<int, IdentityRuntimeRecord> identities{{10, Identity(10)}, {11, Identity(11)}};
 
   const auto result = InactiveRecoveryInputCollector::Collect(BaseInput(
       tracks, person_track_indices, person_features, assigned_track_to_sid, inactive_semantic_ids,
@@ -126,7 +126,7 @@ TEST(InactiveRecoveryInputCollectorTest, ExcludesNonRecoverableInactiveIdentitie
   const std::unordered_map<int, int> assigned_track_to_sid;
   const std::vector<int> inactive_semantic_ids{10, 11};
   const std::unordered_map<int, bool> used_semantic_ids;
-  const std::unordered_map<int, LegacyIdentityRecord> identities{
+  const std::unordered_map<int, IdentityRuntimeRecord> identities{
       {10, Identity(10, 200, 3)},
       {11, Identity(11, 200, 0)},
   };
@@ -148,7 +148,7 @@ TEST(InactiveRecoveryInputCollectorTest, AdaptsStrictAndRelaxedRecoverThresholds
   const std::unordered_map<int, int> assigned_track_to_sid;
   const std::vector<int> inactive_semantic_ids{10, 11};
   const std::unordered_map<int, bool> used_semantic_ids;
-  const std::unordered_map<int, LegacyIdentityRecord> identities{
+  const std::unordered_map<int, IdentityRuntimeRecord> identities{
       {10, Identity(10, 120)},
       {11, Identity(11, 200)},
   };
@@ -169,10 +169,10 @@ TEST(InactiveRecoveryInputCollectorTest, PropagatesMissingIdentityGateEvidenceTo
   const std::unordered_map<int, int> assigned_track_to_sid;
   const std::vector<int> inactive_semantic_ids{10};
   const std::unordered_map<int, bool> used_semantic_ids;
-  const std::unordered_map<int, LegacyIdentityRecord> identities{{10, Identity(10)}};
+  const std::unordered_map<int, IdentityRuntimeRecord> identities{{10, Identity(10)}};
   auto input = BaseInput(tracks, person_track_indices, person_features, assigned_track_to_sid,
                          inactive_semantic_ids, used_semantic_ids, identities);
-  input.score_evidence = [](const Track &, const LegacyIdentityRecord &, const std::vector<float> &) {
+  input.score_evidence = [](const Track &, const IdentityRuntimeRecord &, const std::vector<float> &) {
     InactiveRecoveryInputCollector::ScoreEvidence evidence;
     evidence.app_cost = 0.05F;
     evidence.geo_cost = 0.10F;
@@ -203,10 +203,10 @@ TEST(InactiveRecoveryInputCollectorTest, PropagatesAcceptedCandidateScoresAndSel
   const std::unordered_map<int, int> assigned_track_to_sid;
   const std::vector<int> inactive_semantic_ids{10};
   const std::unordered_map<int, bool> used_semantic_ids;
-  const std::unordered_map<int, LegacyIdentityRecord> identities{{10, Identity(10)}};
+  const std::unordered_map<int, IdentityRuntimeRecord> identities{{10, Identity(10)}};
   auto input = BaseInput(tracks, person_track_indices, person_features, assigned_track_to_sid,
                          inactive_semantic_ids, used_semantic_ids, identities);
-  input.score_evidence = [](const Track &, const LegacyIdentityRecord &, const std::vector<float> &) {
+  input.score_evidence = [](const Track &, const IdentityRuntimeRecord &, const std::vector<float> &) {
     InactiveRecoveryInputCollector::ScoreEvidence evidence;
     evidence.app_cost = 0.10F;
     evidence.geo_cost = 0.22F;
