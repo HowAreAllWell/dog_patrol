@@ -95,6 +95,9 @@ class CameraIngest {
   ~CameraIngest();
 
   static bool ValidateConfig(const Config &config, std::string *error);
+  static bool ParseBayerInterpolation(const std::string &value,
+                                      BayerInterpolation *interpolation,
+                                      std::string *error);
   static std::string BayerInterpolationName(BayerInterpolation interpolation);
   static std::string PixelTypeName(std::uint32_t pixel_type);
 

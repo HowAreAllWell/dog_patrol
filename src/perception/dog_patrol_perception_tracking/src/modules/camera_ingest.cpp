@@ -260,6 +260,29 @@ bool CameraIngest::ValidateConfig(const Config &config, std::string *error) {
   return Fail(error, "camera bayer_interpolation is unsupported");
 }
 
+bool CameraIngest::ParseBayerInterpolation(const std::string &value,
+                                           BayerInterpolation *interpolation,
+                                           std::string *error) {
+  if (interpolation == nullptr) {
+    return Fail(error, "Bayer interpolation output pointer is null");
+  }
+  if (value == "fast") {
+    *interpolation = BayerInterpolation::kFast;
+  } else if (value == "balanced") {
+    *interpolation = BayerInterpolation::kBalanced;
+  } else if (value == "optimal") {
+    *interpolation = BayerInterpolation::kOptimal;
+  } else if (value == "optimal_plus") {
+    *interpolation = BayerInterpolation::kOptimalPlus;
+  } else {
+    return Fail(error, "Unsupported Bayer interpolation mode: " + value);
+  }
+  if (error != nullptr) {
+    error->clear();
+  }
+  return true;
+}
+
 std::string CameraIngest::BayerInterpolationName(const BayerInterpolation interpolation) {
   switch (interpolation) {
     case BayerInterpolation::kFast:

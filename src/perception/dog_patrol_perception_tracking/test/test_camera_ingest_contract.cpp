@@ -24,6 +24,21 @@ TEST(CameraIngestContractTest, ValidatesExplicitBayerConfiguration) {
   EXPECT_NE(error.find("fps"), std::string::npos);
 }
 
+TEST(CameraIngestContractTest, ParsesSupportedBayerInterpolationNames) {
+  CameraIngest::BayerInterpolation interpolation{};
+  std::string error;
+
+  EXPECT_TRUE(CameraIngest::ParseBayerInterpolation("fast", &interpolation, &error));
+  EXPECT_EQ(interpolation, CameraIngest::BayerInterpolation::kFast);
+  EXPECT_TRUE(
+      CameraIngest::ParseBayerInterpolation("optimal_plus", &interpolation, &error));
+  EXPECT_EQ(interpolation, CameraIngest::BayerInterpolation::kOptimalPlus);
+  EXPECT_FALSE(CameraIngest::ParseBayerInterpolation("nearest", &interpolation, &error));
+  EXPECT_NE(error.find("nearest"), std::string::npos);
+  EXPECT_FALSE(CameraIngest::ParseBayerInterpolation("fast", nullptr, &error));
+  EXPECT_NE(error.find("null"), std::string::npos);
+}
+
 TEST(CameraIngestContractTest, NamesKnownAndUnknownMvsPixelFormats) {
   EXPECT_EQ(CameraIngest::PixelTypeName(0x01080009U), "BayerRG8");
   EXPECT_EQ(CameraIngest::PixelTypeName(0x02180015U), "BGR8_Packed");

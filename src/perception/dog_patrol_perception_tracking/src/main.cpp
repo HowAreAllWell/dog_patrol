@@ -27,24 +27,6 @@ namespace {
 
 const char *BoolStr(const bool value) { return value ? "true" : "false"; }
 
-vision_demo_host::CameraIngest::BayerInterpolation ParseBayerInterpolation(
-    const std::string &value) {
-  if (value == "fast") {
-    return vision_demo_host::CameraIngest::BayerInterpolation::kFast;
-  }
-  if (value == "balanced") {
-    return vision_demo_host::CameraIngest::BayerInterpolation::kBalanced;
-  }
-  if (value == "optimal") {
-    return vision_demo_host::CameraIngest::BayerInterpolation::kOptimal;
-  }
-  if (value == "optimal_plus") {
-    return vision_demo_host::CameraIngest::BayerInterpolation::kOptimalPlus;
-  }
-  throw std::runtime_error(
-      "camera.bayer_interpolation must be fast, balanced, optimal, or optimal_plus");
-}
-
 }  // namespace
 
 class VisionDemoNode : public rclcpp::Node {
@@ -165,8 +147,11 @@ class VisionDemoNode : public rclcpp::Node {
     camera_cfg.height = this->get_parameter("camera.height").as_int();
     camera_cfg.fps = this->get_parameter("camera.fps").as_double();
     camera_cfg.timeout_ms = this->get_parameter("camera.timeout_ms").as_int();
-    camera_cfg.bayer_interpolation = ParseBayerInterpolation(
-        this->get_parameter("camera.bayer_interpolation").as_string());
+    if (!vision_demo_host::CameraIngest::ParseBayerInterpolation(
+            this->get_parameter("camera.bayer_interpolation").as_string(),
+            &camera_cfg.bayer_interpolation, &error)) {
+      throw std::runtime_error(error);
+    }
     camera_cfg.bayer_smoothing =
         this->get_parameter("camera.bayer_smoothing").as_bool();
 
