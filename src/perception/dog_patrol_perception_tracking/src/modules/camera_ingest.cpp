@@ -362,6 +362,24 @@ std::string CameraIngest::PixelTypeName(const std::uint32_t pixel_type) {
   }
 }
 
+void CameraIngest::ApplySourceFrameMetadata(const SourceFrameMetadata &metadata,
+                                            AcquiredFrame *frame) {
+  if (frame == nullptr) {
+    return;
+  }
+  frame->source_timestamp_ns = metadata.source_timestamp_ns;
+  frame->sdk_host_timestamp = metadata.sdk_host_timestamp;
+  frame->camera_frame_number = metadata.camera_frame_number;
+  frame->camera_frame_number_available = true;
+  frame->device_timestamp_ticks = metadata.device_timestamp_ticks;
+  frame->source_pixel_type = metadata.source_pixel_type;
+  frame->source_pixel_type_name = PixelTypeName(metadata.source_pixel_type);
+  frame->width = metadata.width;
+  frame->height = metadata.height;
+  frame->source_payload_bytes = metadata.source_payload_bytes;
+  frame->camera_lost_packets = metadata.camera_lost_packets;
+}
+
 bool CameraIngest::Open(const Config &config, std::string *error) {
   Close();
   if (!ValidateConfig(config, error)) {
@@ -535,24 +553,24 @@ bool CameraIngest::Read(AcquiredFrame *frame, std::string *error) {
     const unsigned int height = out_frame.stFrameInfo.nHeight;
     const auto src_pixel_type = out_frame.stFrameInfo.enPixelType;
 
-    frame->source_timestamp_ns = static_cast<std::uint64_t>(
+    SourceFrameMetadata metadata;
+    metadata.source_timestamp_ns = static_cast<std::uint64_t>(
         std::chrono::duration_cast<std::chrono::nanoseconds>(
             std::chrono::system_clock::now().time_since_epoch())
             .count());
-    frame->sdk_host_timestamp = out_frame.stFrameInfo.nHostTimeStamp;
-    frame->camera_frame_number = out_frame.stFrameInfo.nFrameNum;
-    frame->camera_frame_number_available = true;
-    frame->device_timestamp_ticks =
+    metadata.sdk_host_timestamp = out_frame.stFrameInfo.nHostTimeStamp;
+    metadata.camera_frame_number = out_frame.stFrameInfo.nFrameNum;
+    metadata.device_timestamp_ticks =
         (static_cast<std::uint64_t>(out_frame.stFrameInfo.nDevTimeStampHigh) << 32U) |
         out_frame.stFrameInfo.nDevTimeStampLow;
-    frame->source_pixel_type = static_cast<std::uint32_t>(src_pixel_type);
-    frame->source_pixel_type_name = PixelTypeName(frame->source_pixel_type);
-    frame->width = static_cast<int>(width);
-    frame->height = static_cast<int>(height);
-    frame->source_payload_bytes =
+    metadata.source_pixel_type = static_cast<std::uint32_t>(src_pixel_type);
+    metadata.width = static_cast<int>(width);
+    metadata.height = static_cast<int>(height);
+    metadata.source_payload_bytes =
         out_frame.stFrameInfo.nFrameLenEx > 0 ? out_frame.stFrameInfo.nFrameLenEx
                                              : out_frame.stFrameInfo.nFrameLen;
-    frame->camera_lost_packets = out_frame.stFrameInfo.nLostPacket;
+    metadata.camera_lost_packets = out_frame.stFrameInfo.nLostPacket;
+    ApplySourceFrameMetadata(metadata, frame);
 
     MV_CC_PIXEL_CONVERT_PARAM_EX convert_param{};
     convert_param.nWidth = width;

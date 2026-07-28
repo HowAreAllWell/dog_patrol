@@ -45,6 +45,37 @@ TEST(CameraIngestContractTest, NamesKnownAndUnknownMvsPixelFormats) {
   EXPECT_EQ(CameraIngest::PixelTypeName(0xDEADBEEFU), "Unknown(0xdeadbeef)");
 }
 
+TEST(CameraIngestContractTest, ProjectsSdkIndependentSourceFrameMetadata) {
+  CameraIngest::SourceFrameMetadata metadata;
+  metadata.source_timestamp_ns = 1'785'216'415'805'346'555ULL;
+  metadata.sdk_host_timestamp = 1'785'216'415'795LL;
+  metadata.camera_frame_number = 32U;
+  metadata.device_timestamp_ticks = 1'367'135'394'241ULL;
+  metadata.source_pixel_type = 0x0108000AU;
+  metadata.width = 1280;
+  metadata.height = 1024;
+  metadata.source_payload_bytes = 1'310'720U;
+  metadata.camera_lost_packets = 3U;
+
+  CameraIngest::AcquiredFrame frame;
+  frame.bgr8 = cv::Mat(2, 3, CV_8UC3);
+  CameraIngest::ApplySourceFrameMetadata(metadata, &frame);
+
+  EXPECT_EQ(frame.source_timestamp_ns, metadata.source_timestamp_ns);
+  EXPECT_EQ(frame.sdk_host_timestamp, metadata.sdk_host_timestamp);
+  EXPECT_TRUE(frame.camera_frame_number_available);
+  EXPECT_EQ(frame.camera_frame_number, 32U);
+  EXPECT_EQ(frame.device_timestamp_ticks, metadata.device_timestamp_ticks);
+  EXPECT_EQ(frame.source_pixel_type, 0x0108000AU);
+  EXPECT_EQ(frame.source_pixel_type_name, "BayerGB8");
+  EXPECT_EQ(frame.width, 1280);
+  EXPECT_EQ(frame.height, 1024);
+  EXPECT_EQ(frame.source_payload_bytes, 1'310'720U);
+  EXPECT_EQ(frame.camera_lost_packets, 3U);
+  EXPECT_EQ(frame.bgr8.type(), CV_8UC3);
+  EXPECT_EQ(frame.bgr8.size(), cv::Size(3, 2));
+}
+
 TEST(CameraIngestContractTest, CountsNonContiguousCameraFramesWithoutTreatingWrapAsDrop) {
   CameraIngest::FrameContinuity continuity;
 

@@ -256,6 +256,9 @@ Tracker ReID 配置（`tracker.*`）：
 - `B(sparseOptFlow, downscale=2)` 平均 FPS 约 `15.87`
 - `C(sparseOptFlow, downscale=4)` 平均 FPS 约 `21.49`（init 日志显示 `gmc_downscale=4` 已生效）
 
+旧 `scripts/bench_gmc_rtsp.sh` 保留给 #86 统一清理；当前 live inference
+节点已不再接受 RTSP 参数，不应把该历史脚本用于新的 #80 基线。
+
 建议默认配置（当前）：
 - `gmc_enabled=true`
 - `gmc_method=sparseOptFlow`
@@ -276,6 +279,19 @@ source /opt/ros/humble/setup.bash
 colcon build --packages-select vision_demo_host
 ```
 
+运行（legacy RTSP recorder，保留到 #86）：
+
+```bash
+cd /path/to/my_workplace/vision_demo_ws
+source install/setup.bash
+ros2 run vision_demo_host record_test_set \
+  --camera-backend gstreamer \
+  --rtsp-url 'rtsp://example.invalid/stream' \
+  --session-name demo_set_01 \
+  --scene-tag single_person \
+  --notes 'daylight indoor'
+```
+
 运行（Hikrobot MVS / USB3 Vision 工业相机，带预览）：
 
 ```bash
@@ -283,6 +299,7 @@ cd /path/to/my_workplace/vision_demo_ws
 export LD_LIBRARY_PATH=/opt/MVS/lib/aarch64:/opt/MVS/lib/64:${LD_LIBRARY_PATH:-}
 source install/setup.bash
 ros2 run vision_demo_host record_test_set \
+  --camera-backend hik_mvs \
   --mvs-model MV-CU013-A0UC \
   --width 1280 \
   --height 1024 \
@@ -299,6 +316,7 @@ cd /path/to/my_workplace/vision_demo_ws
 export LD_LIBRARY_PATH=/opt/MVS/lib/aarch64:/opt/MVS/lib/64:${LD_LIBRARY_PATH:-}
 source install/setup.bash
 ros2 run vision_demo_host record_test_set \
+  --camera-backend hik_mvs \
   --mvs-model MV-CU013-A0UC \
   --width 1280 \
   --height 1024 \
@@ -315,7 +333,8 @@ ros2 run vision_demo_host record_test_set \
 cd /path/to/my_workplace/vision_demo_ws
 source install/setup.bash
 ros2 run vision_demo_host record_test_set \
-  --mvs-model MV-CU013-A0UC \
+  --camera-backend gstreamer \
+  --rtsp-url 'rtsp://example.invalid/stream' \
   --session-name headless_set_01 \
   --scene-tag robot_motion_heavy \
   --no-preview --auto-record --max-seconds 30

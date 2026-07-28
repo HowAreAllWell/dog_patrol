@@ -48,6 +48,18 @@ class CameraIngest {
     double copy_ms{0.0};
   };
 
+  struct SourceFrameMetadata {
+    std::uint64_t source_timestamp_ns{0};
+    std::int64_t sdk_host_timestamp{0};
+    std::uint32_t camera_frame_number{0};
+    std::uint64_t device_timestamp_ticks{0};
+    std::uint32_t source_pixel_type{0};
+    int width{0};
+    int height{0};
+    std::size_t source_payload_bytes{0};
+    std::uint32_t camera_lost_packets{0};
+  };
+
   struct PercentileSummary {
     std::size_t samples{0};
     double p50_ms{0.0};
@@ -100,6 +112,8 @@ class CameraIngest {
                                       std::string *error);
   static std::string BayerInterpolationName(BayerInterpolation interpolation);
   static std::string PixelTypeName(std::uint32_t pixel_type);
+  static void ApplySourceFrameMetadata(const SourceFrameMetadata &metadata,
+                                       AcquiredFrame *frame);
 
   bool Open(const Config &config, std::string *error);
   bool Read(AcquiredFrame *frame, std::string *error);
