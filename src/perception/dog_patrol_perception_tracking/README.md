@@ -5,7 +5,7 @@ Orin 宿主机侧视觉验收 demo，包含检测、短期跟踪、语义身份�
 ## 当前链路状态
 
 已接入：
-- `camera_ingest`：GStreamer/RTSP 或 Hikrobot MVS
+- `camera_ingest`：仅 Hikrobot MVS；向下游返回自持有的 BGR8 图像和源帧元数据
 - `preprocess_infer`：YOLO26n TensorRT engine 推理（本机导出的 `.engine`）
 - `det_filter`：`person + car` 阈值过滤（配置化）
 - `mot_tracker`：BoT-SORT 风格实现（Kalman + 两阶段关联 + GMC + appearance）
@@ -23,10 +23,10 @@ Orin 宿主机侧视觉验收 demo，包含检测、短期跟踪、语义身份�
 默认参数文件：`config/demo_params.yaml`
 
 核心项：
-- `camera.backend`
-- `camera.rtsp_url` / `camera.gstreamer_pipeline`
 - `camera.mvs_model` / `camera.mvs_serial`
 - `camera.width` / `camera.height` / `camera.fps` / `camera.timeout_ms`
+- `camera.bayer_interpolation`（`fast|balanced|optimal|optimal_plus`）
+- `camera.bayer_smoothing`
 - `detector.runtime_path`
 - `detector.raw_conf_threshold`
 - `detector.person_conf_threshold` / `detector.car_conf_threshold`
@@ -99,49 +99,30 @@ colcon build --packages-select vision_demo_host
 
 ## 运行（示例）
 
-方式 1（直接用 `rtsp_url`）：
+Hikrobot MVS / USB3 Vision 工业相机：
 
 ```bash
 cd /path/to/my_workplace/vision_demo_ws
 source install/setup.bash
 ros2 run vision_demo_host vision_demo_node --ros-args \
-  -p camera.gstreamer_pipeline:='' \
-  -p camera.rtsp_url:='rtsp://example.invalid/stream' \
-  -p detector.runtime_path:='/path/to/my_workplace/vision_demo_ws/assets/models/engines/orin_jp621_trt_local/yolo26n_fp16_640.engine' \
-  -p detector.enable_fake_detection:=false
-```
-
-方式 2（直接传完整 GStreamer pipeline）：
-
-```bash
-cd /path/to/my_workplace/vision_demo_ws
-source install/setup.bash
-ros2 run vision_demo_host vision_demo_node --ros-args \
-  -p camera.gstreamer_pipeline:='rtspsrc location=rtsp://example.invalid/stream latency=200 protocols=tcp ! rtph264depay ! h264parse ! nvv4l2decoder ! nvvidconv ! video/x-raw,format=BGRx ! videoconvert ! video/x-raw,format=BGR ! appsink drop=1 max-buffers=1 sync=false' \
-  -p detector.runtime_path:='/path/to/my_workplace/vision_demo_ws/assets/models/engines/orin_jp621_trt_local/yolo26n_fp16_640.engine' \
-  -p detector.enable_fake_detection:=false
-```
-
-方式 3（Hikrobot MVS / USB3 Vision 工业相机）：
-
-```bash
-cd /path/to/my_workplace/vision_demo_ws
-source install/setup.bash
-ros2 run vision_demo_host vision_demo_node --ros-args \
-  -p camera.backend:='hik_mvs' \
   -p camera.mvs_model:='MV-CU013-A0UC' \
   -p camera.mvs_serial:='CAMERA_SERIAL' \
   -p camera.width:=1280 \
   -p camera.height:=1024 \
   -p camera.fps:=30.0 \
+  -p camera.bayer_interpolation:='optimal' \
+  -p camera.bayer_smoothing:=false \
   -p detector.runtime_path:='/path/to/my_workplace/vision_demo_ws/assets/models/engines/orin_jp621_trt_local/yolo26n_fp16_640.engine' \
   -p detector.enable_fake_detection:=false
 ```
 
 说明：
-- `camera.backend='hik_mvs'` 时，相机采集通过 `/opt/MVS` SDK 完成，不再依赖 `camera.gstreamer_pipeline`。
+- 在线相机采集固定通过 `/opt/MVS` SDK 完成，接口不再提供 GStreamer backend 或 pipeline 参数。
 - `camera.mvs_serial` 可留空；若同机只接一台目标型号相机，可仅用 `camera.mvs_model` 过滤。
 - 当前海康 USB3 Vision 相机通常不会暴露为 `/dev/video*`，因此不走 `v4l2src` 直连路径。
+- 启动日志记录实际 PixelType、分辨率、源 payload、帧号/时间戳，以及显式 Bayer 插值和平滑设置。
+- `camera_metrics` 日志独立于录制开关，报告 acquisition、conversion、copy 的 p50/p95/p99，
+  并报告相机帧号不连续、估计 drop 和 MVS 丢包计数。
 
 ## UDP 接收
 
@@ -164,7 +145,7 @@ nc -u -l -p 5005
 ```bash
 cd /path/to/my_workplace/vision_demo_ws
 src/vision_demo_host/scripts/live_bearing_test.sh \
-  --rtsp-url 'rtsp://example.invalid/stream' \
+  --mvs-model MV-CU013-A0UC \
   --viz true \
   --rec false
 ```
@@ -174,7 +155,7 @@ src/vision_demo_host/scripts/live_bearing_test.sh \
 ```bash
 cd /path/to/my_workplace/vision_demo_ws
 src/vision_demo_host/scripts/live_bearing_test.sh \
-  --rtsp-url 'rtsp://example.invalid/stream' \
+  --mvs-model MV-CU013-A0UC \
   --viz true \
   --rec true \
   --record-path '/path/to/my_workplace/vision_demo_ws/data/recordings/live_$(date +%Y%m%d_%H%M%S).mp4' \
@@ -185,7 +166,7 @@ src/vision_demo_host/scripts/live_bearing_test.sh \
 
 - build 成功
 - 节点可加载真实 TensorRT engine
-- 真实 RTSP ingest 可运行
+- Hik MVS ingest 输出 BGR8 acquired-frame 并携带源帧元数据
 - detector 输出可驱动后续链路
 - BoT-SORT tracker 初始化并输出轨迹（画面有目标时）
 - UDP JSON 可接收并包含完整字段
@@ -257,19 +238,20 @@ Tracker ReID 配置（`tracker.*`）：
 - 当前 tracking identity 实现状态：`/path/to/my_workplace/vision_demo_ws/docs/current_tracking_identity_state.md`
 - `orin_hik_h264_MOT` 01/02 遮挡与 ID 问题复盘：`/path/to/my_workplace/vision_demo_ws/docs/orin_hik_h264_MOT_01_02_issue_resolution.md`
 
-## GMC Benchmark（A/B/C）
+## Hik MVS 相机性能基线
 
-已提供一键脚本（真实 RTSP）：
+一键运行无录制 live inference，并收集实际 PixelType、吞吐、阶段 p50/p95/p99 和 frame drop：
 
 ```bash
-/path/to/my_workplace/vision_demo_ws/src/vision_demo_host/scripts/bench_gmc_rtsp.sh
+/path/to/my_workplace/vision_demo_ws/src/vision_demo_host/scripts/bench_hik_mvs_camera.sh
 ```
 
-输出目录（日志 + 汇总表）：
-- `/path/to/my_workplace/vision_demo_ws/log/bench_gmc_sparse_optflow/`
-- 汇总表：`summary.md`
+默认目标为 `1280x1024@30 FPS`、`fast` Bayer interpolation，运行 60 秒，输出到
+`log/bench_hik_mvs_camera/`。硬件验收应保存 `summary.txt` 和完整日志。
+本轮 `fast` / `optimal` 对照证据见
+`docs/issue80_hik_mvs_frame_contract_baseline.md`。
 
-当前已验证结论（用户终端真实 RTSP）：
+历史 RTSP 基线（仅作迁移前对照，不是当前 live input）：
 - `A(gmc_off)` 平均 FPS 约 `24.07`
 - `B(sparseOptFlow, downscale=2)` 平均 FPS 约 `15.87`
 - `C(sparseOptFlow, downscale=4)` 平均 FPS 约 `21.49`（init 日志显示 `gmc_downscale=4` 已生效）
@@ -294,18 +276,6 @@ source /opt/ros/humble/setup.bash
 colcon build --packages-select vision_demo_host
 ```
 
-运行（带预览）：
-
-```bash
-cd /path/to/my_workplace/vision_demo_ws
-source install/setup.bash
-ros2 run vision_demo_host record_test_set \
-  --rtsp-url 'rtsp://example.invalid/stream' \
-  --session-name demo_set_01 \
-  --scene-tag single_person \
-  --notes 'daylight indoor'
-```
-
 运行（Hikrobot MVS / USB3 Vision 工业相机，带预览）：
 
 ```bash
@@ -313,7 +283,6 @@ cd /path/to/my_workplace/vision_demo_ws
 export LD_LIBRARY_PATH=/opt/MVS/lib/aarch64:/opt/MVS/lib/64:${LD_LIBRARY_PATH:-}
 source install/setup.bash
 ros2 run vision_demo_host record_test_set \
-  --camera-backend hik_mvs \
   --mvs-model MV-CU013-A0UC \
   --width 1280 \
   --height 1024 \
@@ -330,7 +299,6 @@ cd /path/to/my_workplace/vision_demo_ws
 export LD_LIBRARY_PATH=/opt/MVS/lib/aarch64:/opt/MVS/lib/64:${LD_LIBRARY_PATH:-}
 source install/setup.bash
 ros2 run vision_demo_host record_test_set \
-  --camera-backend hik_mvs \
   --mvs-model MV-CU013-A0UC \
   --width 1280 \
   --height 1024 \
@@ -347,7 +315,7 @@ ros2 run vision_demo_host record_test_set \
 cd /path/to/my_workplace/vision_demo_ws
 source install/setup.bash
 ros2 run vision_demo_host record_test_set \
-  --rtsp-url 'rtsp://example.invalid/stream' \
+  --mvs-model MV-CU013-A0UC \
   --session-name headless_set_01 \
   --scene-tag robot_motion_heavy \
   --no-preview --auto-record --max-seconds 30

@@ -3,10 +3,8 @@
 #include <filesystem>
 #include <memory>
 #include <optional>
-#include <sstream>
 #include <stdexcept>
 #include <string>
-#include <cctype>
 #include <utility>
 #include <vector>
 
@@ -29,36 +27,22 @@ namespace {
 
 const char *BoolStr(const bool value) { return value ? "true" : "false"; }
 
-std::string BuildDefaultRtspPipeline(const std::string &rtsp_url) {
-  if (rtsp_url.empty()) {
-    return "";
+vision_demo_host::CameraIngest::BayerInterpolation ParseBayerInterpolation(
+    const std::string &value) {
+  if (value == "fast") {
+    return vision_demo_host::CameraIngest::BayerInterpolation::kFast;
   }
-
-  std::ostringstream oss;
-  oss << "rtspsrc location=" << rtsp_url
-      << " latency=50 ! rtph264depay ! h264parse ! nvv4l2decoder ! "
-         "nvvidconv ! video/x-raw,format=BGRx ! videoconvert ! "
-         "video/x-raw,format=BGR ! appsink drop=1 max-buffers=1 sync=false";
-  return oss.str();
-}
-
-vision_demo_host::CameraIngest::Backend ParseCameraBackend(std::string backend) {
-  std::transform(backend.begin(), backend.end(), backend.begin(),
-                 [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
-  if (backend == "hik_mvs" || backend == "mvs" || backend == "hik") {
-    return vision_demo_host::CameraIngest::Backend::kHikMvs;
+  if (value == "balanced") {
+    return vision_demo_host::CameraIngest::BayerInterpolation::kBalanced;
   }
-  return vision_demo_host::CameraIngest::Backend::kGstreamer;
-}
-
-const char *CameraBackendToString(const vision_demo_host::CameraIngest::Backend backend) {
-  switch (backend) {
-    case vision_demo_host::CameraIngest::Backend::kHikMvs:
-      return "hik_mvs";
-    case vision_demo_host::CameraIngest::Backend::kGstreamer:
-    default:
-      return "gstreamer";
+  if (value == "optimal") {
+    return vision_demo_host::CameraIngest::BayerInterpolation::kOptimal;
   }
+  if (value == "optimal_plus") {
+    return vision_demo_host::CameraIngest::BayerInterpolation::kOptimalPlus;
+  }
+  throw std::runtime_error(
+      "camera.bayer_interpolation must be fast, balanced, optimal, or optimal_plus");
 }
 
 }  // namespace
@@ -86,15 +70,14 @@ class VisionDemoNode : public rclcpp::Node {
 
  private:
   void DeclareParameters() {
-    this->declare_parameter<std::string>("camera.backend", "gstreamer");
-    this->declare_parameter<std::string>("camera.rtsp_url", "");
-    this->declare_parameter<std::string>("camera.gstreamer_pipeline", "");
     this->declare_parameter<std::string>("camera.mvs_model", "MV-CU013-A0UC");
     this->declare_parameter<std::string>("camera.mvs_serial", "");
     this->declare_parameter<int>("camera.width", 1280);
     this->declare_parameter<int>("camera.height", 1024);
     this->declare_parameter<double>("camera.fps", 30.0);
     this->declare_parameter<int>("camera.timeout_ms", 1000);
+    this->declare_parameter<std::string>("camera.bayer_interpolation", "optimal");
+    this->declare_parameter<bool>("camera.bayer_smoothing", false);
 
     this->declare_parameter<std::string>("detector.runtime_path", "");
     this->declare_parameter<double>("detector.raw_conf_threshold", 0.10);
@@ -175,23 +158,17 @@ class VisionDemoNode : public rclcpp::Node {
   void LoadConfigAndInitialize() {
     std::string error;
 
-    const auto camera_backend =
-        ParseCameraBackend(this->get_parameter("camera.backend").as_string());
-    const std::string rtsp_url = this->get_parameter("camera.rtsp_url").as_string();
-    std::string pipeline = this->get_parameter("camera.gstreamer_pipeline").as_string();
-    if (camera_backend == vision_demo_host::CameraIngest::Backend::kGstreamer && pipeline.empty()) {
-      pipeline = BuildDefaultRtspPipeline(rtsp_url);
-    }
-
     vision_demo_host::CameraIngest::Config camera_cfg;
-    camera_cfg.backend = camera_backend;
-    camera_cfg.gstreamer_pipeline = pipeline;
     camera_cfg.hik_mvs_model = this->get_parameter("camera.mvs_model").as_string();
     camera_cfg.hik_mvs_serial = this->get_parameter("camera.mvs_serial").as_string();
     camera_cfg.width = this->get_parameter("camera.width").as_int();
     camera_cfg.height = this->get_parameter("camera.height").as_int();
     camera_cfg.fps = this->get_parameter("camera.fps").as_double();
     camera_cfg.timeout_ms = this->get_parameter("camera.timeout_ms").as_int();
+    camera_cfg.bayer_interpolation = ParseBayerInterpolation(
+        this->get_parameter("camera.bayer_interpolation").as_string());
+    camera_cfg.bayer_smoothing =
+        this->get_parameter("camera.bayer_smoothing").as_bool();
 
     if (!camera_.Open(camera_cfg, &error)) {
       throw std::runtime_error("camera_ingest init failed: " + error);
@@ -364,10 +341,11 @@ class VisionDemoNode : public rclcpp::Node {
       throw std::runtime_error("udp_json_adapter init failed: " + error);
     }
 
-    cv::Mat frame;
-    if (!camera_.Read(&frame, &error)) {
+    vision_demo_host::CameraIngest::AcquiredFrame acquired_frame;
+    if (!camera_.Read(&acquired_frame, &error)) {
       throw std::runtime_error("camera_ingest initial frame failed: " + error);
     }
+    cv::Mat &frame = acquired_frame.bgr8;
 
     vision_demo_host::VisualizerRecorder::Config viz_cfg;
     viz_cfg.enable_visualization = this->get_parameter("visualization.enable").as_bool();
@@ -410,11 +388,13 @@ class VisionDemoNode : public rclcpp::Node {
       throw std::runtime_error("visualizer_recorder init failed: " + error);
     }
 
-    LogEffectiveConfig(camera_cfg, infer_cfg, filter_cfg, tracker_.EffectiveConfig(), target_cfg, bearing_cfg,
-                       sid_cfg, udp_ip, udp_port_raw, viz_cfg);
+    LogEffectiveConfig(camera_cfg, acquired_frame, infer_cfg, filter_cfg,
+                       tracker_.EffectiveConfig(), target_cfg, bearing_cfg, sid_cfg, udp_ip,
+                       udp_port_raw, viz_cfg);
   }
 
   void LogEffectiveConfig(const vision_demo_host::CameraIngest::Config &camera_cfg,
+                          const vision_demo_host::CameraIngest::AcquiredFrame &acquired_frame,
                           const vision_demo_host::PreprocessInfer::Config &infer_cfg,
                           const vision_demo_host::DetFilter::Config &filter_cfg,
                           const vision_demo_host::MotTracker::Config &tracker_cfg,
@@ -425,10 +405,22 @@ class VisionDemoNode : public rclcpp::Node {
                           const int udp_port,
                           const vision_demo_host::VisualizerRecorder::Config &viz_cfg) {
     RCLCPP_INFO(get_logger(),
-                "startup_effective_config camera backend=%s size=%dx%d fps=%.2f timeout_ms=%d mvs_model=%s mvs_serial=%s pipeline_set=%s",
-                CameraBackendToString(camera_cfg.backend), camera_cfg.width, camera_cfg.height, camera_cfg.fps,
-                camera_cfg.timeout_ms, camera_cfg.hik_mvs_model.c_str(), camera_cfg.hik_mvs_serial.c_str(),
-                BoolStr(!camera_cfg.gstreamer_pipeline.empty()));
+                "startup_effective_config camera backend=hik_mvs requested_size=%dx%d requested_fps=%.2f timeout_ms=%d mvs_model=%s mvs_serial=%s bayer_interpolation=%s bayer_smoothing=%s conversion_target=BGR8",
+                camera_cfg.width, camera_cfg.height, camera_cfg.fps, camera_cfg.timeout_ms,
+                camera_cfg.hik_mvs_model.c_str(), camera_cfg.hik_mvs_serial.c_str(),
+                vision_demo_host::CameraIngest::BayerInterpolationName(
+                    camera_cfg.bayer_interpolation)
+                    .c_str(),
+                BoolStr(camera_cfg.bayer_smoothing));
+    RCLCPP_INFO(
+        get_logger(),
+        "startup_camera_source pixel_type=%s pixel_type_value=0x%08x actual_size=%dx%d source_payload_bytes=%zu frame_number=%u source_timestamp_ns=%llu sdk_host_timestamp_raw=%lld device_timestamp_ticks=%llu",
+        acquired_frame.source_pixel_type_name.c_str(), acquired_frame.source_pixel_type,
+        acquired_frame.width, acquired_frame.height, acquired_frame.source_payload_bytes,
+        acquired_frame.camera_frame_number,
+        static_cast<unsigned long long>(acquired_frame.source_timestamp_ns),
+        static_cast<long long>(acquired_frame.sdk_host_timestamp),
+        static_cast<unsigned long long>(acquired_frame.device_timestamp_ticks));
     RCLCPP_INFO(get_logger(),
                 "startup_effective_config detector runtime=%s raw_conf=%.3f input=%dx%d fake_detection=%s filter_person=%.3f filter_car=%.3f",
                 infer_cfg.detector_runtime_path.c_str(), infer_cfg.raw_conf_threshold, infer_cfg.input_width,
@@ -488,12 +480,13 @@ class VisionDemoNode : public rclcpp::Node {
 
   void Tick() {
     std::string error;
-    cv::Mat frame;
-    if (!camera_.Read(&frame, &error)) {
+    vision_demo_host::CameraIngest::AcquiredFrame acquired_frame;
+    if (!camera_.Read(&acquired_frame, &error)) {
       RCLCPP_WARN_THROTTLE(get_logger(), *this->get_clock(), 2000, "camera_ingest read failed: %s",
                            error.c_str());
       return;
     }
+    cv::Mat &frame = acquired_frame.bgr8;
 
     auto detections = infer_.Infer(frame);
     const auto filtered = det_filter_.Filter(detections);
@@ -525,10 +518,24 @@ class VisionDemoNode : public rclcpp::Node {
 
     if (monitor_.ShouldReport()) {
       const int primary_id = primary.primary_target_id;
+      const auto camera_metrics = camera_.Metrics();
       RCLCPP_INFO(get_logger(),
                   "runtime_monitor fps=%.2f state=%s primary_id=%d raw_track_id=%d det=%zu filtered=%zu tracks=%zu",
                   monitor_.CurrentFps(), vision_demo_host::PrimaryStateToString(primary.state).c_str(),
                   primary_id, primary.raw_track_id, detections.size(), filtered.size(), tracks.size());
+      RCLCPP_INFO(
+          get_logger(),
+          "camera_metrics frames=%llu acquisition_failures=%llu dropped_frames=%llu non_contiguous_frames=%llu camera_lost_packets=%llu acquisition_ms_p50_p95_p99=%.3f/%.3f/%.3f conversion_ms_p50_p95_p99=%.3f/%.3f/%.3f copy_ms_p50_p95_p99=%.3f/%.3f/%.3f samples=%zu",
+          static_cast<unsigned long long>(camera_metrics.acquired_frames),
+          static_cast<unsigned long long>(camera_metrics.acquisition_failures),
+          static_cast<unsigned long long>(camera_metrics.dropped_frames),
+          static_cast<unsigned long long>(camera_metrics.non_contiguous_frames),
+          static_cast<unsigned long long>(camera_metrics.camera_lost_packets),
+          camera_metrics.acquisition.p50_ms, camera_metrics.acquisition.p95_ms,
+          camera_metrics.acquisition.p99_ms, camera_metrics.conversion.p50_ms,
+          camera_metrics.conversion.p95_ms, camera_metrics.conversion.p99_ms,
+          camera_metrics.copy.p50_ms, camera_metrics.copy.p95_ms,
+          camera_metrics.copy.p99_ms, camera_metrics.acquisition.samples);
     }
   }
 

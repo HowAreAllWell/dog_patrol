@@ -1,8 +1,13 @@
 #include "vision_demo_host/modules/camera_ingest.hpp"
 
 #include <algorithm>
+#include <chrono>
+#include <cmath>
 #include <cstdio>
 #include <cstring>
+#include <iomanip>
+#include <limits>
+#include <sstream>
 #include <string>
 #include <utility>
 #include <vector>
@@ -15,6 +20,19 @@
 
 namespace vision_demo_host {
 namespace {
+
+using SteadyClock = std::chrono::steady_clock;
+
+double ElapsedMilliseconds(const SteadyClock::time_point start) {
+  return std::chrono::duration<double, std::milli>(SteadyClock::now() - start).count();
+}
+
+bool Fail(std::string *error, const std::string &message) {
+  if (error != nullptr) {
+    *error = message;
+  }
+  return false;
+}
 
 #ifdef VISION_DEMO_HOST_ENABLE_HIK_MVS
 
@@ -37,6 +55,13 @@ std::string FormatSdkError(const int code) {
   char buf[32];
   std::snprintf(buf, sizeof(buf), "0x%x", code);
   return buf;
+}
+
+bool RequireSdkSuccess(const int code, const char *operation, std::string *error) {
+  if (code == MV_OK) {
+    return true;
+  }
+  return Fail(error, std::string(operation) + " failed: " + FormatSdkError(code));
 }
 
 std::string DeviceModelName(const MV_CC_DEVICE_INFO &device) {
@@ -90,6 +115,24 @@ std::string DeviceSerialNumber(const MV_CC_DEVICE_INFO &device) {
 }  // namespace
 
 struct CameraIngest::Impl {
+  StageTiming acquisition_timing;
+  StageTiming conversion_timing;
+  StageTiming copy_timing;
+  FrameContinuity continuity;
+  std::uint64_t acquired_frames{0};
+  std::uint64_t acquisition_failures{0};
+  std::uint64_t camera_lost_packets{0};
+
+  void ResetMetrics() {
+    acquisition_timing.Clear();
+    conversion_timing.Clear();
+    copy_timing.Clear();
+    continuity.Reset();
+    acquired_frames = 0;
+    acquisition_failures = 0;
+    camera_lost_packets = 0;
+  }
+
 #ifdef VISION_DEMO_HOST_ENABLE_HIK_MVS
   void *mvs_handle{nullptr};
   bool mvs_sdk_initialized{false};
@@ -115,45 +158,197 @@ struct CameraIngest::Impl {
 #endif
 };
 
+void CameraIngest::StageTiming::ObserveMilliseconds(const double milliseconds) {
+  if (!std::isfinite(milliseconds) || milliseconds < 0.0) {
+    return;
+  }
+  if (samples_.size() == kMaxSamples) {
+    samples_.erase(samples_.begin());
+  }
+  samples_.push_back(milliseconds);
+}
+
+CameraIngest::PercentileSummary CameraIngest::StageTiming::Summary() const {
+  PercentileSummary result;
+  result.samples = samples_.size();
+  if (samples_.empty()) {
+    return result;
+  }
+
+  std::vector<double> sorted = samples_;
+  std::sort(sorted.begin(), sorted.end());
+  const auto percentile = [&sorted](const double fraction) {
+    const auto rank = static_cast<std::size_t>(
+        std::ceil(fraction * static_cast<double>(sorted.size())));
+    return sorted[std::max<std::size_t>(1, rank) - 1];
+  };
+  result.p50_ms = percentile(0.50);
+  result.p95_ms = percentile(0.95);
+  result.p99_ms = percentile(0.99);
+  return result;
+}
+
+void CameraIngest::StageTiming::Clear() { samples_.clear(); }
+
+std::uint64_t CameraIngest::FrameContinuity::Observe(const std::uint32_t frame_number) {
+  if (!has_previous_) {
+    has_previous_ = true;
+    previous_ = frame_number;
+    return 0;
+  }
+
+  const std::uint32_t expected = previous_ + 1U;
+  previous_ = frame_number;
+  if (frame_number == expected) {
+    return 0;
+  }
+
+  ++non_contiguous_frames_;
+  if (frame_number > expected) {
+    const auto dropped = static_cast<std::uint64_t>(frame_number - expected);
+    dropped_frames_ += dropped;
+    return dropped;
+  }
+  return 0;
+}
+
+std::uint64_t CameraIngest::FrameContinuity::DroppedFrames() const {
+  return dropped_frames_;
+}
+
+std::uint64_t CameraIngest::FrameContinuity::NonContiguousFrames() const {
+  return non_contiguous_frames_;
+}
+
+void CameraIngest::FrameContinuity::Reset() {
+  has_previous_ = false;
+  previous_ = 0;
+  dropped_frames_ = 0;
+  non_contiguous_frames_ = 0;
+}
+
 CameraIngest::CameraIngest() : impl_(std::make_unique<Impl>()) {}
 
 CameraIngest::~CameraIngest() { Close(); }
 
 void CameraIngest::Close() {
-  if (capture_.isOpened()) {
-    capture_.release();
-  }
 #ifdef VISION_DEMO_HOST_ENABLE_HIK_MVS
   impl_->ResetMvs();
 #endif
 }
 
+bool CameraIngest::ValidateConfig(const Config &config, std::string *error) {
+  if (error != nullptr) {
+    error->clear();
+  }
+  if (config.width <= 0 || config.height <= 0) {
+    return Fail(error, "camera width and height must be positive");
+  }
+  if (!std::isfinite(config.fps) || config.fps <= 0.0) {
+    return Fail(error, "camera fps must be finite and positive");
+  }
+  if (config.timeout_ms <= 0) {
+    return Fail(error, "camera timeout_ms must be positive");
+  }
+  switch (config.bayer_interpolation) {
+    case BayerInterpolation::kFast:
+    case BayerInterpolation::kBalanced:
+    case BayerInterpolation::kOptimal:
+    case BayerInterpolation::kOptimalPlus:
+      return true;
+  }
+  return Fail(error, "camera bayer_interpolation is unsupported");
+}
+
+std::string CameraIngest::BayerInterpolationName(const BayerInterpolation interpolation) {
+  switch (interpolation) {
+    case BayerInterpolation::kFast:
+      return "fast";
+    case BayerInterpolation::kBalanced:
+      return "balanced";
+    case BayerInterpolation::kOptimal:
+      return "optimal";
+    case BayerInterpolation::kOptimalPlus:
+      return "optimal_plus";
+  }
+  return "unknown";
+}
+
+std::string CameraIngest::PixelTypeName(const std::uint32_t pixel_type) {
+  switch (pixel_type) {
+    case 0x01080001U:
+      return "Mono8";
+    case 0x01100003U:
+      return "Mono10";
+    case 0x010C0004U:
+      return "Mono10_Packed";
+    case 0x01100005U:
+      return "Mono12";
+    case 0x010C0006U:
+      return "Mono12_Packed";
+    case 0x01100007U:
+      return "Mono16";
+    case 0x01080008U:
+      return "BayerGR8";
+    case 0x01080009U:
+      return "BayerRG8";
+    case 0x0108000AU:
+      return "BayerGB8";
+    case 0x0108000BU:
+      return "BayerBG8";
+    case 0x0110000CU:
+      return "BayerGR10";
+    case 0x0110000DU:
+      return "BayerRG10";
+    case 0x0110000EU:
+      return "BayerGB10";
+    case 0x0110000FU:
+      return "BayerBG10";
+    case 0x01100010U:
+      return "BayerGR12";
+    case 0x01100011U:
+      return "BayerRG12";
+    case 0x01100012U:
+      return "BayerGB12";
+    case 0x01100013U:
+      return "BayerBG12";
+    case 0x010C0026U:
+      return "BayerGR10_Packed";
+    case 0x010C0027U:
+      return "BayerRG10_Packed";
+    case 0x010C0028U:
+      return "BayerGB10_Packed";
+    case 0x010C0029U:
+      return "BayerBG10_Packed";
+    case 0x010C002AU:
+      return "BayerGR12_Packed";
+    case 0x010C002BU:
+      return "BayerRG12_Packed";
+    case 0x010C002CU:
+      return "BayerGB12_Packed";
+    case 0x010C002DU:
+      return "BayerBG12_Packed";
+    case 0x02180014U:
+      return "RGB8_Packed";
+    case 0x02180015U:
+      return "BGR8_Packed";
+    default:
+      std::ostringstream value;
+      value << "Unknown(0x" << std::hex << std::nouppercase << pixel_type << ")";
+      return value.str();
+  }
+}
+
 bool CameraIngest::Open(const Config &config, std::string *error) {
   Close();
-  config_ = config;
-
-  if (config_.backend == Backend::kGstreamer) {
-    if (config_.gstreamer_pipeline.empty()) {
-      if (error != nullptr) {
-        *error = "GStreamer pipeline is empty.";
-      }
-      return false;
-    }
-
-    if (!capture_.open(config_.gstreamer_pipeline, cv::CAP_GSTREAMER)) {
-      if (error != nullptr) {
-        *error = "Failed to open GStreamer source. Pipeline: " + config_.gstreamer_pipeline;
-      }
-      return false;
-    }
-    return true;
+  if (!ValidateConfig(config, error)) {
+    return false;
   }
+  config_ = config;
+  impl_->ResetMetrics();
 
 #ifndef VISION_DEMO_HOST_ENABLE_HIK_MVS
-  if (error != nullptr) {
-    *error = "Hik MVS backend requested, but this build does not include the MVS SDK.";
-  }
-  return false;
+  return Fail(error, "This build does not include the Hik MVS SDK.");
 #else
   const int init_ret = MV_CC_Initialize();
   if (init_ret != MV_OK) {
@@ -232,20 +427,40 @@ bool CameraIngest::Open(const Config &config, std::string *error) {
   if (selected_device->nTLayerType == MV_GIGE_DEVICE || selected_device->nTLayerType == MV_GENTL_GIGE_DEVICE) {
     const int packet_size = MV_CC_GetOptimalPacketSize(impl_->mvs_handle);
     if (packet_size > 0) {
-      (void)MV_CC_SetIntValueEx(impl_->mvs_handle, "GevSCPSPacketSize", static_cast<unsigned int>(packet_size));
+      if (!RequireSdkSuccess(
+              MV_CC_SetIntValueEx(impl_->mvs_handle, "GevSCPSPacketSize", packet_size),
+              "MV_CC_SetIntValueEx(GevSCPSPacketSize)", error)) {
+        Close();
+        return false;
+      }
     }
   }
 
-  (void)MV_CC_SetEnumValue(impl_->mvs_handle, "TriggerMode", MV_TRIGGER_MODE_OFF);
-  if (config_.width > 0) {
-    (void)MV_CC_SetIntValueEx(impl_->mvs_handle, "Width", config_.width);
-  }
-  if (config_.height > 0) {
-    (void)MV_CC_SetIntValueEx(impl_->mvs_handle, "Height", config_.height);
-  }
-  if (config_.fps > 0.0) {
-    (void)MV_CC_SetBoolValue(impl_->mvs_handle, "AcquisitionFrameRateEnable", true);
-    (void)MV_CC_SetFloatValue(impl_->mvs_handle, "AcquisitionFrameRate", static_cast<float>(config_.fps));
+  if (!RequireSdkSuccess(
+          MV_CC_SetEnumValue(impl_->mvs_handle, "TriggerMode", MV_TRIGGER_MODE_OFF),
+          "MV_CC_SetEnumValue(TriggerMode)", error) ||
+      !RequireSdkSuccess(
+          MV_CC_SetIntValueEx(impl_->mvs_handle, "Width", config_.width),
+          "MV_CC_SetIntValueEx(Width)", error) ||
+      !RequireSdkSuccess(
+          MV_CC_SetIntValueEx(impl_->mvs_handle, "Height", config_.height),
+          "MV_CC_SetIntValueEx(Height)", error) ||
+      !RequireSdkSuccess(
+          MV_CC_SetBoolValue(impl_->mvs_handle, "AcquisitionFrameRateEnable", true),
+          "MV_CC_SetBoolValue(AcquisitionFrameRateEnable)", error) ||
+      !RequireSdkSuccess(
+          MV_CC_SetFloatValue(
+              impl_->mvs_handle, "AcquisitionFrameRate", static_cast<float>(config_.fps)),
+          "MV_CC_SetFloatValue(AcquisitionFrameRate)", error) ||
+      !RequireSdkSuccess(
+          MV_CC_SetBayerCvtQuality(
+              impl_->mvs_handle, static_cast<unsigned int>(config_.bayer_interpolation)),
+          "MV_CC_SetBayerCvtQuality", error) ||
+      !RequireSdkSuccess(
+          MV_CC_SetBayerFilterEnable(impl_->mvs_handle, config_.bayer_smoothing),
+          "MV_CC_SetBayerFilterEnable", error)) {
+    Close();
+    return false;
   }
 
   const int start_ret = MV_CC_StartGrabbing(impl_->mvs_handle);
@@ -262,36 +477,14 @@ bool CameraIngest::Open(const Config &config, std::string *error) {
 #endif
 }
 
-bool CameraIngest::Read(cv::Mat *frame, std::string *error) {
+bool CameraIngest::Read(AcquiredFrame *frame, std::string *error) {
   if (frame == nullptr) {
-    if (error != nullptr) {
-      *error = "Output frame pointer is null.";
-    }
-    return false;
+    return Fail(error, "Output acquired-frame pointer is null.");
   }
-
-  if (config_.backend == Backend::kGstreamer) {
-    if (!capture_.isOpened()) {
-      if (error != nullptr) {
-        *error = "Camera source is not opened.";
-      }
-      return false;
-    }
-
-    if (!capture_.read(*frame) || frame->empty()) {
-      if (error != nullptr) {
-        *error = "Failed to read frame from GStreamer source.";
-      }
-      return false;
-    }
-    return true;
-  }
+  *frame = AcquiredFrame{};
 
 #ifndef VISION_DEMO_HOST_ENABLE_HIK_MVS
-  if (error != nullptr) {
-    *error = "Hik MVS backend requested, but this build does not include the MVS SDK.";
-  }
-  return false;
+  return Fail(error, "This build does not include the Hik MVS SDK.");
 #else
   if (impl_->mvs_handle == nullptr || !impl_->mvs_grabbing) {
     if (error != nullptr) {
@@ -302,8 +495,11 @@ bool CameraIngest::Read(cv::Mat *frame, std::string *error) {
 
   MV_FRAME_OUT out_frame{};
   const unsigned int timeout_ms = static_cast<unsigned int>(std::max(1, config_.timeout_ms));
+  const auto acquisition_start = SteadyClock::now();
   const int get_ret = MV_CC_GetImageBuffer(impl_->mvs_handle, &out_frame, timeout_ms);
+  frame->acquisition_ms = ElapsedMilliseconds(acquisition_start);
   if (get_ret != MV_OK || out_frame.pBufAddr == nullptr) {
+    ++impl_->acquisition_failures;
     if (error != nullptr) {
       *error = "MV_CC_GetImageBuffer failed: " + FormatSdkError(get_ret);
     }
@@ -315,6 +511,25 @@ bool CameraIngest::Read(cv::Mat *frame, std::string *error) {
     const unsigned int width = out_frame.stFrameInfo.nWidth;
     const unsigned int height = out_frame.stFrameInfo.nHeight;
     const auto src_pixel_type = out_frame.stFrameInfo.enPixelType;
+
+    frame->source_timestamp_ns = static_cast<std::uint64_t>(
+        std::chrono::duration_cast<std::chrono::nanoseconds>(
+            std::chrono::system_clock::now().time_since_epoch())
+            .count());
+    frame->sdk_host_timestamp = out_frame.stFrameInfo.nHostTimeStamp;
+    frame->camera_frame_number = out_frame.stFrameInfo.nFrameNum;
+    frame->camera_frame_number_available = true;
+    frame->device_timestamp_ticks =
+        (static_cast<std::uint64_t>(out_frame.stFrameInfo.nDevTimeStampHigh) << 32U) |
+        out_frame.stFrameInfo.nDevTimeStampLow;
+    frame->source_pixel_type = static_cast<std::uint32_t>(src_pixel_type);
+    frame->source_pixel_type_name = PixelTypeName(frame->source_pixel_type);
+    frame->width = static_cast<int>(width);
+    frame->height = static_cast<int>(height);
+    frame->source_payload_bytes =
+        out_frame.stFrameInfo.nFrameLenEx > 0 ? out_frame.stFrameInfo.nFrameLenEx
+                                             : out_frame.stFrameInfo.nFrameLen;
+    frame->camera_lost_packets = out_frame.stFrameInfo.nLostPacket;
 
     MV_CC_PIXEL_CONVERT_PARAM_EX convert_param{};
     convert_param.nWidth = width;
@@ -337,6 +552,7 @@ bool CameraIngest::Read(cv::Mat *frame, std::string *error) {
     convert_param.pDstBuffer = impl_->mvs_convert_buffer.data();
     convert_param.nDstBufferSize = static_cast<unsigned int>(impl_->mvs_convert_buffer.size());
 
+    const auto conversion_start = SteadyClock::now();
     const int convert_ret = MV_CC_ConvertPixelTypeEx(impl_->mvs_handle, &convert_param);
     if (convert_ret != MV_OK) {
       if (error != nullptr) {
@@ -347,14 +563,20 @@ bool CameraIngest::Read(cv::Mat *frame, std::string *error) {
 
     if (channel_count == 1) {
       cv::Mat mono(static_cast<int>(height), static_cast<int>(width), CV_8UC1, impl_->mvs_convert_buffer.data());
-      cv::cvtColor(mono, *frame, cv::COLOR_GRAY2BGR);
+      cv::cvtColor(mono, frame->bgr8, cv::COLOR_GRAY2BGR);
     } else {
+      frame->conversion_ms = ElapsedMilliseconds(conversion_start);
       cv::Mat bgr(static_cast<int>(height), static_cast<int>(width), CV_8UC3, impl_->mvs_convert_buffer.data());
-      *frame = bgr.clone();
+      const auto copy_start = SteadyClock::now();
+      frame->bgr8 = bgr.clone();
+      frame->copy_ms = ElapsedMilliseconds(copy_start);
     }
-    ok = !frame->empty();
+    if (channel_count == 1) {
+      frame->conversion_ms = ElapsedMilliseconds(conversion_start);
+    }
+    ok = !frame->bgr8.empty() && frame->bgr8.type() == CV_8UC3;
     if (!ok && error != nullptr) {
-      *error = "Converted MVS frame is empty.";
+      *error = "Converted MVS frame is not a non-empty BGR8 image.";
     }
   } while (false);
 
@@ -364,8 +586,29 @@ bool CameraIngest::Read(cv::Mat *frame, std::string *error) {
     ok = false;
   }
 
+  if (ok) {
+    ++impl_->acquired_frames;
+    impl_->camera_lost_packets += frame->camera_lost_packets;
+    impl_->continuity.Observe(frame->camera_frame_number);
+    impl_->acquisition_timing.ObserveMilliseconds(frame->acquisition_ms);
+    impl_->conversion_timing.ObserveMilliseconds(frame->conversion_ms);
+    impl_->copy_timing.ObserveMilliseconds(frame->copy_ms);
+  }
   return ok;
 #endif
+}
+
+CameraIngest::MetricsSnapshot CameraIngest::Metrics() const {
+  MetricsSnapshot result;
+  result.acquired_frames = impl_->acquired_frames;
+  result.acquisition_failures = impl_->acquisition_failures;
+  result.dropped_frames = impl_->continuity.DroppedFrames();
+  result.non_contiguous_frames = impl_->continuity.NonContiguousFrames();
+  result.camera_lost_packets = impl_->camera_lost_packets;
+  result.acquisition = impl_->acquisition_timing.Summary();
+  result.conversion = impl_->conversion_timing.Summary();
+  result.copy = impl_->copy_timing.Summary();
+  return result;
 }
 
 }  // namespace vision_demo_host

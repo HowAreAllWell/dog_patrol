@@ -123,6 +123,13 @@ install(DIRECTORY config launch
 if(BUILD_TESTING)
   find_package(ament_cmake_gtest REQUIRED)
 
+  ament_add_gtest(test_camera_ingest_contract test/test_camera_ingest_contract.cpp)
+  if(TARGET test_camera_ingest_contract)
+    target_compile_features(test_camera_ingest_contract PUBLIC cxx_std_17)
+    target_include_directories(test_camera_ingest_contract PRIVATE include)
+    target_link_libraries(test_camera_ingest_contract ${PROJECT_NAME}_modules)
+  endif()
+
   ament_add_gtest(test_primary_target_manager test/test_primary_target_manager.cpp)
   if(TARGET test_primary_target_manager)
     target_compile_features(test_primary_target_manager PUBLIC cxx_std_17)

@@ -1,16 +1,14 @@
 vision_demo_host_node:
   ros__parameters:
     camera:
-      backend: "gstreamer"
-      # Replace with real URL in deployment, or override via --ros-args.
-      rtsp_url: "rtsp://example.invalid/stream"
-      gstreamer_pipeline: ""
       mvs_model: "MV-CU013-A0UC"
       mvs_serial: ""
       width: 1280
       height: 1024
       fps: 30.0
       timeout_ms: 1000
+      bayer_interpolation: "optimal"
+      bayer_smoothing: false
 
     detector:
       runtime_path: "/path/to/my_workplace/vision_demo_ws/assets/models/engines/orin_jp621_trt_local/yolo26n_fp16_640.engine"
