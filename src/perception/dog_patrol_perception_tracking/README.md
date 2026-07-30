@@ -265,114 +265,54 @@ Tracker ReID 配置（`tracker.*`）：
 - `gmc_downscale=4`
 - `with_reid=true`（强制）
 
-## 测试集录制工具（record_test_set）
+## 无损 BGR8 测试集采集（capture_ffv1）
 
-入口：
-- 可执行：`record_test_set`
-- 位置：`/path/to/my_workplace/vision_demo_ws/src/vision_demo_host/src/tools/record_test_set.cpp`
+`capture_ffv1` 是当前独立采集入口：只初始化一台 Hik MVS 相机，不加载 detector、tracker
+或 identity。它始终把 `CameraIngest` 的 clean BGR8 帧写为 FFV1/MKV；FFV1 不可用或写入
+失败会显式报错，绝不会回退到有损编码。
 
-构建：
+构建后在预览优先模式运行：
 
 ```bash
-cd /path/to/my_workplace/vision_demo_ws
 source /opt/ros/humble/setup.bash
-colcon build --packages-select vision_demo_host
-```
-
-运行（legacy RTSP recorder，保留到 #86）：
-
-```bash
-cd /path/to/my_workplace/vision_demo_ws
 source install/setup.bash
-ros2 run vision_demo_host record_test_set \
-  --camera-backend gstreamer \
-  --rtsp-url 'rtsp://example.invalid/stream' \
-  --session-name demo_set_01 \
-  --scene-tag single_person \
-  --notes 'daylight indoor'
-```
-
-运行（Hikrobot MVS / USB3 Vision 工业相机，带预览）：
-
-```bash
-cd /path/to/my_workplace/vision_demo_ws
-export LD_LIBRARY_PATH=/opt/MVS/lib/aarch64:/opt/MVS/lib/64:${LD_LIBRARY_PATH:-}
-source install/setup.bash
-ros2 run vision_demo_host record_test_set \
-  --camera-backend hik_mvs \
+ros2 run vision_demo_host capture_ffv1 \
   --mvs-model MV-CU013-A0UC \
-  --width 1280 \
-  --height 1024 \
-  --fps 30.0 \
-  --session-name orin_hik_set_01 \
-  --scene-tag single_person \
-  --notes 'hik mvs daylight indoor'
+  --width 1280 --height 1024 --fps 30.0 \
+  --bayer-interpolation optimal \
+  --session-name orin_hik_lossless_01
 ```
 
-运行（Hikrobot MVS，无损 FFV1/MKV）：
+预览默认处于 `STANDBY`，录制的视频不含任何 preview 文字。热键为：
 
-```bash
-cd /path/to/my_workplace/vision_demo_ws
-export LD_LIBRARY_PATH=/opt/MVS/lib/aarch64:/opt/MVS/lib/64:${LD_LIBRARY_PATH:-}
-source install/setup.bash
-ros2 run vision_demo_host record_test_set \
-  --camera-backend hik_mvs \
-  --mvs-model MV-CU013-A0UC \
-  --width 1280 \
-  --height 1024 \
-  --fps 30.0 \
-  --recording-mode ffv1 \
-  --session-name orin_hik_lossless_01 \
-  --scene-tag single_person \
-  --notes 'hik mvs lossless ffv1'
-```
+- `R`：开始一个新 take
+- `S`：停止并完成当前 take；预览继续，可再次 `R`
+- `M`：在当前 take 添加 marker
+- `I`：切换预览信息
+- `Q`：完成当前 take（如有）并退出
 
-运行（无预览退路）：
+写入通过一个有界 queue 与采集解耦。queue 满时会丢弃最新采集帧并在 take metadata 中
+记录 `captured_frames`、`written_frames`、`dropped_frames`、`write_errors` 与
+`camera_frame_gaps`；不得把目标 30 FPS 误报为实际写入速率。
 
-```bash
-cd /path/to/my_workplace/vision_demo_ws
-source install/setup.bash
-ros2 run vision_demo_host record_test_set \
-  --camera-backend gstreamer \
-  --rtsp-url 'rtsp://example.invalid/stream' \
-  --session-name headless_set_01 \
-  --scene-tag robot_motion_heavy \
-  --no-preview --auto-record --max-seconds 30
-```
+每个 session 的 take 目录形如 `data/captures/<session>_<timestamp>/take_001/`，其中包含：
 
-热键（预览模式）：
-- `r`：开始/停止录制
-- `q`：退出
-- `m`：打点标记
-- `c`：切换叠字显示
-
-输出目录结构（示例）：
-- `/path/to/my_workplace/vision_demo_ws/data/recordings/demo_set_01_20260402_154500/`
-- `video.mp4`（默认 H264）或 `video.mkv`（`--recording-mode ffv1`）
-- `frame_timestamps.csv`
+- `video.mkv`（FFV1）
+- `frame_timestamps.csv`（source timestamp、camera frame number、PixelType、payload 与丢包）
 - `markers.csv`
-- `metadata.json`
+- `metadata.json`（#80 BGR8 frame contract、相机请求、codec、计数与 `complete`/`incomplete` 状态）
 
-`metadata.json` 包含：
-- 录制起止时间
-- 相机后端、RTSP/GStreamer 或 Hik MVS 输入信息
-- 分辨率、源 FPS、实际录制 FPS、帧数
-- 是否开启预览、场景标签、备注
-- 当前默认 tracker/GMC 口径（记录用途）
+自动化模式必须显式无预览、自动开始和限时：
 
-录制编码路径（当前）：
-- 默认 `--recording-mode h264`：Jetson 硬件编码 `GStreamer appsrc -> nvvidconv -> nvv4l2h264enc -> qtmux`
-- 若硬编管线打开失败：自动回退 `OpenCV mp4v`，并在终端打印 warning
-- 无损 `--recording-mode ffv1`：OpenCV/FFmpeg 写入 FFV1 lossless `video.mkv`；若本机 FFV1 不可用会直接失败，不会静默降级为有损
-- `metadata.json` 的 `recording_mode` 和 `video_path` 会记录当前编码模式与视频路径
+```bash
+source install/setup.bash
+ros2 run vision_demo_host capture_ffv1 \
+  --headless --auto-record --max-seconds 30 \
+  --session-name headless_capture_01
+```
 
-推荐 `--scene-tag`：
-- `single_person`
-- `multi_person_crossing`
-- `occlusion`
-- `reenter`
-- `person_and_car`
-- `robot_motion_heavy`
+`record_test_set` 仍保留旧 RTSP/GStreamer/H.264 路径，等待 `#86` 统一清理；不要将其用于
+新的无损 Hik MVS 数据集采集。
 
 ## 离线回放评估工具（offline_eval_recordings）
 

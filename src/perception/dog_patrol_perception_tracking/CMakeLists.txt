@@ -30,6 +30,8 @@ endif()
 
 set(MODULE_SOURCES
   src/modules/camera_ingest.cpp
+  src/modules/ffv1_capture_workflow.cpp
+  src/modules/ffv1_capture_artifact_writer.cpp
   src/modules/preprocess_infer.cpp
   src/modules/yolo26_output_contract.cpp
   src/modules/det_filter.cpp
@@ -103,6 +105,10 @@ add_executable(record_test_set src/tools/record_test_set.cpp)
 target_compile_features(record_test_set PUBLIC cxx_std_17)
 target_link_libraries(record_test_set ${PROJECT_NAME}_modules ${OpenCV_LIBS})
 
+add_executable(capture_ffv1 src/tools/capture_ffv1.cpp)
+target_compile_features(capture_ffv1 PUBLIC cxx_std_17)
+target_link_libraries(capture_ffv1 ${PROJECT_NAME}_modules ${OpenCV_LIBS})
+
 add_executable(offline_eval_recordings src/tools/offline_eval_recordings.cpp)
 target_compile_features(offline_eval_recordings PUBLIC cxx_std_17)
 target_link_libraries(offline_eval_recordings ${PROJECT_NAME}_modules ${OpenCV_LIBS})
@@ -111,6 +117,7 @@ install(TARGETS
   ${PROJECT_NAME}_modules
   vision_demo_node
   record_test_set
+  capture_ffv1
   offline_eval_recordings
   DESTINATION lib/${PROJECT_NAME})
 
@@ -128,6 +135,13 @@ if(BUILD_TESTING)
     target_compile_features(test_camera_ingest_contract PUBLIC cxx_std_17)
     target_include_directories(test_camera_ingest_contract PRIVATE include)
     target_link_libraries(test_camera_ingest_contract ${PROJECT_NAME}_modules)
+  endif()
+
+  ament_add_gtest(test_ffv1_capture_workflow test/test_ffv1_capture_workflow.cpp)
+  if(TARGET test_ffv1_capture_workflow)
+    target_compile_features(test_ffv1_capture_workflow PUBLIC cxx_std_17)
+    target_include_directories(test_ffv1_capture_workflow PRIVATE include)
+    target_link_libraries(test_ffv1_capture_workflow ${PROJECT_NAME}_modules)
   endif()
 
   ament_add_gtest(test_primary_target_manager test/test_primary_target_manager.cpp)
