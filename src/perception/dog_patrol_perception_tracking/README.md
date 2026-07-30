@@ -302,6 +302,9 @@ ros2 run vision_demo_host capture_ffv1 \
 - `markers.csv`
 - `metadata.json`（#80 BGR8 frame contract、相机请求、codec、计数与 `complete`/`incomplete` 状态）
 
+MKV 的 stream FPS 是 configured nominal rate；数据集真实采集/写入速率以 `metadata.json.timing`
+的 `captured_fps` / `written_fps` 为准，`stream_fps_is_nominal=true` 明确标注这一区别。
+
 自动化模式必须显式无预览、自动开始和限时：
 
 ```bash

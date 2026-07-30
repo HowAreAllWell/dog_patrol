@@ -238,6 +238,57 @@ class BlockingWriteCaptureArtifactWriterFactory final : public CaptureArtifactWr
   std::shared_ptr<BlockingWriteArtifacts> artifacts_;
 };
 
+struct FailingBeginArtifacts {
+  std::size_t begin_attempts{0};
+  std::vector<CaptureTakeSummary> summaries;
+};
+
+class FailingBeginCaptureArtifactWriter final : public CaptureArtifactWriter {
+ public:
+  explicit FailingBeginCaptureArtifactWriter(std::shared_ptr<FailingBeginArtifacts> artifacts)
+      : artifacts_(std::move(artifacts)) {}
+
+  bool Begin(const CaptureTakeDescriptor &, const CaptureFrameContract &,
+             std::string *error) override {
+    ++artifacts_->begin_attempts;
+    if (error != nullptr) {
+      *error = "simulated FFV1 initialization failure";
+    }
+    return false;
+  }
+
+  bool Write(const CaptureFrame &, std::string *error) override {
+    if (error != nullptr) {
+      *error = "Write must not run after initialization failure";
+    }
+    return false;
+  }
+
+  bool Finish(const CaptureTakeSummary &summary, std::string *error) override {
+    artifacts_->summaries.push_back(summary);
+    if (error != nullptr) {
+      error->clear();
+    }
+    return true;
+  }
+
+ private:
+  std::shared_ptr<FailingBeginArtifacts> artifacts_;
+};
+
+class FailingBeginCaptureArtifactWriterFactory final : public CaptureArtifactWriterFactory {
+ public:
+  explicit FailingBeginCaptureArtifactWriterFactory(std::shared_ptr<FailingBeginArtifacts> artifacts)
+      : artifacts_(std::move(artifacts)) {}
+
+  std::unique_ptr<CaptureArtifactWriter> Create() override {
+    return std::make_unique<FailingBeginCaptureArtifactWriter>(artifacts_);
+  }
+
+ private:
+  std::shared_ptr<FailingBeginArtifacts> artifacts_;
+};
+
 CameraIngest::AcquiredFrame MakeFrame(const std::uint32_t camera_frame_number,
                                       const std::uint64_t source_timestamp_ns) {
   CameraIngest::AcquiredFrame frame;
@@ -401,6 +452,25 @@ TEST(Ffv1CaptureWorkflowTest, FullBoundedQueueDropsNewestCapturedFrame) {
   EXPECT_EQ(artifacts->summaries[0].dropped_frames, 1U);
 }
 
+TEST(Ffv1CaptureWorkflowTest, InitializationFailureFinalizesAnIncompleteTakeWithTheFirstError) {
+  auto artifacts = std::make_shared<FailingBeginArtifacts>();
+  Ffv1CaptureWorkflow workflow(
+      Ffv1CaptureWorkflow::Config{},
+      std::make_unique<FailingBeginCaptureArtifactWriterFactory>(artifacts));
+  std::string error;
+
+  ASSERT_TRUE(workflow.HandleControl(CaptureControl::kStart, 1'000U, &error)) << error;
+  workflow.Submit(MakeFrame(1U, 1'100U));
+  EXPECT_FALSE(workflow.HandleControl(CaptureControl::kStop, 2'000U, &error));
+  EXPECT_NE(error.find("simulated FFV1 initialization failure"), std::string::npos);
+  EXPECT_EQ(artifacts->begin_attempts, 1U);
+  ASSERT_EQ(artifacts->summaries.size(), 1U);
+  EXPECT_FALSE(artifacts->summaries[0].complete);
+  EXPECT_FALSE(artifacts->summaries[0].writer_opened);
+  EXPECT_EQ(artifacts->summaries[0].last_write_error,
+            "simulated FFV1 initialization failure");
+}
+
 TEST(Ffv1CaptureArtifactWriterTest, PersistsLosslessBgr8FrameAndTakeMetadata) {
   const auto output_dir = std::filesystem::temp_directory_path() /
                           "vision_demo_ffv1_capture_writer_test";
@@ -469,6 +539,40 @@ TEST(Ffv1CaptureArtifactWriterTest, PersistsLosslessBgr8FrameAndTakeMetadata) {
   ASSERT_TRUE(video.read(decoded));
   EXPECT_EQ(decoded.size(), frame.source.bgr8.size());
   EXPECT_EQ(cv::norm(decoded, frame.source.bgr8, cv::NORM_INF), 0.0);
+  std::filesystem::remove_all(output_dir);
+}
+
+TEST(Ffv1CaptureArtifactWriterTest, PersistsIncompleteMetadataWhenFfv1NeverOpened) {
+  const auto output_dir = std::filesystem::temp_directory_path() /
+                          "vision_demo_ffv1_capture_incomplete_test";
+  std::filesystem::remove_all(output_dir);
+  Ffv1CaptureArtifactWriterFactory::Config config;
+  config.session_directory = output_dir;
+  config.requested_fps = 30.0;
+  Ffv1CaptureArtifactWriterFactory factory(config);
+  auto writer = factory.Create();
+  CaptureTakeSummary summary;
+  summary.descriptor.sequence = 1U;
+  summary.descriptor.name = "take_001";
+  summary.descriptor.started_wall_time_ns = 1'000U;
+  summary.finished_wall_time_ns = 1'000'001'000U;
+  summary.complete = false;
+  summary.last_write_error = "mandatory FFV1 writer unavailable";
+
+  std::string error;
+  ASSERT_TRUE(writer->Finish(summary, &error)) << error;
+  const auto take_dir = output_dir / summary.descriptor.name;
+  EXPECT_FALSE(std::filesystem::exists(take_dir / "video.mkv"));
+  EXPECT_TRUE(std::filesystem::exists(take_dir / "frame_timestamps.csv"));
+  EXPECT_TRUE(std::filesystem::exists(take_dir / "markers.csv"));
+  std::ifstream metadata(take_dir / "metadata.json");
+  const std::string metadata_text((std::istreambuf_iterator<char>(metadata)),
+                                  std::istreambuf_iterator<char>());
+  EXPECT_NE(metadata_text.find("\"state\": \"incomplete\""), std::string::npos);
+  EXPECT_NE(metadata_text.find("\"writer_opened\": false"), std::string::npos);
+  EXPECT_NE(metadata_text.find("mandatory FFV1 writer unavailable"), std::string::npos);
+  EXPECT_NE(metadata_text.find("\"stream_fps_is_nominal\": true"), std::string::npos);
+  EXPECT_NE(metadata_text.find("\"written_fps\": 0"), std::string::npos);
   std::filesystem::remove_all(output_dir);
 }
 

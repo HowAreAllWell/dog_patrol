@@ -260,11 +260,13 @@ bool Ffv1CaptureWorkflow::Finalize(const bool complete, const bool stop_after_fi
     summary = take->summary;
   }
   std::string finish_error;
-  if (summary.writer_opened && !take->writer->Finish(summary, &finish_error)) {
+  if (!take->writer->Finish(summary, &finish_error)) {
     std::lock_guard<std::mutex> take_lock(take->mutex);
     ++take->summary.write_errors;
     take->summary.complete = false;
-    take->summary.last_write_error = finish_error;
+    if (take->summary.last_write_error.empty()) {
+      take->summary.last_write_error = finish_error;
+    }
     summary = take->summary;
   }
 

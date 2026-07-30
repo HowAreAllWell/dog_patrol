@@ -68,13 +68,9 @@ class Ffv1CaptureArtifactWriter final : public CaptureArtifactWriter {
 
     descriptor_ = descriptor;
     frame_contract_ = frame_contract;
-    take_directory_ = config_.session_directory / descriptor.name;
-    std::error_code filesystem_error;
-    std::filesystem::create_directories(take_directory_, filesystem_error);
-    if (filesystem_error) {
-      return Fail(error, "Failed to create FFV1 take directory: " + filesystem_error.message());
+    if (!PrepareTakeDirectory(descriptor, error)) {
+      return false;
     }
-    frame_timestamps_path_ = take_directory_ / "frame_timestamps.csv";
     frame_timestamps_.open(frame_timestamps_path_);
     if (!frame_timestamps_) {
       return Fail(error, "Failed to open FFV1 frame timestamp artifact: " +
@@ -137,11 +133,20 @@ class Ffv1CaptureArtifactWriter final : public CaptureArtifactWriter {
   }
 
   bool Finish(const CaptureTakeSummary &summary, std::string *error) override {
-    if (!started_ || finished_) {
-      return Fail(error, "FFV1 capture artifact writer has no active take to finalize");
+    if (finished_) {
+      return Fail(error, "FFV1 capture artifact writer has already finalized its take");
     }
-    video_writer_.release();
-    frame_timestamps_.close();
+    descriptor_ = summary.descriptor;
+    frame_contract_ = summary.frame_contract;
+    if (!PrepareTakeDirectory(summary.descriptor, error)) {
+      return false;
+    }
+    if (started_) {
+      video_writer_.release();
+      frame_timestamps_.close();
+    } else if (!EnsureFrameTimestampArtifact(error)) {
+      return false;
+    }
     const std::filesystem::path markers_path = take_directory_ / "markers.csv";
     std::ofstream markers(markers_path);
     if (!markers) {
@@ -163,6 +168,17 @@ class Ffv1CaptureArtifactWriter final : public CaptureArtifactWriter {
     if (!metadata) {
       return Fail(error, "Failed to open FFV1 metadata artifact: " + metadata_path.string());
     }
+    const std::uint64_t elapsed_ns =
+        summary.finished_wall_time_ns >= summary.descriptor.started_wall_time_ns
+            ? summary.finished_wall_time_ns - summary.descriptor.started_wall_time_ns
+            : 0U;
+    const double elapsed_seconds = static_cast<double>(elapsed_ns) / 1'000'000'000.0;
+    const double captured_fps = elapsed_seconds > 0.0
+                                    ? static_cast<double>(summary.captured_frames) / elapsed_seconds
+                                    : 0.0;
+    const double written_fps = elapsed_seconds > 0.0
+                                   ? static_cast<double>(summary.written_frames) / elapsed_seconds
+                                   : 0.0;
     metadata << "{\n"
              << "  \"take_name\": \"" << EscapeJson(summary.descriptor.name) << "\",\n"
              << "  \"take_sequence\": " << summary.descriptor.sequence << ",\n"
@@ -170,6 +186,10 @@ class Ffv1CaptureArtifactWriter final : public CaptureArtifactWriter {
              << "\",\n"
              << "  \"codec\": \"FFV1\",\n"
              << "  \"container\": \"MKV\",\n"
+             << "  \"writer_opened\": " << (summary.writer_opened ? "true" : "false")
+             << ",\n"
+             << "  \"last_write_error\": \"" << EscapeJson(summary.last_write_error)
+             << "\",\n"
              << "  \"video_path\": \"" << EscapeJson(video_path_.string()) << "\",\n"
              << "  \"started_wall_time_ns\": " << summary.descriptor.started_wall_time_ns
              << ",\n"
@@ -206,6 +226,14 @@ class Ffv1CaptureArtifactWriter final : public CaptureArtifactWriter {
              << "    \"write_errors\": " << summary.write_errors << ",\n"
              << "    \"camera_frame_gaps\": " << summary.camera_frame_gaps << "\n"
              << "  },\n"
+             << "  \"timing\": {\n"
+             << "    \"nominal_stream_fps\": " << config_.requested_fps << ",\n"
+             << "    \"stream_fps_is_nominal\": true,\n"
+             << "    \"take_elapsed_seconds\": " << std::fixed << std::setprecision(6)
+             << elapsed_seconds << ",\n"
+             << "    \"captured_fps\": " << captured_fps << ",\n"
+             << "    \"written_fps\": " << written_fps << "\n"
+             << "  },\n"
              << "  \"markers_path\": \"" << EscapeJson(markers_path.string()) << "\",\n"
              << "  \"frame_timestamps_path\": \""
              << EscapeJson(frame_timestamps_path_.string()) << "\"\n"
@@ -222,6 +250,39 @@ class Ffv1CaptureArtifactWriter final : public CaptureArtifactWriter {
   }
 
  private:
+  bool PrepareTakeDirectory(const CaptureTakeDescriptor &descriptor, std::string *error) {
+    if (!take_directory_.empty()) {
+      return true;
+    }
+    take_directory_ = config_.session_directory / descriptor.name;
+    std::error_code filesystem_error;
+    std::filesystem::create_directories(take_directory_, filesystem_error);
+    if (filesystem_error) {
+      return Fail(error, "Failed to create FFV1 take directory: " + filesystem_error.message());
+    }
+    video_path_ = take_directory_ / "video.mkv";
+    frame_timestamps_path_ = take_directory_ / "frame_timestamps.csv";
+    return true;
+  }
+
+  bool EnsureFrameTimestampArtifact(std::string *error) {
+    if (std::filesystem::exists(frame_timestamps_path_)) {
+      return true;
+    }
+    std::ofstream timestamps(frame_timestamps_path_);
+    if (!timestamps) {
+      return Fail(error, "Failed to open FFV1 frame timestamp artifact: " +
+                             frame_timestamps_path_.string());
+    }
+    timestamps
+        << "capture_index,source_timestamp_ns,sdk_host_timestamp,camera_frame_number,"
+           "camera_frame_number_available,device_timestamp_ticks,source_pixel_type,"
+           "source_pixel_type_name,width,height,source_payload_bytes,camera_lost_packets\n";
+    timestamps.close();
+    return static_cast<bool>(timestamps) ||
+           Fail(error, "Failed to write FFV1 frame timestamp artifact");
+  }
+
   Ffv1CaptureArtifactWriterFactory::Config config_;
   CaptureTakeDescriptor descriptor_;
   CaptureFrameContract frame_contract_;
