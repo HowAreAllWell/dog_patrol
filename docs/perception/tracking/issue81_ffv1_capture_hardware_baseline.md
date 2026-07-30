@@ -20,6 +20,8 @@ build/vision_demo_host/capture_ffv1 \
 | 10 秒压力验证（queue=120） | `balanced` | `data/captures/issue81_balanced_10s_20260730_131121/` | complete；captured/written/dropped=`301/254/47`，write errors=`0`，camera frame gaps=`0` |
 | 3 秒严格背压验证（queue=1） | `balanced` | `data/captures/issue81_balanced_queue1_3s_20260730_132054/` | complete；captured/written/dropped=`91/41/50`，write errors=`0`，camera frame gaps=`0` |
 | 10 秒严格背压复现（queue=1，3 次） | `balanced` | `data/captures/issue81_segfault_repro_{1,2,3}_20260730_1943*/` | 三次均 complete 且均为 captured/written/dropped=`301/153/148`，write errors=`0`，camera frame gaps=`0` |
+| native FFmpeg 10 秒严格背压（queue=1） | `balanced` | `data/captures/issue81_native_ffmpeg_q1_10s_20260730_200010/` | complete；`301/300/1`，唯一 drop 位于 writer 初始化瞬态，camera frame gaps=`0` |
+| native FFmpeg 30 秒持续验证（queue=2） | `balanced` | `data/captures/issue81_native_ffmpeg_q2_30s_20260730_200049/` | complete；captured/written/dropped=`901/901/0`，write errors=`0`，camera frame gaps=`0`；`ffprobe nb_read_frames=901` |
 | 3 秒本地显示预览对照（queue=1） | `balanced` | `data/captures/issue81_local_display_preview_control_20260730_193300/` | complete；captured/written/dropped=`90/46/44`，camera frame gaps=`0` |
 | 本地显示人工交互（queue=120） | `balanced` | `data/captures/issue81_local_interactive_acceptance_20260730_193338/` | `take_001` complete，captured/written/dropped=`234/234/0`，含 1 个 Marker；`take_002` complete，`65/65/0`；两段 camera frame gaps 均为 `0` |
 
@@ -27,15 +29,22 @@ build/vision_demo_host/capture_ffv1 \
 
 ## 容器、合同与连续性
 
-`ffprobe` 对 post-fix 的 3 秒 take 的结果为 `codec_name=ffv1`、`1280x1024`、
+旧 OpenCV writer 的 `ffprobe` 对 post-fix 的 3 秒 take 的结果为 `codec_name=ffv1`、`1280x1024`、
 `avg_frame_rate=30/1` 且 `nb_read_frames=41`，与 `metadata.json.counts.written_frames=41`
 一致。FFV1/OpenCV stream 是 configured CFR，所以 `avg_frame_rate` 只代表 nominal stream rate；
 metadata 明确写入 `stream_fps_is_nominal=true`、take elapsed、`captured_fps` 与
 `written_fps`，供数据集消费者使用真实吞吐口径。
 
-本地显示人工交互产生的两个 `video.mkv` 也经 `ffprobe` 确认为 `codec_name=ffv1`、
+本地显示人工交互产生的两个旧 writer `video.mkv` 也经 `ffprobe` 确认为 `codec_name=ffv1`、
 `1280x1024`（OpenCV writer 在容器中报告 `pix_fmt=bgra`；采集和 metadata 的帧合同仍为
 `BGR8`）。
+
+native FFmpeg writer 直接使用 FFV1 slice threading：本机 1280x1024 run 的 metadata 记录
+`backend=native_ffmpeg`、`thread_count=12`、`slice_count=12`、`pixel_format=bgr0`。30 秒
+take 的 `ffprobe` 确认为 `codec_name=ffv1`、`1280x1024`、`pix_fmt=bgr0`、
+`nb_read_frames=901`，与 metadata 的 `written_frames=901` 一致。单测以已知 BGR8 像素验证
+native writer 的 decode round-trip 逐像素一致；视频容器使用 `bgr0` 只是 FFmpeg 对 BGR8 输入的
+无损四字节封装，不改变 BGR 颜色通道值。
 
 3 秒 take 的 metadata 记录 `output_pixel_format=BGR8`、source PixelType=`BayerGB8`
 (`0x0108000a`)、payload=`1310720` bytes、`bayer_interpolation=balanced`。逐帧 CSV
@@ -62,19 +71,19 @@ headless 后采集 90 帧。因此远程 X11 预览会阻塞采集循环，不�
 
 ## 结论与遗留风险
 
-`balanced` 下相机采集达到目标：post-fix 3 秒 run 的
-`captured_fps=30.188`，但 `written_fps=13.601`；queue=1 时 50 帧按约定显式丢弃。较大的
-queue=120 在 10 秒 run 中缓冲后写出 254 帧、仍丢弃 47 帧。30 FPS capture target 已被观测到，
-但当前 CPU FFV1 写入端是明确吞吐瓶颈；工具不会把 container 的 nominal 30 FPS 误报为实际
-写入速率。
+`balanced` 下相机采集达到目标。历史 OpenCV writer 的 queue=1 三次 10 秒 run 都只写入
+153/301 帧（约 15.3 FPS），且 `tegrastats` 显示一个 CPU 核 100%、I/O wait=0；这确认瓶颈是
+单核编码路径而非 NVMe。用户确认改为 native FFmpeg slice writer 后，30 秒 queue=2 硬件 run
+达到 captured/written/dropped=`901/901/0`，captured/written FPS 均为 `30.018655`。因此当前
+1280x1024@30 FPS 的实时直接 FFV1 路径已通过 30 秒零丢帧验证；metadata 仍区分 nominal stream
+rate 与实测速率，不把 container 的 30 FPS 误报为实际写入速率。
 
-本地显示下的真实预览交互已完成，覆盖两个 take、一个 Marker 和正常退出。当前 CPU FFV1
-写入吞吐必须按实测判断：queue=1 的三次独立 10 秒 run 都只写入 153/301 帧（约 15.3 FPS），
-20 秒 gdb run 也为 305/601 帧（约 15.25 FPS）。同时 `tegrastats` 显示一个 CPU 核持续 100%、
-总 CPU 约 77% idle，`vmstat` 的 I/O wait 为 0；现有证据指向单核 FFV1 编码路径，而非 NVMe
-饱和。较大 queue 只能吸收短时积压，不能改变持续写入能力，不能只按 nominal 30 FPS 或单次
-无 drop 结果推断持续写入能力。
+queue=1 的 10 秒 native FFmpeg run 仍在 writer 初始化期间丢弃 1 帧；queue=2 的 30 秒 run
+没有持续积压或丢帧。默认 queue=120 仍保留为吸收正常启动和系统调度 burst 的容量，不应把它
+当作持续写入能力的替代证据。本地显示下的真实预览交互已完成，覆盖两个 take、一个 Marker 和
+正常退出；MobaXterm X11 preview 仍会阻塞采集，不应用于实时录制。
 
-一次 20 秒 queue=1 直接 run 在退出前报告 segmentation fault，后续同一场景的 gdb run 和三次
-10 秒重复均以 exit code 0 完成；系统 core limit 为 0、未安装 `coredumpctl`，因此尚未取得栈。
-该问题仍为未稳定复现的风险；若再次出现，应以 gdb 或启用可保存的 core dump 记录后再归因。
+一次旧 writer 20 秒 queue=1 直接 run 在退出前报告 segmentation fault，后续同一场景的 gdb
+run、三次 10 秒 old-writer run，以及本次 10/30 秒 native writer run 均以 exit code 0 完成。
+系统 core limit 为 0、未安装 `coredumpctl`，因此该退出故障仍未取得栈；若再次出现，应以 gdb
+或启用可保存的 core dump 再归因。

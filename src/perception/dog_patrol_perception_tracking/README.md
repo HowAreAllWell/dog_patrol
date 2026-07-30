@@ -269,7 +269,10 @@ Tracker ReID 配置（`tracker.*`）：
 
 `capture_ffv1` 是当前独立采集入口：只初始化一台 Hik MVS 相机，不加载 detector、tracker
 或 identity。它始终把 `CameraIngest` 的 clean BGR8 帧写为 FFV1/MKV；FFV1 不可用或写入
-失败会显式报错，绝不会回退到有损编码。
+失败会显式报错，绝不会回退到有损编码。writer 直接链接 native FFmpeg，并在大于等于一百万
+像素的帧上使用最多 12 个 FFV1 slice 线程；`metadata.json.encoder` 会记录实际线程数、slice
+数和容器像素格式。构建机需要 `pkg-config`、`libavcodec-dev`、`libavformat-dev` 与
+`libavutil-dev`。
 
 构建后在预览优先模式运行：
 
@@ -300,7 +303,7 @@ ros2 run vision_demo_host capture_ffv1 \
 - `video.mkv`（FFV1）
 - `frame_timestamps.csv`（source timestamp、camera frame number、PixelType、payload 与丢包）
 - `markers.csv`
-- `metadata.json`（#80 BGR8 frame contract、相机请求、codec、计数与 `complete`/`incomplete` 状态）
+- `metadata.json`（#80 BGR8 frame contract、相机请求、native FFmpeg encoder 配置、codec、计数与 `complete`/`incomplete` 状态）
 
 MKV 的 stream FPS 是 configured nominal rate；数据集真实采集/写入速率以 `metadata.json.timing`
 的 `captured_fps` / `written_fps` 为准，`stream_fps_is_nominal=true` 明确标注这一区别。

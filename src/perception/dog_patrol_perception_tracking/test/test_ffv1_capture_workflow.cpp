@@ -530,6 +530,8 @@ TEST(Ffv1CaptureArtifactWriterTest, PersistsLosslessBgr8FrameAndTakeMetadata) {
                                   std::istreambuf_iterator<char>());
   EXPECT_NE(metadata_text.find("\"state\": \"complete\""), std::string::npos);
   EXPECT_NE(metadata_text.find("\"codec\": \"FFV1\""), std::string::npos);
+  EXPECT_NE(metadata_text.find("\"backend\": \"native_ffmpeg\""), std::string::npos);
+  EXPECT_NE(metadata_text.find("\"thread_type\": \"slice\""), std::string::npos);
   EXPECT_NE(metadata_text.find("\"captured_frames\": 1"), std::string::npos);
   EXPECT_NE(metadata_text.find("\"source_pixel_type_name\": \"BayerGB8\""),
             std::string::npos);
