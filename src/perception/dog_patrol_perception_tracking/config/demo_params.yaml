@@ -7,7 +7,7 @@ vision_demo_host_node:
       height: 1024
       fps: 30.0
       timeout_ms: 1000
-      bayer_interpolation: "optimal"
+      bayer_interpolation: "balanced"
       bayer_smoothing: false
 
     detector:

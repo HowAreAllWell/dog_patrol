@@ -58,8 +58,12 @@ class VisionDemoNode : public rclcpp::Node {
     this->declare_parameter<int>("camera.height", 1024);
     this->declare_parameter<double>("camera.fps", 30.0);
     this->declare_parameter<int>("camera.timeout_ms", 1000);
-    this->declare_parameter<std::string>("camera.bayer_interpolation", "optimal");
-    this->declare_parameter<bool>("camera.bayer_smoothing", false);
+    this->declare_parameter<std::string>(
+        "camera.bayer_interpolation",
+        vision_demo_host::CameraIngest::BayerInterpolationName(
+            vision_demo_host::CameraIngest::kDefaultBayerInterpolation));
+    this->declare_parameter<bool>("camera.bayer_smoothing",
+                                  vision_demo_host::CameraIngest::kDefaultBayerSmoothing);
 
     this->declare_parameter<std::string>("detector.runtime_path", "");
     this->declare_parameter<double>("detector.raw_conf_threshold", 0.10);

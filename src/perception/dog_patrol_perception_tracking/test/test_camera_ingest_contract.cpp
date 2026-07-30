@@ -24,12 +24,23 @@ TEST(CameraIngestContractTest, ValidatesExplicitBayerConfiguration) {
   EXPECT_NE(error.find("fps"), std::string::npos);
 }
 
-TEST(CameraIngestContractTest, ParsesSupportedBayerInterpolationNames) {
+TEST(CameraIngestContractTest, DefaultsToBalancedBayerWithoutSmoothing) {
+  const CameraIngest::Config config;
+
+  EXPECT_EQ(config.bayer_interpolation, CameraIngest::BayerInterpolation::kBalanced);
+  EXPECT_FALSE(config.bayer_smoothing);
+}
+
+TEST(CameraIngestContractTest, ParsesEverySupportedBayerInterpolationOverride) {
   CameraIngest::BayerInterpolation interpolation{};
   std::string error;
 
   EXPECT_TRUE(CameraIngest::ParseBayerInterpolation("fast", &interpolation, &error));
   EXPECT_EQ(interpolation, CameraIngest::BayerInterpolation::kFast);
+  EXPECT_TRUE(CameraIngest::ParseBayerInterpolation("balanced", &interpolation, &error));
+  EXPECT_EQ(interpolation, CameraIngest::BayerInterpolation::kBalanced);
+  EXPECT_TRUE(CameraIngest::ParseBayerInterpolation("optimal", &interpolation, &error));
+  EXPECT_EQ(interpolation, CameraIngest::BayerInterpolation::kOptimal);
   EXPECT_TRUE(
       CameraIngest::ParseBayerInterpolation("optimal_plus", &interpolation, &error));
   EXPECT_EQ(interpolation, CameraIngest::BayerInterpolation::kOptimalPlus);

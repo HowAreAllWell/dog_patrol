@@ -19,6 +19,10 @@ class CameraIngest {
     kOptimalPlus = 3,
   };
 
+  static constexpr BayerInterpolation kDefaultBayerInterpolation{
+      BayerInterpolation::kBalanced};
+  static constexpr bool kDefaultBayerSmoothing{false};
+
   struct Config {
     std::string hik_mvs_model;
     std::string hik_mvs_serial;
@@ -26,8 +30,8 @@ class CameraIngest {
     int height{1024};
     double fps{30.0};
     int timeout_ms{1000};
-    BayerInterpolation bayer_interpolation{BayerInterpolation::kOptimal};
-    bool bayer_smoothing{false};
+    BayerInterpolation bayer_interpolation{kDefaultBayerInterpolation};
+    bool bayer_smoothing{kDefaultBayerSmoothing};
   };
 
   struct AcquiredFrame {

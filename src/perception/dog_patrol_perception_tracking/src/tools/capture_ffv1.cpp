@@ -30,8 +30,8 @@ struct Options {
   double fps{30.0};
   int timeout_ms{1000};
   vision_demo_host::CameraIngest::BayerInterpolation bayer_interpolation{
-      vision_demo_host::CameraIngest::BayerInterpolation::kOptimal};
-  bool bayer_smoothing{false};
+      vision_demo_host::CameraIngest::kDefaultBayerInterpolation};
+  bool bayer_smoothing{vision_demo_host::CameraIngest::kDefaultBayerSmoothing};
   std::string output_root{"data/captures"};
   std::string session_name{"capture"};
   std::size_t queue_capacity{120};
@@ -81,7 +81,7 @@ void PrintUsage() {
       << "  --height <px>                        (default: 1024)\n"
       << "  --fps <fps>                          (default: 30.0)\n"
       << "  --timeout-ms <ms>                    (default: 1000)\n"
-      << "  --bayer-interpolation <fast|balanced|optimal|optimal_plus>\n"
+      << "  --bayer-interpolation <fast|balanced|optimal|optimal_plus> (default: balanced)\n"
       << "  --bayer-smoothing                    (default: disabled)\n"
       << "  --output-root <dir>                  (default: data/captures)\n"
       << "  --session-name <name>                (default: capture)\n"

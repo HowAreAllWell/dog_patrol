@@ -339,6 +339,23 @@ TEST(Ffv1CaptureWorkflowTest, StartFrameStopFinalizesOneTakeWithObservedCountsAn
   EXPECT_EQ(summary.frame_contract.bayer_interpolation, "balanced");
 }
 
+TEST(Ffv1CaptureWorkflowTest, DefaultConfigurationRecordsBalancedBayerWithoutSmoothing) {
+  auto artifacts = std::make_shared<CapturedArtifacts>();
+  Ffv1CaptureWorkflow workflow(
+      Ffv1CaptureWorkflow::Config{},
+      std::make_unique<InMemoryCaptureArtifactWriterFactory>(artifacts));
+  std::string error;
+
+  ASSERT_TRUE(workflow.HandleControl(CaptureControl::kStart, 1'000U, &error)) << error;
+  workflow.Submit(MakeFrame(41U, 1'500U));
+  ASSERT_TRUE(workflow.HandleControl(CaptureControl::kStop, 2'000U, &error)) << error;
+
+  ASSERT_EQ(artifacts->summaries.size(), 1U);
+  const CaptureFrameContract &contract = artifacts->summaries.front().frame_contract;
+  EXPECT_EQ(contract.bayer_interpolation, "balanced");
+  EXPECT_FALSE(contract.bayer_smoothing);
+}
+
 TEST(Ffv1CaptureWorkflowTest, AcquisitionDoesNotBlockWhileTheWriterInitializes) {
   auto artifacts = std::make_shared<BlockingBeginArtifacts>();
   Ffv1CaptureWorkflow::Config config;

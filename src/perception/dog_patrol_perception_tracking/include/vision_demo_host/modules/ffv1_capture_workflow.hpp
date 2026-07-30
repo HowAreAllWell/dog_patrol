@@ -102,8 +102,8 @@ class Ffv1CaptureWorkflow {
     std::string take_name_prefix{"take"};
     std::size_t queue_capacity{120};
     CameraIngest::BayerInterpolation bayer_interpolation{
-        CameraIngest::BayerInterpolation::kOptimal};
-    bool bayer_smoothing{false};
+        CameraIngest::kDefaultBayerInterpolation};
+    bool bayer_smoothing{CameraIngest::kDefaultBayerSmoothing};
   };
 
   Ffv1CaptureWorkflow(Config config,

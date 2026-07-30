@@ -25,8 +25,8 @@ Orin 宿主机侧视觉验收 demo，包含检测、短期跟踪、语义身份�
 核心项：
 - `camera.mvs_model` / `camera.mvs_serial`
 - `camera.width` / `camera.height` / `camera.fps` / `camera.timeout_ms`
-- `camera.bayer_interpolation`（`fast|balanced|optimal|optimal_plus`）
-- `camera.bayer_smoothing`
+- `camera.bayer_interpolation`（默认 `balanced`；`fast|balanced|optimal|optimal_plus` 均可显式覆盖）
+- `camera.bayer_smoothing`（默认 `false`）
 - `detector.runtime_path`
 - `detector.raw_conf_threshold`
 - `detector.person_conf_threshold` / `detector.car_conf_threshold`
@@ -110,7 +110,7 @@ ros2 run vision_demo_host vision_demo_node --ros-args \
   -p camera.width:=1280 \
   -p camera.height:=1024 \
   -p camera.fps:=30.0 \
-  -p camera.bayer_interpolation:='optimal' \
+  -p camera.bayer_interpolation:='balanced' \
   -p camera.bayer_smoothing:=false \
   -p detector.runtime_path:='/path/to/my_workplace/vision_demo_ws/assets/models/engines/orin_jp621_trt_local/yolo26n_fp16_640.engine' \
   -p detector.enable_fake_detection:=false
@@ -247,14 +247,16 @@ Tracker ReID 配置（`tracker.*`）：
 ```
 
 默认目标为 `1280x1024@30 FPS`、`fast` Bayer interpolation，运行 60 秒，输出到
-`log/bench_hik_mvs_camera/`。硬件验收应保存 `summary.txt` 和完整日志。
+`log/bench_hik_mvs_camera/`。这是固定的性能对照，非 production runtime 默认；硬件验收应保存
+`summary.txt` 和完整日志。
 本轮 `fast` / `optimal` 对照证据见
 `docs/issue80_hik_mvs_frame_contract_baseline.md`。
 
 `#85` 已补充同源 Bayer、含人受控 detector/ReID/tracking 和完整 `balanced` live 30 FPS 证据，
-见 `docs/issue85_bayer_preprocess_audit.md`。当前配置文件/参数声明仍以 `optimal` 为默认，直到
-required `#93` 独立实施；`bench_hik_mvs_camera.sh` 的 `fast` 默认是性能对照基准，不代表 runtime
-默认。
+见 `docs/issue85_bayer_preprocess_audit.md`。当前 config file、参数声明、live helper 和 Hik MVS
+capture/record 工具均默认 `balanced`，且 smoothing 默认关闭；`optimal` rollback 可用
+`-p camera.bayer_interpolation:=optimal` 或 capture/record 的 `--bayer-interpolation optimal`。
+`bench_hik_mvs_camera.sh` 的 `fast` 默认只作为性能对照基准，不代表 runtime 默认。
 
 `benchmark_bayer_input` 是仅 MVS-enabled 构建中的 headless 审计工具。它对一批自持有 Bayer
 buffers 比较全部 SDK quality、写出 FFV1 variants、检测 CSV 和分段 p50/p95/p99；可用
@@ -292,9 +294,11 @@ source install/setup.bash
 ros2 run vision_demo_host capture_ffv1 \
   --mvs-model MV-CU013-A0UC \
   --width 1280 --height 1024 --fps 30.0 \
-  --bayer-interpolation optimal \
   --session-name orin_hik_lossless_01
 ```
+
+不传 `--bayer-interpolation` 时 capture 默认 `balanced`，且 Bayer smoothing 保持关闭。需要与旧
+`optimal` 默认作可回滚对照时，显式加 `--bayer-interpolation optimal`；四种 SDK 支持 mode 都可覆盖。
 
 预览默认处于 `STANDBY`，录制的视频不含任何 preview 文字。热键为：
 
