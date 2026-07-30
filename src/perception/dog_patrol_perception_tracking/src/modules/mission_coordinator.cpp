@@ -4,14 +4,6 @@
 #include <stdexcept>
 
 namespace vision_demo_host {
-namespace {
-
-bool IsNewerStateSeq(const std::uint32_t candidate, const std::uint32_t current) {
-  return candidate != current && static_cast<std::int32_t>(candidate - current) > 0;
-}
-
-}  // namespace
-
 MissionCoordinator::MissionCoordinator() : MissionCoordinator(Config{}) {}
 
 MissionCoordinator::MissionCoordinator(Config config) : config_(config) {
@@ -41,18 +33,7 @@ bool MissionCoordinator::AcceptsFreshTargetBox(const MissionPhase phase) {
 }
 
 bool MissionCoordinator::IsCurrentMissionState(const MissionSnapshot &mission) {
-  if (!latest_state_seq_.has_value()) {
-    latest_state_seq_ = mission.state_seq;
-    return true;
-  }
-  if (mission.state_seq == latest_state_seq_.value()) {
-    return true;
-  }
-  if (!IsNewerStateSeq(mission.state_seq, latest_state_seq_.value())) {
-    return false;
-  }
-  latest_state_seq_ = mission.state_seq;
-  return true;
+  return state_sequence_.AcceptsCurrentOrNewer(mission.state_seq);
 }
 
 bool MissionCoordinator::IsCurrentSourceTime(const TimePoint source_time) const {

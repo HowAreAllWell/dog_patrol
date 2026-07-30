@@ -44,6 +44,7 @@ set(MODULE_SOURCES
   src/modules/mot_tracker.cpp
   src/modules/primary_target_manager.cpp
   src/modules/mission_coordinator.cpp
+  src/modules/perception_readiness.cpp
   src/modules/primary_recovery_debug.cpp
   src/modules/bearing_estimator.cpp
   src/modules/udp_json_adapter.cpp
@@ -189,6 +190,13 @@ if(BUILD_TESTING)
     target_compile_features(test_mission_coordinator PUBLIC cxx_std_17)
     target_include_directories(test_mission_coordinator PRIVATE include)
     target_link_libraries(test_mission_coordinator ${PROJECT_NAME}_modules)
+  endif()
+
+  ament_add_gtest(test_perception_readiness test/test_perception_readiness.cpp)
+  if(TARGET test_perception_readiness)
+    target_compile_features(test_perception_readiness PUBLIC cxx_std_17)
+    target_include_directories(test_perception_readiness PRIVATE include)
+    target_link_libraries(test_perception_readiness ${PROJECT_NAME}_modules)
   endif()
 
   ament_add_gtest(test_primary_recovery_debug test/test_primary_recovery_debug.cpp)

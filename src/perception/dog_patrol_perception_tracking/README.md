@@ -11,6 +11,7 @@ Orin 宿主机侧视觉验收 demo，包含检测、短期跟踪、语义身份�
 - `mot_tracker`：BoT-SORT 风格实现（Kalman + 两阶段关联 + GMC + appearance）
 - `primary_target_manager`：`person`-only 主目标规则（首锁最大框 + continuity-first）
 - `mission_coordinator`：ROS-independent 任务输出协调 seam；按任务状态 / semantic target / state sequence 只产生当前帧可信 bbox，并负责配置化同目标 loss/reacquire event 时序
+- `perception_readiness`：ROS-independent READY 聚合 seam；以 required capability contribution 和 `STARTUP state_seq` 产生至多一次 aggregate READY action
 - `bearing_estimator`：demo 近似 bearing（非标定真值）
 - `udp_json_adapter`：localhost UDP JSON
 
@@ -47,6 +48,19 @@ Orin 宿主机侧视觉验收 demo，包含检测、短期跟踪、语义身份�
 source-time，不按固定帧数计时；输出当前 target 的新鲜 bbox 只允许在
 `CONFIRM_TARGET`、`APPROACH_TARGET`、`VERIFY_IDENTITY`、`TRACK_INTRUDER`。
 它尚未连接 ROS 参数、订阅或 live loop，这些 transport/runtime 职责属于 `#84`。
+
+`PerceptionReadinessAggregator` 只接受 `MissionSnapshot` 和 required contributor，复用
+`MissionCoordinator` 的 mission phase / `state_seq` 术语：只有当前 `STARTUP state_seq`
+中所有 required contributor 都为 ready 时，才产生一次 `PerceptionReadyAction`；非
+`STARTUP`、旧 sequence、同 sequence duplicate update 都不产生 READY。视觉侧应使用
+`DetectionTrackingReadinessContributor` 报告 detector/tracker 的 ready、not-ready 或
+failure；既有 `vision_demo_node` 的 detector/tracker 初始化、camera source-frame failure 和
+detector/tracker frame-processing exception 会更新它。尚未接入的 authorization 和任意未来能力必须使用
+`PlaceholderReadinessContributor(capability, owner, replacement_seam, readiness)`，显式
+写明 owner 与替换入口；placeholder 默认 not-ready，只有部署明确认可临时能力时才传
+ready。接入实际 capability 时以同名 `ReplaceRequiredContributor` 替换，不能改变
+mission-supervisor 或 vision-node policy。该 seam 不含 ROS publisher、mission snapshot 输入或
+aggregate READY action；这些 transport/runtime 连接仍属于 `#84`。
 
 建议 engine 路径：
 - `/path/to/my_workplace/vision_demo_ws/assets/models/engines/orin_jp621_trt_local/yolo26n_fp16_640.engine`

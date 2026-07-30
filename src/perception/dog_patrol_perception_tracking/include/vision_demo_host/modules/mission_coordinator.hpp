@@ -5,6 +5,7 @@
 #include <optional>
 #include <vector>
 
+#include "vision_demo_host/modules/mission_state_sequence.hpp"
 #include "vision_demo_host/types.hpp"
 
 namespace vision_demo_host {
@@ -106,7 +107,7 @@ class MissionCoordinator {
   void ResetMissionTarget();
 
   Config config_;
-  std::optional<std::uint32_t> latest_state_seq_;
+  MissionStateSequenceCursor state_sequence_;
   std::optional<TimePoint> latest_source_time_;
   std::optional<TimePoint> last_published_source_time_;
   std::optional<int> tracked_target_id_;

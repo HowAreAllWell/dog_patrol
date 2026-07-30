@@ -17,6 +17,7 @@
 #include "vision_demo_host/modules/det_filter.hpp"
 #include "vision_demo_host/modules/identity_manager.hpp"
 #include "vision_demo_host/modules/mot_tracker.hpp"
+#include "vision_demo_host/modules/perception_readiness.hpp"
 #include "vision_demo_host/modules/preprocess_infer.hpp"
 #include "vision_demo_host/modules/primary_target_manager.hpp"
 #include "vision_demo_host/modules/runtime_monitor.hpp"
@@ -171,6 +172,8 @@ class VisionDemoNode : public rclcpp::Node {
         this->get_parameter("camera.bayer_smoothing").as_bool();
 
     if (!camera_.Open(camera_cfg, &error)) {
+      detection_tracking_readiness_.ReportRuntimeStatus(
+          {false, false, "camera input initialization failed: " + error});
       throw std::runtime_error("camera_ingest init failed: " + error);
     }
 
@@ -184,8 +187,11 @@ class VisionDemoNode : public rclcpp::Node {
     infer_cfg.enable_timing_metrics = this->get_parameter("runtime.inference_timing_metrics").as_bool();
     infer_ = vision_demo_host::PreprocessInfer(infer_cfg);
     if (!infer_.Initialize(&error)) {
+      detection_tracking_readiness_.ReportRuntimeStatus(
+          {false, false, "detector initialization failed: " + error});
       throw std::runtime_error("preprocess_infer init failed: " + error);
     }
+    detection_tracking_readiness_.ReportRuntimeStatus({true, false, {}});
 
     vision_demo_host::DetFilter::Config filter_cfg;
     filter_cfg.person_conf_threshold =
@@ -236,8 +242,11 @@ class VisionDemoNode : public rclcpp::Node {
     tracker_cfg.with_reid = true;
     tracker_ = vision_demo_host::MotTracker(tracker_cfg);
     if (!tracker_.Initialize(&error)) {
+      detection_tracking_readiness_.ReportRuntimeStatus(
+          {true, false, "tracker initialization failed: " + error});
       throw std::runtime_error("mot_tracker init failed: " + error);
     }
+    detection_tracking_readiness_.ReportRuntimeStatus({true, true, {}});
 
     vision_demo_host::PrimaryTargetManager::Config target_cfg;
     target_cfg.lost_threshold_frames = this->get_parameter("target.lost_threshold_frames").as_int();
@@ -344,6 +353,8 @@ class VisionDemoNode : public rclcpp::Node {
 
     vision_demo_host::CameraIngest::AcquiredFrame acquired_frame;
     if (!camera_.Read(&acquired_frame, &error)) {
+      detection_tracking_readiness_.ReportRuntimeStatus(
+          {true, true, "initial detection/tracking source frame failed: " + error});
       throw std::runtime_error("camera_ingest initial frame failed: " + error);
     }
     cv::Mat &frame = acquired_frame.bgr8;
@@ -513,15 +524,27 @@ class VisionDemoNode : public rclcpp::Node {
     std::string error;
     vision_demo_host::CameraIngest::AcquiredFrame acquired_frame;
     if (!camera_.Read(&acquired_frame, &error)) {
+      detection_tracking_readiness_.ReportRuntimeStatus(
+          {true, true, "detection/tracking source frame failed: " + error});
       RCLCPP_WARN_THROTTLE(get_logger(), *this->get_clock(), 2000, "camera_ingest read failed: %s",
                            error.c_str());
       return;
     }
     cv::Mat &frame = acquired_frame.bgr8;
 
-    auto detections = infer_.Infer(frame);
-    const auto filtered = det_filter_.Filter(detections);
-    auto tracks = tracker_.Update(filtered, frame);
+    std::vector<vision_demo_host::Detection> detections;
+    std::vector<vision_demo_host::Detection> filtered;
+    std::vector<vision_demo_host::Track> tracks;
+    try {
+      detections = infer_.Infer(frame);
+      filtered = det_filter_.Filter(detections);
+      tracks = tracker_.Update(filtered, frame);
+    } catch (const std::exception &exception) {
+      detection_tracking_readiness_.ReportRuntimeStatus(
+          {true, true, "detection/tracking frame processing failed: " + std::string(exception.what())});
+      throw;
+    }
+    detection_tracking_readiness_.ReportRuntimeStatus({true, true, {}});
 
     const auto primary_prev = primary_manager_.GetState();
     auto identity_result = identity_manager_.Update(
@@ -588,6 +611,7 @@ class VisionDemoNode : public rclcpp::Node {
   vision_demo_host::PreprocessInfer infer_;
   vision_demo_host::DetFilter det_filter_;
   vision_demo_host::MotTracker tracker_;
+  vision_demo_host::DetectionTrackingReadinessContributor detection_tracking_readiness_;
   vision_demo_host::PrimaryTargetManager primary_manager_;
   vision_demo_host::IdentityManager identity_manager_;
   vision_demo_host::BearingEstimator bearing_;
