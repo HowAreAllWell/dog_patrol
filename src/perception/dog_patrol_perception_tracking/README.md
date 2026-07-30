@@ -36,7 +36,10 @@ Orin 宿主机侧视觉验收 demo，包含检测、短期跟踪、语义身份�
 - `bearing.camera_mount_x/y/z`
 - `bearing.camera_mount_roll/pitch/yaw`
 - `udp.ip` / `udp.port`
-- `visualization.enable` / `recording.enable`
+- `visualization.enable`（overlay preview；默认 `false`）
+- `visualization.queue_capacity`（异步 overlay render/write queue；默认 `4`）
+- `recording.enable` / `recording.output_root` / `recording.path` / `recording.fps`（当前 live result 录制强制为 FFV1/MKV；`path` 必须位于可信 diagnostic output root，且 result root 不得与受保护的 clean `data/captures/` 重叠或经符号链接指向它）
+- `runtime.inference_timing_metrics`（默认 `true`，输出 inference p50/p95/p99）
 
 建议 engine 路径：
 - `/path/to/my_workplace/vision_demo_ws/assets/models/engines/orin_jp621_trt_local/yolo26n_fp16_640.engine`
@@ -140,6 +143,15 @@ nc -u -l -p 5005
 - 前台启动 `vision_demo_node`
 - 支持可视化/录制开关参数
 
+四种 live mode 独立配置：
+
+- inference-only：`--viz false --rec false`（干净性能 baseline）
+- preview：`--viz true --rec false`（需要本地图形会话）
+- record：`--viz false --rec true --record-path /path/to/diagnostics/live.mkv`
+- preview+record：`--viz true --rec true --record-path /path/to/diagnostics/live.mkv`
+
+预览和录制从同一 worker 产生同一 tracking/identity/primary overlay canvas。worker 队列有界、队满丢弃最新诊断帧而不等待编码或显示；每秒日志会输出 capture、inference、render/write 的 FPS、queue/render/write drop 和 p50/p95/p99。请将 live overlay 放在 `data/diagnostics/live_overlays/` 等结果目录，不能当作 source dataset。
+
 示例（实时预览 + 实时方位打印，不录制）：
 
 ```bash
@@ -150,7 +162,7 @@ src/vision_demo_host/scripts/live_bearing_test.sh \
   --rec false
 ```
 
-示例（实时预览 + 录制）：
+示例（实时预览 + FFV1 overlay 诊断录制）：
 
 ```bash
 cd /path/to/my_workplace/vision_demo_ws
@@ -158,8 +170,8 @@ src/vision_demo_host/scripts/live_bearing_test.sh \
   --mvs-model MV-CU013-A0UC \
   --viz true \
   --rec true \
-  --record-path '/path/to/my_workplace/vision_demo_ws/data/recordings/live_$(date +%Y%m%d_%H%M%S).mp4' \
-  --record-fps 25.0
+  --record-path '/path/to/my_workplace/vision_demo_ws/data/diagnostics/live_overlays/live_$(date +%Y%m%d_%H%M%S).mkv' \
+  --record-fps 30.0
 ```
 
 ## 基本验证重点

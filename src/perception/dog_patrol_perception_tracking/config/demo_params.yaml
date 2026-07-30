@@ -87,11 +87,14 @@ vision_demo_host_node:
 
     visualization:
       enable: false
+      queue_capacity: 4
 
     recording:
       enable: false
-      path: "/tmp/vision_demo_out.mp4"
-      fps: 15.0
+      output_root: "data/diagnostics/live_overlays"
+      path: "data/diagnostics/live_overlays/vision_demo_overlay.mkv"
+      fps: 30.0
 
     runtime:
       tick_ms: 33
+      inference_timing_metrics: true

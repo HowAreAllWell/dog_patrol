@@ -32,6 +32,7 @@ endif()
 
 set(MODULE_SOURCES
   src/modules/camera_ingest.cpp
+  src/modules/ffv1_mkv_writer.cpp
   src/modules/ffv1_capture_workflow.cpp
   src/modules/ffv1_capture_artifact_writer.cpp
   src/modules/preprocess_infer.cpp
@@ -165,6 +166,13 @@ if(BUILD_TESTING)
     target_compile_features(test_ffv1_capture_workflow PUBLIC cxx_std_17)
     target_include_directories(test_ffv1_capture_workflow PRIVATE include)
     target_link_libraries(test_ffv1_capture_workflow ${PROJECT_NAME}_modules)
+  endif()
+
+  ament_add_gtest(test_visualizer_recorder test/test_visualizer_recorder.cpp)
+  if(TARGET test_visualizer_recorder)
+    target_compile_features(test_visualizer_recorder PUBLIC cxx_std_17)
+    target_include_directories(test_visualizer_recorder PRIVATE include)
+    target_link_libraries(test_visualizer_recorder ${PROJECT_NAME}_modules)
   endif()
 
   ament_add_gtest(test_primary_target_manager test/test_primary_target_manager.cpp)

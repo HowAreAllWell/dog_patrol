@@ -1,23 +1,57 @@
 #pragma once
 
-#include <optional>
+#include <chrono>
+#include <cstddef>
+#include <cstdint>
+#include <condition_variable>
+#include <deque>
+#include <filesystem>
+#include <memory>
+#include <mutex>
 #include <string>
+#include <thread>
 #include <vector>
 
 #include <opencv2/core/mat.hpp>
-#include <opencv2/videoio.hpp>
 
 #include "vision_demo_host/types.hpp"
 
 namespace vision_demo_host {
 
+// The worker-only boundary for diagnostic overlay recording. Implementations must
+// accept the already-rendered canvas and must never run on the inference thread.
+class OverlayArtifactWriter {
+ public:
+  virtual ~OverlayArtifactWriter() = default;
+
+  virtual bool Open(const cv::Size &frame_size, double fps, std::string *error) = 0;
+  virtual bool Write(const cv::Mat &canvas, std::string *error) = 0;
+  virtual bool Close(std::string *error) = 0;
+};
+
+class OverlayArtifactWriterFactory {
+ public:
+  virtual ~OverlayArtifactWriterFactory() = default;
+
+  virtual std::unique_ptr<OverlayArtifactWriter> Create(const std::filesystem::path &output_path,
+                                                         double fps) = 0;
+};
+
 class VisualizerRecorder {
  public:
   struct Config {
-    bool enable_visualization{false};
+    bool enable_preview{false};
     bool enable_recording{false};
-    std::string recording_path{"/tmp/vision_demo_out.mp4"};
-    double recording_fps{15.0};
+    // Result artifacts are constrained to this root. A live camera has no source
+    // directory to compare against, so this is the explicit trust boundary that
+    // keeps diagnostic overlays out of clean capture datasets.
+    std::string recording_output_root{"data/diagnostics/live_overlays"};
+    std::string recording_path{"data/diagnostics/live_overlays/vision_demo_overlay.mkv"};
+    // The active live camera has no input directory; project capture roots are
+    // consequently declared as protected paths rather than inferred per frame.
+    std::vector<std::string> protected_source_dataset_roots{"data/captures"};
+    double recording_fps{30.0};
+    std::size_t queue_capacity{4};
     int semantic_id_max_missing_frames{180};
     int sid_feat_bank_size{30};
     float sid_recover_sim_thresh_strict{0.85F};
@@ -43,18 +77,95 @@ class VisualizerRecorder {
     int sid_reid_input_height{256};
   };
 
-  explicit VisualizerRecorder(Config config);
+  struct PercentileSummary {
+    std::size_t samples{0};
+    double p50_ms{0.0};
+    double p95_ms{0.0};
+    double p99_ms{0.0};
+  };
+
+  struct MetricsSnapshot {
+    std::uint64_t submitted_frames{0};
+    std::uint64_t enqueued_frames{0};
+    std::uint64_t queue_dropped_frames{0};
+    std::uint64_t render_dropped_frames{0};
+    std::uint64_t write_dropped_frames{0};
+    std::uint64_t rendered_frames{0};
+    std::uint64_t previewed_frames{0};
+    std::uint64_t written_frames{0};
+    std::uint64_t render_errors{0};
+    std::uint64_t write_errors{0};
+    double submitted_fps{0.0};
+    double rendered_fps{0.0};
+    double previewed_fps{0.0};
+    double written_fps{0.0};
+    PercentileSummary queue_wait;
+    PercentileSummary render;
+    PercentileSummary write;
+
+    std::uint64_t dropped_frames() const {
+      return queue_dropped_frames + render_dropped_frames + write_dropped_frames;
+    }
+  };
+
+  explicit VisualizerRecorder(
+      Config config,
+      std::unique_ptr<OverlayArtifactWriterFactory> artifact_writer_factory = nullptr);
+  ~VisualizerRecorder();
+
+  VisualizerRecorder(const VisualizerRecorder &) = delete;
+  VisualizerRecorder &operator=(const VisualizerRecorder &) = delete;
+
+  static bool ValidateConfig(const Config &config, std::string *error);
+  static std::string ModeName(const Config &config);
 
   bool Initialize(const cv::Size &frame_size, std::string *error);
-  void Render(const cv::Mat &frame, const std::vector<Track> &tracks,
-              const PrimaryTargetResult &primary,
-              const IdentityManagerResult *identity_result,
-              const std::string &primary_decision_reason = {},
-              const std::string &primary_reject_reason = {});
+
+  // Transfers the caller's BGR8 ownership into a bounded, non-blocking output queue.
+  // Pass a moved CameraIngest::AcquiredFrame::bgr8 to avoid a second frame copy.
+  void Submit(cv::Mat frame, std::vector<Track> tracks, PrimaryTargetResult primary,
+              IdentityManagerResult identity_result, std::string primary_decision_reason = {},
+              std::string primary_reject_reason = {});
+  void Shutdown();
+
+  MetricsSnapshot Metrics() const;
+  std::string LastError() const;
 
  private:
+  struct Job {
+    cv::Mat frame;
+    std::vector<Track> tracks;
+    PrimaryTargetResult primary;
+    IdentityManagerResult identity_result;
+    std::string primary_decision_reason;
+    std::string primary_reject_reason;
+    std::chrono::steady_clock::time_point enqueued_at;
+  };
+
+  static cv::Mat BuildOverlayCanvas(const Job &job);
+  static PercentileSummary Summarize(const std::vector<double> &samples);
+  static void Observe(std::vector<double> *samples, double milliseconds);
+  void AddError(const std::string &error);
+  void WorkerLoop();
+
   Config config_;
-  cv::VideoWriter writer_;
+  std::unique_ptr<OverlayArtifactWriterFactory> artifact_writer_factory_;
+  cv::Size frame_size_;
+  bool initialized_{false};
+  bool stopping_{false};
+  std::thread worker_;
+
+  mutable std::mutex queue_mutex_;
+  std::condition_variable queue_changed_;
+  std::deque<Job> queue_;
+
+  mutable std::mutex metrics_mutex_;
+  MetricsSnapshot metrics_;
+  std::vector<double> queue_wait_ms_;
+  std::vector<double> render_ms_;
+  std::vector<double> write_ms_;
+  std::chrono::steady_clock::time_point started_at_{};
+  std::string last_error_;
 };
 
 }  // namespace vision_demo_host

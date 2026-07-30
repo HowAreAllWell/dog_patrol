@@ -39,8 +39,7 @@ class VisionDemoNode : public rclcpp::Node {
         primary_manager_(vision_demo_host::PrimaryTargetManager::Config{}),
         identity_manager_(vision_demo_host::IdentityManager::Config{}),
         bearing_(vision_demo_host::BearingEstimator::Config{}),
-        udp_("127.0.0.1", 5005),
-        visualizer_(vision_demo_host::VisualizerRecorder::Config{}) {
+        udp_("127.0.0.1", 5005) {
     DeclareParameters();
     LoadConfigAndInitialize();
 
@@ -48,6 +47,14 @@ class VisionDemoNode : public rclcpp::Node {
     timer_ = this->create_wall_timer(std::chrono::milliseconds(timer_ms),
                                      std::bind(&VisionDemoNode::Tick, this));
     RCLCPP_INFO(get_logger(), "vision_demo_host_node started.");
+  }
+
+  void ShutdownAndLog() {
+    if (visualizer_ == nullptr) {
+      return;
+    }
+    visualizer_->Shutdown();
+    LogOverlayMetrics(visualizer_->Metrics(), "final");
   }
 
  private:
@@ -134,9 +141,13 @@ class VisionDemoNode : public rclcpp::Node {
     this->declare_parameter<int>("udp.port", 5005);
 
     this->declare_parameter<bool>("visualization.enable", false);
+    this->declare_parameter<int>("visualization.queue_capacity", 4);
     this->declare_parameter<bool>("recording.enable", false);
-    this->declare_parameter<std::string>("recording.path", "/tmp/vision_demo_out.mp4");
-    this->declare_parameter<double>("recording.fps", 15.0);
+    this->declare_parameter<std::string>("recording.output_root", "data/diagnostics/live_overlays");
+    this->declare_parameter<std::string>("recording.path",
+                                         "data/diagnostics/live_overlays/vision_demo_overlay.mkv");
+    this->declare_parameter<double>("recording.fps", 30.0);
+    this->declare_parameter<bool>("runtime.inference_timing_metrics", true);
 
     this->declare_parameter<int>("runtime.tick_ms", 33);
   }
@@ -170,6 +181,7 @@ class VisionDemoNode : public rclcpp::Node {
     infer_cfg.input_width = this->get_parameter("detector.input_width").as_int();
     infer_cfg.input_height = this->get_parameter("detector.input_height").as_int();
     infer_cfg.enable_fake_detection = this->get_parameter("detector.enable_fake_detection").as_bool();
+    infer_cfg.enable_timing_metrics = this->get_parameter("runtime.inference_timing_metrics").as_bool();
     infer_ = vision_demo_host::PreprocessInfer(infer_cfg);
     if (!infer_.Initialize(&error)) {
       throw std::runtime_error("preprocess_infer init failed: " + error);
@@ -337,10 +349,15 @@ class VisionDemoNode : public rclcpp::Node {
     cv::Mat &frame = acquired_frame.bgr8;
 
     vision_demo_host::VisualizerRecorder::Config viz_cfg;
-    viz_cfg.enable_visualization = this->get_parameter("visualization.enable").as_bool();
+    viz_cfg.enable_preview = this->get_parameter("visualization.enable").as_bool();
     viz_cfg.enable_recording = this->get_parameter("recording.enable").as_bool();
+    viz_cfg.recording_output_root = this->get_parameter("recording.output_root").as_string();
     viz_cfg.recording_path = this->get_parameter("recording.path").as_string();
     viz_cfg.recording_fps = this->get_parameter("recording.fps").as_double();
+    const int visualization_queue_capacity = this->get_parameter("visualization.queue_capacity").as_int();
+    viz_cfg.queue_capacity = visualization_queue_capacity > 0
+                                 ? static_cast<std::size_t>(visualization_queue_capacity)
+                                 : 0U;
     viz_cfg.semantic_id_max_missing_frames = target_cfg.lost_threshold_frames;
     viz_cfg.sid_feat_bank_size = this->get_parameter("sid.feat_bank_size").as_int();
     viz_cfg.sid_recover_sim_thresh_strict =
@@ -372,8 +389,8 @@ class VisionDemoNode : public rclcpp::Node {
     viz_cfg.sid_reid_model_path = this->get_parameter("sid.reid_model_path").as_string();
     viz_cfg.sid_reid_input_width = this->get_parameter("sid.reid_input_width").as_int();
     viz_cfg.sid_reid_input_height = this->get_parameter("sid.reid_input_height").as_int();
-    visualizer_ = vision_demo_host::VisualizerRecorder(viz_cfg);
-    if (!visualizer_.Initialize(frame.size(), &error)) {
+    visualizer_ = std::make_unique<vision_demo_host::VisualizerRecorder>(viz_cfg);
+    if (!visualizer_->Initialize(frame.size(), &error)) {
       throw std::runtime_error("visualizer_recorder init failed: " + error);
     }
 
@@ -460,11 +477,36 @@ class VisionDemoNode : public rclcpp::Node {
                 target_cfg.lost_threshold_frames, target_cfg.min_person_area_px, target_cfg.max_center_jump_norm,
                 target_cfg.min_area_ratio, target_cfg.max_area_ratio, target_cfg.pending_recovery_frames);
     RCLCPP_INFO(get_logger(),
-                "startup_effective_config bearing hfov=%.5f mount_xyz=%.5f/%.5f/%.5f mount_rpy=%.5f/%.5f/%.5f udp=%s:%d visualization=%s recording=%s recording_path=%s recording_fps=%.2f",
+                "startup_effective_config bearing hfov=%.5f mount_xyz=%.5f/%.5f/%.5f mount_rpy=%.5f/%.5f/%.5f udp=%s:%d live_mode=%s preview=%s recording=%s recording_output_root=%s recording_path=%s recording_fps=%.2f overlay_queue_capacity=%zu",
                 bearing_cfg.camera_horizontal_fov_rad, bearing_cfg.camera_mount_x, bearing_cfg.camera_mount_y,
                 bearing_cfg.camera_mount_z, bearing_cfg.camera_mount_roll, bearing_cfg.camera_mount_pitch,
-                bearing_cfg.camera_mount_yaw, udp_ip.c_str(), udp_port, BoolStr(viz_cfg.enable_visualization),
-                BoolStr(viz_cfg.enable_recording), viz_cfg.recording_path.c_str(), viz_cfg.recording_fps);
+                bearing_cfg.camera_mount_yaw, udp_ip.c_str(), udp_port,
+                vision_demo_host::VisualizerRecorder::ModeName(viz_cfg).c_str(), BoolStr(viz_cfg.enable_preview),
+                BoolStr(viz_cfg.enable_recording), viz_cfg.recording_output_root.c_str(),
+                viz_cfg.recording_path.c_str(), viz_cfg.recording_fps, viz_cfg.queue_capacity);
+  }
+
+  void LogOverlayMetrics(const vision_demo_host::VisualizerRecorder::MetricsSnapshot &overlay_metrics,
+                         const char *phase) {
+    RCLCPP_INFO(
+        get_logger(),
+        "overlay_metrics phase=%s submitted=%llu enqueued=%llu queue_drops=%llu render_drops=%llu write_drops=%llu render_errors=%llu write_errors=%llu submitted_fps=%.2f rendered_fps=%.2f previewed_fps=%.2f written_fps=%.2f queue_wait_ms_p50_p95_p99=%.3f/%.3f/%.3f render_ms_p50_p95_p99=%.3f/%.3f/%.3f write_ms_p50_p95_p99=%.3f/%.3f/%.3f",
+        phase, static_cast<unsigned long long>(overlay_metrics.submitted_frames),
+        static_cast<unsigned long long>(overlay_metrics.enqueued_frames),
+        static_cast<unsigned long long>(overlay_metrics.queue_dropped_frames),
+        static_cast<unsigned long long>(overlay_metrics.render_dropped_frames),
+        static_cast<unsigned long long>(overlay_metrics.write_dropped_frames),
+        static_cast<unsigned long long>(overlay_metrics.render_errors),
+        static_cast<unsigned long long>(overlay_metrics.write_errors), overlay_metrics.submitted_fps,
+        overlay_metrics.rendered_fps, overlay_metrics.previewed_fps, overlay_metrics.written_fps,
+        overlay_metrics.queue_wait.p50_ms, overlay_metrics.queue_wait.p95_ms,
+        overlay_metrics.queue_wait.p99_ms, overlay_metrics.render.p50_ms,
+        overlay_metrics.render.p95_ms, overlay_metrics.render.p99_ms,
+        overlay_metrics.write.p50_ms, overlay_metrics.write.p95_ms, overlay_metrics.write.p99_ms);
+    const std::string overlay_error = visualizer_->LastError();
+    if (!overlay_error.empty()) {
+      RCLCPP_WARN(get_logger(), "overlay worker last_error: %s", overlay_error.c_str());
+    }
   }
 
   void Tick() {
@@ -482,10 +524,10 @@ class VisionDemoNode : public rclcpp::Node {
     auto tracks = tracker_.Update(filtered, frame);
 
     const auto primary_prev = primary_manager_.GetState();
-    const auto identity_result = identity_manager_.Update(
+    auto identity_result = identity_manager_.Update(
         vision_demo_host::TrackletObservationsFromTracks(tracks), tracker_.LastTrackletHypotheses(), primary_prev,
         &frame);
-    const auto primary = primary_manager_.Update(identity_result.identities);
+    auto primary = primary_manager_.Update(identity_result.identities);
     vision_demo_host::BearingOutput output{};
     if (primary.primary_track.has_value()) {
       output = bearing_.Estimate(primary.primary_track.value(), frame.cols, frame.rows);
@@ -501,9 +543,6 @@ class VisionDemoNode : public rclcpp::Node {
       RCLCPP_WARN_THROTTLE(get_logger(), *this->get_clock(), 2000, "udp_json_adapter send failed: %s",
                            error.c_str());
     }
-
-    visualizer_.Render(frame, tracks, primary, &identity_result, primary_manager_.LastDecisionReason(),
-                       primary_manager_.LastRejectReason());
 
     if (monitor_.ShouldReport()) {
       const int primary_id = primary.primary_target_id;
@@ -525,6 +564,21 @@ class VisionDemoNode : public rclcpp::Node {
           camera_metrics.conversion.p95_ms, camera_metrics.conversion.p99_ms,
           camera_metrics.copy.p50_ms, camera_metrics.copy.p95_ms,
           camera_metrics.copy.p99_ms, camera_metrics.acquisition.samples);
+      const auto inference_metrics = infer_.Metrics();
+      RCLCPP_INFO(
+          get_logger(),
+          "inference_metrics total_ms_p50_p95_p99=%.3f/%.3f/%.3f samples=%zu",
+          inference_metrics.total.p50_ms, inference_metrics.total.p95_ms,
+          inference_metrics.total.p99_ms, inference_metrics.total.samples);
+      if (visualizer_ != nullptr) {
+        LogOverlayMetrics(visualizer_->Metrics(), "runtime");
+      }
+    }
+
+    if (visualizer_ != nullptr) {
+      visualizer_->Submit(std::move(acquired_frame.bgr8), std::move(tracks), std::move(primary),
+                          std::move(identity_result),
+                          primary_manager_.LastDecisionReason(), primary_manager_.LastRejectReason());
     }
   }
 
@@ -538,7 +592,7 @@ class VisionDemoNode : public rclcpp::Node {
   vision_demo_host::IdentityManager identity_manager_;
   vision_demo_host::BearingEstimator bearing_;
   vision_demo_host::UdpJsonAdapter udp_;
-  vision_demo_host::VisualizerRecorder visualizer_;
+  std::unique_ptr<vision_demo_host::VisualizerRecorder> visualizer_;
   vision_demo_host::RuntimeMonitor monitor_;
 };
 
@@ -547,6 +601,7 @@ int main(int argc, char *argv[]) {
   try {
     auto node = std::make_shared<VisionDemoNode>();
     rclcpp::spin(node);
+    node->ShutdownAndLog();
   } catch (const std::exception &e) {
     RCLCPP_FATAL(rclcpp::get_logger("vision_demo_host_node"), "Fatal init/runtime error: %s", e.what());
   }
