@@ -1,5 +1,6 @@
 #include <gtest/gtest.h>
 
+#include <chrono>
 #include <vector>
 
 #include "vision_demo_host/modules/primary_target_manager.hpp"
@@ -60,6 +61,119 @@ TEST(PrimaryTargetManagerTest, FirstLockChoosesLargestPersonIdentityOnly) {
   EXPECT_EQ(state.primary_target_id, 22);
   EXPECT_EQ(state.primary_track->id, 202);
   EXPECT_EQ(state.primary_track->class_id, vision_demo_host::ClassId::kPerson);
+}
+
+TEST(PrimaryTargetManagerTest, PatrolCycleExcludesHandledIdentityAndChoosesNextLargestEligiblePerson) {
+  vision_demo_host::PrimaryTargetManager::Config cfg;
+  cfg.min_person_area_px = 100.0F;
+  vision_demo_host::PrimaryTargetManager mgr(cfg);
+  const vision_demo_host::PrimaryTargetManager::TimePoint now{};
+
+  const auto handled = MakeIdentity(11, 101, vision_demo_host::ClassId::kPerson, cv::Rect2f(0, 0, 80, 80));
+  const auto eligible = MakeIdentity(22, 202, vision_demo_host::ClassId::kPerson, cv::Rect2f(0, 0, 60, 60));
+
+  const auto first = mgr.UpdateForPatrol({handled}, now);
+  ASSERT_TRUE(first.primary_track.has_value());
+  EXPECT_EQ(first.primary_target_id, 11);
+
+  mgr.ResetForPatrolCycle(first.primary_target_id);
+  const auto state = mgr.UpdateForPatrol({handled, eligible}, now);
+
+  EXPECT_FALSE(mgr.IsMissionEligible(handled));
+  EXPECT_EQ(state.state, vision_demo_host::PrimaryState::kLocked);
+  EXPECT_EQ(state.primary_target_id, 22);
+  ASSERT_TRUE(state.primary_track.has_value());
+  EXPECT_EQ(state.primary_track->id, 202);
+  EXPECT_EQ(handled.semantic_id, 11);
+  EXPECT_EQ(handled.supporting_raw_track_id, 101);
+}
+
+TEST(PrimaryTargetManagerTest, HandledIdentityUsesDefaultThirtySecondContinuousAbsenceBeforePatrolEligibility) {
+  using namespace std::chrono_literals;
+
+  vision_demo_host::PrimaryTargetManager::Config cfg;
+  cfg.min_person_area_px = 100.0F;
+  vision_demo_host::PrimaryTargetManager mgr(cfg);
+  const vision_demo_host::PrimaryTargetManager::TimePoint start{};
+  const auto handled = MakeIdentity(11, 101, vision_demo_host::ClassId::kPerson, cv::Rect2f(0, 0, 80, 80));
+
+  mgr.ResetForPatrolCycle(11);
+  mgr.UpdateForPatrol({handled}, start);
+  mgr.UpdateForPatrol({}, start);
+  mgr.UpdateForPatrol({}, start + 29s);
+  EXPECT_FALSE(mgr.IsMissionEligible(handled));
+
+  mgr.UpdateForPatrol({}, start + 30s);
+  EXPECT_TRUE(mgr.IsMissionEligible(handled));
+
+  const auto state = mgr.UpdateForPatrol({handled}, start + 30s);
+  ASSERT_TRUE(state.primary_track.has_value());
+  EXPECT_EQ(state.primary_target_id, 11);
+}
+
+TEST(PrimaryTargetManagerTest, ReappearingHandledIdentityRestartsConfiguredAbsenceTimer) {
+  using namespace std::chrono_literals;
+
+  vision_demo_host::PrimaryTargetManager::Config cfg;
+  cfg.min_person_area_px = 100.0F;
+  cfg.handled_ignore_absence = 2s;
+  vision_demo_host::PrimaryTargetManager mgr(cfg);
+  const vision_demo_host::PrimaryTargetManager::TimePoint start{};
+  const auto handled = MakeIdentity(11, 101, vision_demo_host::ClassId::kPerson, cv::Rect2f(0, 0, 80, 80));
+
+  mgr.ResetForPatrolCycle(11);
+  mgr.UpdateForPatrol({}, start);
+  mgr.UpdateForPatrol({handled}, start + 1500ms);
+  mgr.UpdateForPatrol({}, start + 1600ms);
+  mgr.UpdateForPatrol({}, start + 3500ms);
+  EXPECT_FALSE(mgr.IsMissionEligible(handled));
+
+  mgr.UpdateForPatrol({}, start + 3600ms);
+  EXPECT_TRUE(mgr.IsMissionEligible(handled));
+}
+
+TEST(PrimaryTargetManagerTest, PatrolSelectionKeepsMultipleHandledIdentitiesExcluded) {
+  vision_demo_host::PrimaryTargetManager::Config cfg;
+  cfg.min_person_area_px = 100.0F;
+  vision_demo_host::PrimaryTargetManager mgr(cfg);
+  const vision_demo_host::PrimaryTargetManager::TimePoint now{};
+  const auto first_handled =
+      MakeIdentity(11, 101, vision_demo_host::ClassId::kPerson, cv::Rect2f(0, 0, 100, 100));
+  const auto second_handled =
+      MakeIdentity(22, 202, vision_demo_host::ClassId::kPerson, cv::Rect2f(0, 0, 80, 80));
+  const auto eligible = MakeIdentity(33, 303, vision_demo_host::ClassId::kPerson, cv::Rect2f(0, 0, 60, 60));
+
+  mgr.ResetForPatrolCycle(11);
+  mgr.UpdateForPatrol({first_handled}, now);
+  mgr.ResetForPatrolCycle(22);
+  const auto state = mgr.UpdateForPatrol({first_handled, second_handled, eligible}, now);
+
+  EXPECT_FALSE(mgr.IsMissionEligible(first_handled));
+  EXPECT_FALSE(mgr.IsMissionEligible(second_handled));
+  ASSERT_TRUE(state.primary_track.has_value());
+  EXPECT_EQ(state.primary_target_id, 33);
+  EXPECT_EQ(state.primary_track->id, 303);
+}
+
+TEST(PrimaryTargetManagerTest, ActivePatrolPrimaryDoesNotSwitchWhenAnotherEligiblePersonBecomesLarger) {
+  using namespace std::chrono_literals;
+
+  vision_demo_host::PrimaryTargetManager::Config cfg;
+  cfg.min_person_area_px = 100.0F;
+  vision_demo_host::PrimaryTargetManager mgr(cfg);
+  const vision_demo_host::PrimaryTargetManager::TimePoint start{};
+  const auto primary = MakeIdentity(11, 101, vision_demo_host::ClassId::kPerson, cv::Rect2f(0, 0, 60, 60));
+  const auto candidate = MakeIdentity(22, 202, vision_demo_host::ClassId::kPerson, cv::Rect2f(0, 0, 50, 50));
+
+  const auto first = mgr.UpdateForPatrol({primary, candidate}, start);
+  ASSERT_TRUE(first.primary_track.has_value());
+  EXPECT_EQ(first.primary_target_id, 11);
+
+  const auto larger_candidate = MakeIdentity(22, 202, vision_demo_host::ClassId::kPerson, cv::Rect2f(0, 0, 100, 100));
+  const auto second = mgr.UpdateForPatrol({primary, larger_candidate}, start + 1ms);
+  ASSERT_TRUE(second.primary_track.has_value());
+  EXPECT_EQ(second.primary_target_id, 11);
+  EXPECT_EQ(second.primary_track->id, 101);
 }
 
 TEST(PrimaryTargetManagerTest, LockedContinuityPreferredBeforeReplacement) {

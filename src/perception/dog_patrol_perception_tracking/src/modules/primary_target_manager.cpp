@@ -15,6 +15,9 @@ PrimaryTargetManager::PrimaryTargetManager(Config config) : config_(std::move(co
   config_.min_area_ratio = std::max(0.0F, config_.min_area_ratio);
   config_.max_area_ratio = std::max(config_.min_area_ratio, config_.max_area_ratio);
   config_.pending_recovery_frames = std::max(0, config_.pending_recovery_frames);
+  if (config_.handled_ignore_absence <= Duration::zero()) {
+    config_.handled_ignore_absence = std::chrono::milliseconds{1};
+  }
 }
 
 std::optional<IdentityObservation> PrimaryTargetManager::FindVisibleIdentityBySemanticId(
@@ -40,7 +43,7 @@ std::optional<IdentityObservation> PrimaryTargetManager::FindIdentityBySemanticI
 }
 
 std::optional<IdentityObservation> PrimaryTargetManager::SelectLargestValidPersonIdentity(
-    const std::vector<IdentityObservation> &identities) const {
+    const std::vector<IdentityObservation> &identities, const bool require_mission_eligibility) const {
   std::optional<IdentityObservation> best = std::nullopt;
   float best_area = 0.0F;
 
@@ -49,6 +52,9 @@ std::optional<IdentityObservation> PrimaryTargetManager::SelectLargestValidPerso
       continue;
     }
     if (identity.class_id != ClassId::kPerson) {
+      continue;
+    }
+    if (require_mission_eligibility && !IsMissionEligible(identity)) {
       continue;
     }
 
@@ -64,6 +70,49 @@ std::optional<IdentityObservation> PrimaryTargetManager::SelectLargestValidPerso
   }
 
   return best;
+}
+
+void PrimaryTargetManager::ResetForPatrolCycle(const int handled_semantic_id) {
+  if (handled_semantic_id > 0) {
+    handled_identity_absence_started_at_.insert_or_assign(handled_semantic_id, std::nullopt);
+  }
+
+  state_ = PrimaryTargetResult{};
+  primary_target_id_ = -1;
+  bound_raw_track_id_ = -1;
+  last_primary_track_ = std::nullopt;
+  pending_recovery_frames_ = 0;
+  last_decision_reason_.clear();
+  last_reject_reason_.clear();
+}
+
+bool PrimaryTargetManager::IsMissionEligible(const IdentityObservation &identity) const {
+  return identity.semantic_id > 0 &&
+         handled_identity_absence_started_at_.find(identity.semantic_id) == handled_identity_absence_started_at_.end();
+}
+
+void PrimaryTargetManager::UpdateHandledIdentityAbsence(const std::vector<IdentityObservation> &identities,
+                                                        const TimePoint now) {
+  for (auto it = handled_identity_absence_started_at_.begin(); it != handled_identity_absence_started_at_.end();) {
+    const auto visible_identity = FindVisibleIdentityBySemanticId(identities, it->first);
+    if (visible_identity.has_value()) {
+      it->second.reset();
+      ++it;
+      continue;
+    }
+
+    if (!it->second.has_value()) {
+      it->second = now;
+      ++it;
+      continue;
+    }
+
+    if (now >= it->second.value() && now - it->second.value() >= config_.handled_ignore_absence) {
+      it = handled_identity_absence_started_at_.erase(it);
+      continue;
+    }
+    ++it;
+  }
 }
 
 bool PrimaryTargetManager::IsVisibleIdentity(const IdentityObservation &identity) const {
@@ -161,6 +210,17 @@ bool PrimaryTargetManager::IsVisiblePrimarySane(const Track &track, std::string 
 }
 
 PrimaryTargetResult PrimaryTargetManager::Update(const std::vector<IdentityObservation> &identities) {
+  return UpdateInternal(identities, false);
+}
+
+PrimaryTargetResult PrimaryTargetManager::UpdateForPatrol(const std::vector<IdentityObservation> &identities,
+                                                          const TimePoint now) {
+  UpdateHandledIdentityAbsence(identities, now);
+  return UpdateInternal(identities, true);
+}
+
+PrimaryTargetResult PrimaryTargetManager::UpdateInternal(const std::vector<IdentityObservation> &identities,
+                                                         const bool require_mission_eligibility) {
   last_decision_reason_.clear();
   last_reject_reason_.clear();
 
@@ -249,7 +309,7 @@ PrimaryTargetResult PrimaryTargetManager::Update(const std::vector<IdentityObser
     return EnterLost("lost_after_threshold", state_.missing_frames);
   }
 
-  auto new_identity = SelectLargestValidPersonIdentity(identities);
+  auto new_identity = SelectLargestValidPersonIdentity(identities, require_mission_eligibility);
   if (new_identity.has_value()) {
     auto new_target = TrackFromIdentityObservation(new_identity.value());
     primary_target_id_ = new_identity->semantic_id > 0 ? new_identity->semantic_id : 1;
