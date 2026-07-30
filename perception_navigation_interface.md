@@ -396,7 +396,7 @@ float32 confidence
 - bbox 区间为 `[x_min, x_max)` 和 `[y_min, y_max)`；
 - bbox 必须位于图像尺寸范围内。
 
-导航只在下列未阻塞状态接受与当前权威 `target_id` 相同且未过期的新鲜 bbox：
+下列未阻塞状态接受与当前权威 `target_id` 相同且未过期的新鲜 bbox：
 
 | 全局状态 | 是否接受新鲜 bbox | 用途 |
 |---|---|---|
@@ -404,10 +404,11 @@ float32 confidence
 | `PATROL` | 否 | 忽略上一次任务的旧 bbox |
 | `CONFIRM_TARGET` | 是 | 建立目标位置，机器人保持停车 |
 | `APPROACH_TARGET` | 是 | 更新目标位置并安全接近 |
-| `VERIFY_IDENTITY` | 否 | 认证期间保持停车，不因 bbox 重启运动 |
+| `VERIFY_IDENTITY` | 是 | 向授权模块提供当前目标 bbox；导航保持停车，不因 bbox 更新重新移动 |
 | `TRACK_INTRUDER` | 是 | 更新目标位置并持续跟随 |
 
-`blocked=true` 时导航不得继续使用 bbox 驱动运动；收到有效
+`VERIFY_IDENTITY` 中 bbox 只作为授权模块的当前目标输入；导航保持停车，不能因 bbox
+更新重新移动。`blocked=true` 时导航不得继续使用 bbox 驱动运动；收到有效
 `TARGET_REACQUIRED` 且状态机解除 `TARGET_LOST` 阻塞后，才按上表恢复处理。
 
 推荐 QoS：
@@ -754,6 +755,7 @@ detail="target lost: ..."
 感知：
 
 - 看到新的 `state_seq` 后向授权模块启动一次请求；
+- 持续向授权模块提供同一目标的新鲜 bbox；
 - 提供所需的人脸、提示和口令等感知上下文；
 - 只转发授权模块给出的 `AUTHORIZED` 或 `UNAUTHORIZED`。
 
