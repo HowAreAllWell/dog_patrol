@@ -43,6 +43,17 @@ vision_demo_host_node:
       min_area_ratio: 0.25
       max_area_ratio: 4.0
       pending_recovery_frames: 3
+      lost_event_timeout_sec: 0.5
+      reacquire_retention_sec: 6.0
+      handled_ignore_absence_sec: 30.0
+
+    mission:
+      state_topic: "/mission/state"
+      event_topic: "/mission/event"
+      selected_target_bbox_topic: "/perception/selected_target_bbox"
+
+    perception:
+      camera_optical_frame_id: "hik_camera_optical_frame"
 
     bearing:
       camera_horizontal_fov_rad: 1.5708

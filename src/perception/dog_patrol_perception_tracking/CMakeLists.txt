@@ -7,6 +7,7 @@ endif()
 
 find_package(ament_cmake REQUIRED)
 find_package(rclcpp REQUIRED)
+find_package(dog_patrol_interfaces REQUIRED)
 find_package(OpenCV REQUIRED)
 find_package(CUDAToolkit REQUIRED)
 find_package(PkgConfig REQUIRED)
@@ -44,6 +45,7 @@ set(MODULE_SOURCES
   src/modules/mot_tracker.cpp
   src/modules/primary_target_manager.cpp
   src/modules/mission_coordinator.cpp
+  src/modules/mission_ros_adapter.cpp
   src/modules/perception_readiness.cpp
   src/modules/primary_recovery_debug.cpp
   src/modules/bearing_estimator.cpp
@@ -92,6 +94,7 @@ target_include_directories(${PROJECT_NAME}_modules PUBLIC
 target_include_directories(${PROJECT_NAME}_modules PRIVATE src/modules)
 target_compile_features(${PROJECT_NAME}_modules PUBLIC cxx_std_17)
 ament_target_dependencies(${PROJECT_NAME}_modules rclcpp)
+ament_target_dependencies(${PROJECT_NAME}_modules dog_patrol_interfaces)
 target_link_libraries(${PROJECT_NAME}_modules ${OpenCV_LIBS} PkgConfig::FFMPEG)
 target_link_libraries(${PROJECT_NAME}_modules ${TENSORRT_LIB} CUDA::cudart)
 if(HIK_MVS_AVAILABLE)
@@ -105,6 +108,7 @@ endif()
 add_executable(vision_demo_node src/main.cpp)
 target_compile_features(vision_demo_node PUBLIC cxx_std_17)
 ament_target_dependencies(vision_demo_node rclcpp)
+ament_target_dependencies(vision_demo_node dog_patrol_interfaces)
 target_link_libraries(vision_demo_node ${PROJECT_NAME}_modules)
 
 add_executable(record_test_set src/tools/record_test_set.cpp)
@@ -145,6 +149,8 @@ install(DIRECTORY include/
 
 install(DIRECTORY config launch
   DESTINATION share/${PROJECT_NAME})
+
+ament_export_dependencies(dog_patrol_interfaces)
 
 if(BUILD_TESTING)
   find_package(ament_cmake_gtest REQUIRED)
@@ -197,6 +203,14 @@ if(BUILD_TESTING)
     target_compile_features(test_perception_readiness PUBLIC cxx_std_17)
     target_include_directories(test_perception_readiness PRIVATE include)
     target_link_libraries(test_perception_readiness ${PROJECT_NAME}_modules)
+  endif()
+
+  ament_add_gtest(test_mission_ros_adapter test/test_mission_ros_adapter.cpp)
+  if(TARGET test_mission_ros_adapter)
+    target_compile_features(test_mission_ros_adapter PUBLIC cxx_std_17)
+    target_include_directories(test_mission_ros_adapter PRIVATE include)
+    target_link_libraries(test_mission_ros_adapter ${PROJECT_NAME}_modules)
+    ament_target_dependencies(test_mission_ros_adapter rclcpp dog_patrol_interfaces)
   endif()
 
   ament_add_gtest(test_primary_recovery_debug test/test_primary_recovery_debug.cpp)

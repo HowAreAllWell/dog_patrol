@@ -12,6 +12,7 @@ Orin 宿主机侧视觉验收 demo，包含检测、短期跟踪、语义身份�
 - `primary_target_manager`：`person`-only 主目标规则（首锁最大框 + continuity-first）
 - `mission_coordinator`：ROS-independent 任务输出协调 seam；按任务状态 / semantic target / state sequence 只产生当前帧可信 bbox，并负责配置化同目标 loss/reacquire event 时序
 - `perception_readiness`：ROS-independent READY 聚合 seam；以 required capability contribution 和 `STARTUP state_seq` 产生至多一次 aggregate READY action
+- `mission_ros_adapter`：`dog_patrol_interfaces` 的唯一 ROS transport seam；可靠/transient state 输入、aggregate READY/event 输出和 best-effort 新鲜 bbox 输出均在此处映射
 - `bearing_estimator`：demo 近似 bearing（非标定真值）
 - `udp_json_adapter`：localhost UDP JSON
 
@@ -34,6 +35,9 @@ Orin 宿主机侧视觉验收 demo，包含检测、短期跟踪、语义身份�
 - `detector.person_conf_threshold` / `detector.car_conf_threshold`
 - `tracker.*`
 - `target.lost_threshold_frames`
+- `target.lost_event_timeout_sec` / `target.reacquire_retention_sec` / `target.handled_ignore_absence_sec`
+- `mission.state_topic` / `mission.event_topic` / `mission.selected_target_bbox_topic`
+- `perception.camera_optical_frame_id`
 - `bearing.camera_horizontal_fov_rad`
 - `bearing.camera_mount_x/y/z`
 - `bearing.camera_mount_roll/pitch/yaw`
@@ -47,7 +51,11 @@ Orin 宿主机侧视觉验收 demo，包含检测、短期跟踪、语义身份�
 `reacquire_retention=6s`，两者必须为正且前者更短。它只使用注入的单调
 source-time，不按固定帧数计时；输出当前 target 的新鲜 bbox 只允许在
 `CONFIRM_TARGET`、`APPROACH_TARGET`、`VERIFY_IDENTITY`、`TRACK_INTRUDER`。
-它尚未连接 ROS 参数、订阅或 live loop，这些 transport/runtime 职责属于 `#84`。
+live node 将它绑定到上述 ROS 参数：`TARGET_LOST` / `TARGET_REACQUIRED` 只由
+coordinator 的 one-shot action 转发，绝不缓存 bbox。`PATROL` 只会在当前帧
+锁定语义 ID 后发送一次 `TARGET_CONFIRMED`，不会发送 bbox；收到相同目标的
+authoritative `CONFIRM_TARGET`、`APPROACH_TARGET`、`VERIFY_IDENTITY` 或
+`TRACK_INTRUDER` state 后才发布新的 bbox。
 
 `PerceptionReadinessAggregator` 只接受 `MissionSnapshot` 和 required contributor，复用
 `MissionCoordinator` 的 mission phase / `state_seq` 术语：只有当前 `STARTUP state_seq`
@@ -59,8 +67,37 @@ detector/tracker frame-processing exception 会更新它。尚未接入的 autho
 `PlaceholderReadinessContributor(capability, owner, replacement_seam, readiness)`，显式
 写明 owner 与替换入口；placeholder 默认 not-ready，只有部署明确认可临时能力时才传
 ready。接入实际 capability 时以同名 `ReplaceRequiredContributor` 替换，不能改变
-mission-supervisor 或 vision-node policy。该 seam 不含 ROS publisher、mission snapshot 输入或
-aggregate READY action；这些 transport/runtime 连接仍属于 `#84`。
+mission-supervisor 或 vision-node policy。`MissionRosAdapter` 已把 real
+detector/tracker contributor 注册为 required contributor，并在当前 `STARTUP`
+sequence 汇总后发布一次 `SOURCE_PERCEPTION/READY`。外部模块可通过
+`AddRequiredReadinessContributor` 在同一 aggregate seam 注册明确的 placeholder 或
+实际 contributor；未 ready 的 required contributor 不会被假装成 ready。
+
+## Patrol ROS 2 contract
+
+构建和运行本包前，先 source 已构建的 `dog_patrol_interfaces` overlay。该 package 是
+`MissionState`、`MissionEvent` 和 `TargetBoundingBox` 的唯一消息来源。
+
+```bash
+source /opt/ros/humble/setup.bash
+source /path/to/workspace/dog_patrol/install/setup.bash
+```
+
+- `/mission/state`：reliable、transient-local、keep-last 1。adapter 拒绝未知 enum、无效
+  phase/target/block 组合、同 sequence 冲突消息以及旧的 wraparound-safe `state_seq`。
+- `/mission/event`：reliable、volatile、keep-last 10。发布 aggregate `READY`、
+  `TARGET_CONFIRMED` 和 coordinator 的 `TARGET_LOST` / `TARGET_REACQUIRED`，source 为
+  `SOURCE_PERCEPTION`。
+- `/perception/selected_target_bbox`：best-effort、volatile、keep-last 5。只传当前帧、当前
+  semantic `target_id` 的可信框；`Header.stamp` 为相机 source timestamp，`frame_id` 为
+  `perception.camera_optical_frame_id`，且 x/y 以原图像素的 clamped half-open 区间表示。
+
+共享 `TargetBoundingBox` 当前没有 camera-frame-number 字段，因此 MVS frame number 保留为
+runtime 诊断元数据；公开消息不编码未在 shared contract 中定义的字段。
+
+ROS subscription callback 只验证并加锁保存 snapshot；camera、detector、tracker、identity、
+primary 和 coordinator 的 frame chain 由 live tick mutex 串行执行。即使用
+`MultiThreadedExecutor` 也不会并发进入 detector/tracker/identity。
 
 建议 engine 路径：
 - `/path/to/my_workplace/vision_demo_ws/assets/models/engines/orin_jp621_trt_local/yolo26n_fp16_640.engine`
@@ -118,6 +155,7 @@ aggregate READY action；这些 transport/runtime 连接仍属于 `#84`。
 ```bash
 cd /path/to/my_workplace/vision_demo_ws
 source /opt/ros/humble/setup.bash
+source /path/to/workspace/dog_patrol/install/setup.bash
 colcon build --packages-select vision_demo_host
 ```
 
@@ -127,6 +165,8 @@ Hikrobot MVS / USB3 Vision 工业相机：
 
 ```bash
 cd /path/to/my_workplace/vision_demo_ws
+source /opt/ros/humble/setup.bash
+source /path/to/workspace/dog_patrol/install/setup.bash
 source install/setup.bash
 ros2 run vision_demo_host vision_demo_node --ros-args \
   -p camera.mvs_model:='MV-CU013-A0UC' \
