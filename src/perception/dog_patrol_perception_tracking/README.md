@@ -68,8 +68,12 @@ detector/tracker frame-processing exception 会更新它。尚未接入的 autho
 写明 owner 与替换入口；placeholder 默认 not-ready，只有部署明确认可临时能力时才传
 ready。接入实际 capability 时以同名 `ReplaceRequiredContributor` 替换，不能改变
 mission-supervisor 或 vision-node policy。`MissionRosAdapter` 已把 real
-detector/tracker contributor 注册为 required contributor，并在当前 `STARTUP`
-sequence 汇总后发布一次 `SOURCE_PERCEPTION/READY`。外部模块可通过
+detector/tracker contributor 和 owner 为 `dog_patrol authorization module` 的
+`authorization` required placeholder 注册到同一聚合中；后者默认 not-ready，替换入口为
+`MissionRosAdapter::ReplaceRequiredReadinessContributor("authorization", provider)`。
+只有部署显式设置 `perception.authorization_placeholder_ready:=true`（临时认可）或通过该
+replacement seam 接入真实 provider，当前 `STARTUP` sequence 才能汇总后发布一次
+`SOURCE_PERCEPTION/READY`。外部模块可通过
 `AddRequiredReadinessContributor` 在同一 aggregate seam 注册明确的 placeholder 或
 实际 contributor；未 ready 的 required contributor 不会被假装成 ready。
 
@@ -97,7 +101,19 @@ runtime 诊断元数据；公开消息不编码未在 shared contract 中定义�
 
 ROS subscription callback 只验证并加锁保存 snapshot；camera、detector、tracker、identity、
 primary 和 coordinator 的 frame chain 由 live tick mutex 串行执行。即使用
-`MultiThreadedExecutor` 也不会并发进入 detector/tracker/identity。
+`MultiThreadedExecutor` 也不会并发进入 detector/tracker/identity；mission-state subscription
+置于独立的 mutually-exclusive callback group，使它在 camera acquisition 或 inference 较慢时
+仍能及时写入最新 snapshot。READY、event 和 bbox 都在发布前于同一 mission mutex 下复核
+完整 snapshot，因此不会把旧 sequence、旧 target 或已 blocked 的 frame action 发到 ROS。
+
+无图形会话可运行独立进程 smoke：启动 `mission_ros_adapter_smoke`，使用另一个 ROS 2
+进程向默认 `/issue84/smoke/mission/state` 发布 `STARTUP(100)`、`PATROL(101)`、
+`CONFIRM_TARGET(102,target_id=42)`，再发布同目标的 blocked
+`CONFIRM_TARGET(103, BLOCK_TARGET_LOST)`；通过外部 `ros2 topic echo` 观察 READY、
+TARGET_CONFIRMED、当前帧 bbox、TARGET_LOST 与 TARGET_REACQUIRED。该 fixture 使用固定的
+可信 synthetic frame，只验收 DDS/adapter transport，不能替代真 Hik 相机中的真实检测验收。
+默认 `smoke.reacquire_retention_sec=30` 只为给 CLI 操作留出时间；production node 仍使用
+`target.reacquire_retention_sec=6`。
 
 建议 engine 路径：
 - `/path/to/my_workplace/vision_demo_ws/assets/models/engines/orin_jp621_trt_local/yolo26n_fp16_640.engine`

@@ -13,6 +13,7 @@
 #include <opencv2/core/mat.hpp>
 
 #include <rclcpp/rclcpp.hpp>
+#include <rclcpp/executors/multi_threaded_executor.hpp>
 
 #include "vision_demo_host/modules/bearing_estimator.hpp"
 #include "vision_demo_host/modules/camera_ingest.hpp"
@@ -116,6 +117,10 @@ class VisionDemoNode : public rclcpp::Node {
                                          "/perception/selected_target_bbox");
     this->declare_parameter<std::string>("perception.camera_optical_frame_id",
                                          "hik_camera_optical_frame");
+    this->declare_parameter<bool>("perception.authorization_placeholder_ready", false);
+    this->declare_parameter<std::string>(
+        "perception.authorization_placeholder_detail",
+        "authorization capability has not been integrated");
 
     this->declare_parameter<double>("bearing.camera_horizontal_fov_rad", 1.5708);
     this->declare_parameter<double>("bearing.camera_mount_x", 0.22646);
@@ -184,6 +189,13 @@ class VisionDemoNode : public rclcpp::Node {
     mission_config.mission_event_topic = this->get_parameter("mission.event_topic").as_string();
     mission_config.target_bbox_topic =
         this->get_parameter("mission.selected_target_bbox_topic").as_string();
+    mission_state_callback_group_ = this->create_callback_group(
+        rclcpp::CallbackGroupType::MutuallyExclusive);
+    mission_config.mission_state_callback_group = mission_state_callback_group_;
+    mission_config.authorization_placeholder_ready =
+        this->get_parameter("perception.authorization_placeholder_ready").as_bool();
+    mission_config.authorization_placeholder_detail =
+        this->get_parameter("perception.authorization_placeholder_detail").as_string();
     mission_config.coordinator.lost_event_timeout = std::chrono::duration_cast<
         vision_demo_host::MissionCoordinator::Duration>(std::chrono::duration<double>(lost_timeout_sec));
     mission_config.coordinator.reacquire_retention = std::chrono::duration_cast<
@@ -729,6 +741,7 @@ class VisionDemoNode : public rclcpp::Node {
   vision_demo_host::DetFilter det_filter_;
   vision_demo_host::MotTracker tracker_;
   std::unique_ptr<vision_demo_host::MissionRosAdapter> mission_ros_adapter_;
+  rclcpp::CallbackGroup::SharedPtr mission_state_callback_group_;
   std::string camera_optical_frame_id_;
   std::optional<vision_demo_host::MissionSnapshot> last_mission_for_primary_;
   std::mutex pipeline_mutex_;
@@ -744,7 +757,9 @@ int main(int argc, char *argv[]) {
   rclcpp::init(argc, argv);
   try {
     auto node = std::make_shared<VisionDemoNode>();
-    rclcpp::spin(node);
+    rclcpp::executors::MultiThreadedExecutor executor(rclcpp::ExecutorOptions{}, 2U);
+    executor.add_node(node);
+    executor.spin();
     node->ShutdownAndLog();
   } catch (const std::exception &e) {
     RCLCPP_FATAL(rclcpp::get_logger("vision_demo_host_node"), "Fatal init/runtime error: %s", e.what());

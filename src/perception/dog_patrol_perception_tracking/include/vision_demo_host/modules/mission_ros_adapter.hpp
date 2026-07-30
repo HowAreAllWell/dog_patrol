@@ -40,6 +40,15 @@ class MissionRosAdapter {
     std::string mission_state_topic{"/mission/state"};
     std::string mission_event_topic{"/mission/event"};
     std::string target_bbox_topic{"/perception/selected_target_bbox"};
+    // The live node assigns this subscriber a callback group separate from
+    // camera/inference so state reception remains responsive while a frame is
+    // being processed. A null group uses the node default (unit-test default).
+    rclcpp::CallbackGroup::SharedPtr mission_state_callback_group;
+    // Authorization is required for aggregate perception readiness but is
+    // not owned by this repository. It stays not-ready until an integration
+    // explicitly accepts the temporary placeholder or replaces it.
+    bool authorization_placeholder_ready{false};
+    std::string authorization_placeholder_detail;
     MissionCoordinator::Config coordinator;
   };
 
@@ -69,6 +78,8 @@ class MissionRosAdapter {
 
   DetectionTrackingReadinessContributor &detection_tracking_readiness();
   void AddRequiredReadinessContributor(std::unique_ptr<PerceptionReadinessContributor> contributor);
+  bool ReplaceRequiredReadinessContributor(
+      std::string capability, std::unique_ptr<PerceptionReadinessContributor> contributor);
 
   // Call after detector/tracker initialization and periodically while the
   // live loop is running so one aggregate READY action is published for each
@@ -96,8 +107,13 @@ class MissionRosAdapter {
       PerceptionMissionEvent event, int target_id, std::uint32_t observed_state_seq,
       std::uint64_t source_timestamp_ns);
 
-  void PublishEvent(PerceptionMissionEvent event, int target_id,
-                    std::uint32_t observed_state_seq, std::uint64_t source_timestamp_ns);
+  bool IsCurrentMissionLocked(const MissionSnapshot &mission) const;
+  bool PublishMissionEventIfCurrent(
+      const MissionSnapshot &mission,
+      const dog_patrol_interfaces::msg::MissionEvent &message);
+  bool PublishTargetBoxIfCurrent(
+      const MissionSnapshot &mission,
+      const dog_patrol_interfaces::msg::TargetBoundingBox &message);
 
   rclcpp::Node &node_;
   Config config_;

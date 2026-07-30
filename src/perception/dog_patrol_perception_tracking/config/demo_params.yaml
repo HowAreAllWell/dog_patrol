@@ -54,6 +54,8 @@ vision_demo_host_node:
 
     perception:
       camera_optical_frame_id: "hik_camera_optical_frame"
+      authorization_placeholder_ready: false
+      authorization_placeholder_detail: "authorization capability has not been integrated"
 
     bearing:
       camera_horizontal_fov_rad: 1.5708

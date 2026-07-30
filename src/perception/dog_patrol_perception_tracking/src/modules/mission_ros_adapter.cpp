@@ -31,14 +31,25 @@ MissionRosAdapter::MissionRosAdapter(rclcpp::Node &node, Config config)
   auto detection_tracking = std::make_unique<DetectionTrackingReadinessContributor>();
   detection_tracking_readiness_ = detection_tracking.get();
   readiness_aggregator_.AddRequiredContributor(std::move(detection_tracking));
+  readiness_aggregator_.AddRequiredContributor(std::make_unique<PlaceholderReadinessContributor>(
+      "authorization", "dog_patrol authorization module",
+      "MissionRosAdapter::ReplaceRequiredReadinessContributor(authorization, provider)",
+      config_.authorization_placeholder_ready ? PerceptionReadiness::kReady
+                                              : PerceptionReadiness::kNotReady,
+      config_.authorization_placeholder_detail.empty()
+          ? "authorization capability has not been integrated"
+          : config_.authorization_placeholder_detail));
 
   mission_event_publisher_ = node_.create_publisher<MissionEventMessage>(
       config_.mission_event_topic, MissionEventQos());
   target_bbox_publisher_ = node_.create_publisher<dog_patrol_interfaces::msg::TargetBoundingBox>(
       config_.target_bbox_topic, TargetBoundingBoxQos());
+  rclcpp::SubscriptionOptions mission_state_subscription_options;
+  mission_state_subscription_options.callback_group = config_.mission_state_callback_group;
   mission_state_subscription_ = node_.create_subscription<MissionStateMessage>(
       config_.mission_state_topic, MissionStateQos(),
-      [this](const MissionStateMessage::SharedPtr message) { StoreMissionState(*message); });
+      [this](const MissionStateMessage::SharedPtr message) { StoreMissionState(*message); },
+      mission_state_subscription_options);
 }
 
 rclcpp::QoS MissionRosAdapter::MissionStateQos() {
@@ -211,6 +222,12 @@ void MissionRosAdapter::AddRequiredReadinessContributor(
   readiness_aggregator_.AddRequiredContributor(std::move(contributor));
 }
 
+bool MissionRosAdapter::ReplaceRequiredReadinessContributor(
+    std::string capability, std::unique_ptr<PerceptionReadinessContributor> contributor) {
+  return readiness_aggregator_.ReplaceRequiredContributor(std::move(capability),
+                                                           std::move(contributor));
+}
+
 dog_patrol_interfaces::msg::MissionEvent MissionRosAdapter::EventMessage(
     const PerceptionMissionEvent event, const int target_id,
     const std::uint32_t observed_state_seq, const std::uint64_t source_timestamp_ns) {
@@ -232,11 +249,32 @@ dog_patrol_interfaces::msg::MissionEvent MissionRosAdapter::EventMessage(
   return message;
 }
 
-void MissionRosAdapter::PublishEvent(const PerceptionMissionEvent event, const int target_id,
-                                     const std::uint32_t observed_state_seq,
-                                     const std::uint64_t source_timestamp_ns) {
-  mission_event_publisher_->publish(
-      EventMessage(event, target_id, observed_state_seq, source_timestamp_ns));
+bool MissionRosAdapter::IsCurrentMissionLocked(const MissionSnapshot &mission) const {
+  return latest_mission_.has_value() && latest_mission_->state_seq == mission.state_seq &&
+         latest_mission_->phase == mission.phase && latest_mission_->target_id == mission.target_id &&
+         latest_mission_->blocked == mission.blocked &&
+         latest_mission_->block_cause == mission.block_cause;
+}
+
+bool MissionRosAdapter::PublishMissionEventIfCurrent(const MissionSnapshot &mission,
+                                                      const MissionEventMessage &message) {
+  std::lock_guard<std::mutex> lock(mission_mutex_);
+  if (!IsCurrentMissionLocked(mission)) {
+    return false;
+  }
+  mission_event_publisher_->publish(message);
+  return true;
+}
+
+bool MissionRosAdapter::PublishTargetBoxIfCurrent(
+    const MissionSnapshot &mission,
+    const dog_patrol_interfaces::msg::TargetBoundingBox &message) {
+  std::lock_guard<std::mutex> lock(mission_mutex_);
+  if (!IsCurrentMissionLocked(mission)) {
+    return false;
+  }
+  target_bbox_publisher_->publish(message);
+  return true;
 }
 
 void MissionRosAdapter::PublishReadiness() {
@@ -255,7 +293,7 @@ void MissionRosAdapter::PublishReadiness() {
   message.source = MissionEventMessage::SOURCE_PERCEPTION;
   message.event = MissionEventMessage::READY;
   message.detail = "aggregate perception readiness: required contributors ready";
-  mission_event_publisher_->publish(message);
+  (void)PublishMissionEventIfCurrent(mission.value(), message);
 }
 
 void MissionRosAdapter::ProcessFrame(const MissionCoordinator::FrameInput &input,
@@ -269,15 +307,16 @@ void MissionRosAdapter::ProcessFrame(const MissionCoordinator::FrameInput &input
   current_input.mission = mission.value();
   const MissionCoordinator::Output output = coordinator_.Update(current_input);
   for (const auto &event : output.events) {
-    PublishEvent(event.event, event.target_id, event.observed_state_seq,
-                 metadata.source_timestamp_ns);
+    (void)PublishMissionEventIfCurrent(
+        mission.value(), EventMessage(event.event, event.target_id, event.observed_state_seq,
+                                      metadata.source_timestamp_ns));
   }
   if (!output.target_box.has_value()) {
     return;
   }
   const auto message = TargetBoxFromAction(output.target_box.value(), metadata);
   if (message.has_value()) {
-    target_bbox_publisher_->publish(message.value());
+    (void)PublishTargetBoxIfCurrent(mission.value(), message.value());
   }
 }
 
@@ -303,22 +342,19 @@ bool MissionRosAdapter::PublishTargetConfirmed(const MissionSnapshot &mission,
   }
   {
     std::lock_guard<std::mutex> lock(mission_mutex_);
-    if (!latest_mission_.has_value() || latest_mission_->state_seq != mission.state_seq ||
-        latest_mission_->phase != MissionPhase::kPatrol || latest_mission_->target_id != 0 ||
-        latest_mission_->blocked || confirmed_patrol_state_seq_ == mission.state_seq) {
+    if (!IsCurrentMissionLocked(mission) || confirmed_patrol_state_seq_ == mission.state_seq) {
       return false;
     }
     confirmed_patrol_state_seq_ = mission.state_seq;
+    dog_patrol_interfaces::msg::MissionEvent message;
+    message.header.stamp = TimeMessage(metadata.source_timestamp_ns);
+    message.observed_state_seq = mission.state_seq;
+    message.target_id = static_cast<std::uint32_t>(primary.primary_target_id);
+    message.source = MissionEventMessage::SOURCE_PERCEPTION;
+    message.event = MissionEventMessage::TARGET_CONFIRMED;
+    message.detail = "largest eligible current-frame semantic target selected";
+    mission_event_publisher_->publish(message);
   }
-
-  dog_patrol_interfaces::msg::MissionEvent message;
-  message.header.stamp = TimeMessage(metadata.source_timestamp_ns);
-  message.observed_state_seq = mission.state_seq;
-  message.target_id = static_cast<std::uint32_t>(primary.primary_target_id);
-  message.source = MissionEventMessage::SOURCE_PERCEPTION;
-  message.event = MissionEventMessage::TARGET_CONFIRMED;
-  message.detail = "largest eligible current-frame semantic target selected";
-  mission_event_publisher_->publish(message);
   return true;
 }
 

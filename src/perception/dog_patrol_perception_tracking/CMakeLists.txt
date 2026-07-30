@@ -111,6 +111,14 @@ ament_target_dependencies(vision_demo_node rclcpp)
 ament_target_dependencies(vision_demo_node dog_patrol_interfaces)
 target_link_libraries(vision_demo_node ${PROJECT_NAME}_modules)
 
+# Deterministic, headless transport fixture for the issue #84 deployment
+# smoke. It is intentionally separate from the gtest process: a ROS CLI
+# publisher/subscriber drives the same adapter boundary over DDS.
+add_executable(mission_ros_adapter_smoke src/tools/mission_ros_adapter_smoke.cpp)
+target_compile_features(mission_ros_adapter_smoke PUBLIC cxx_std_17)
+ament_target_dependencies(mission_ros_adapter_smoke rclcpp dog_patrol_interfaces)
+target_link_libraries(mission_ros_adapter_smoke ${PROJECT_NAME}_modules)
+
 add_executable(record_test_set src/tools/record_test_set.cpp)
 target_compile_features(record_test_set PUBLIC cxx_std_17)
 target_link_libraries(record_test_set ${PROJECT_NAME}_modules ${OpenCV_LIBS})
@@ -135,6 +143,7 @@ endif()
 install(TARGETS
   ${PROJECT_NAME}_modules
   vision_demo_node
+  mission_ros_adapter_smoke
   record_test_set
   capture_ffv1
   offline_eval_recordings
