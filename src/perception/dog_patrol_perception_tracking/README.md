@@ -10,6 +10,7 @@ Orin 宿主机侧视觉验收 demo，包含检测、短期跟踪、语义身份�
 - `det_filter`：`person + car` 阈值过滤（配置化）
 - `mot_tracker`：BoT-SORT 风格实现（Kalman + 两阶段关联 + GMC + appearance）
 - `primary_target_manager`：`person`-only 主目标规则（首锁最大框 + continuity-first）
+- `mission_coordinator`：ROS-independent 任务输出协调 seam；按任务状态 / semantic target / state sequence 只产生当前帧可信 bbox，并负责配置化同目标 loss/reacquire event 时序
 - `bearing_estimator`：demo 近似 bearing（非标定真值）
 - `udp_json_adapter`：localhost UDP JSON
 
@@ -40,6 +41,12 @@ Orin 宿主机侧视觉验收 demo，包含检测、短期跟踪、语义身份�
 - `visualization.queue_capacity`（异步 overlay render/write queue；默认 `4`）
 - `recording.enable` / `recording.output_root` / `recording.path` / `recording.fps`（当前 live result 录制强制为 FFV1/MKV；`path` 必须位于可信 diagnostic output root，且 result root 不得与受保护的 clean `data/captures/` 重叠或经符号链接指向它）
 - `runtime.inference_timing_metrics`（默认 `true`，输出 inference p50/p95/p99）
+
+`MissionCoordinator::Config` 当前提供 `lost_event_timeout=0.5s` 和
+`reacquire_retention=6s`，两者必须为正且前者更短。它只使用注入的单调
+source-time，不按固定帧数计时；输出当前 target 的新鲜 bbox 只允许在
+`CONFIRM_TARGET`、`APPROACH_TARGET`、`VERIFY_IDENTITY`、`TRACK_INTRUDER`。
+它尚未连接 ROS 参数、订阅或 live loop，这些 transport/runtime 职责属于 `#84`。
 
 建议 engine 路径：
 - `/path/to/my_workplace/vision_demo_ws/assets/models/engines/orin_jp621_trt_local/yolo26n_fp16_640.engine`
