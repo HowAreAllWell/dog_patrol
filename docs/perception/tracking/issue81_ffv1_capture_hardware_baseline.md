@@ -19,6 +19,7 @@ build/vision_demo_host/capture_ffv1 \
 | 2 秒 smoke | `optimal` | `data/captures/issue81_hardware_smoke_20260730_131042/` | complete；captured/written/dropped=`54/54/0`，camera frame gaps=`6` |
 | 10 秒压力验证（queue=120） | `balanced` | `data/captures/issue81_balanced_10s_20260730_131121/` | complete；captured/written/dropped=`301/254/47`，write errors=`0`，camera frame gaps=`0` |
 | 3 秒严格背压验证（queue=1） | `balanced` | `data/captures/issue81_balanced_queue1_3s_20260730_132054/` | complete；captured/written/dropped=`91/41/50`，write errors=`0`，camera frame gaps=`0` |
+| 10 秒严格背压复现（queue=1，3 次） | `balanced` | `data/captures/issue81_segfault_repro_{1,2,3}_20260730_1943*/` | 三次均 complete 且均为 captured/written/dropped=`301/153/148`，write errors=`0`，camera frame gaps=`0` |
 | 3 秒本地显示预览对照（queue=1） | `balanced` | `data/captures/issue81_local_display_preview_control_20260730_193300/` | complete；captured/written/dropped=`90/46/44`，camera frame gaps=`0` |
 | 本地显示人工交互（queue=120） | `balanced` | `data/captures/issue81_local_interactive_acceptance_20260730_193338/` | `take_001` complete，captured/written/dropped=`234/234/0`，含 1 个 Marker；`take_002` complete，`65/65/0`；两段 camera frame gaps 均为 `0` |
 
@@ -68,8 +69,12 @@ queue=120 在 10 秒 run 中缓冲后写出 254 帧、仍丢弃 47 帧。30 FPS 
 写入速率。
 
 本地显示下的真实预览交互已完成，覆盖两个 take、一个 Marker 和正常退出。当前 CPU FFV1
-写入吞吐仍需按实测判断：早期 queue=1/queue=120 压力基线有显式 drop，而本次较短的本地
-交互运行没有 drop；不能只按 nominal 30 FPS 或单次无 drop 结果推断持续写入能力。先前一次
-preview/headless 运行曾在退出后报告 segmentation fault，但后续 headless（有/无 `DISPLAY`）、
-本地 preview 对照和人工交互均以 exit code 0 完成；若再次出现，应保留 `coredumpctl` 记录后
-再归因。
+写入吞吐必须按实测判断：queue=1 的三次独立 10 秒 run 都只写入 153/301 帧（约 15.3 FPS），
+20 秒 gdb run 也为 305/601 帧（约 15.25 FPS）。同时 `tegrastats` 显示一个 CPU 核持续 100%、
+总 CPU 约 77% idle，`vmstat` 的 I/O wait 为 0；现有证据指向单核 FFV1 编码路径，而非 NVMe
+饱和。较大 queue 只能吸收短时积压，不能改变持续写入能力，不能只按 nominal 30 FPS 或单次
+无 drop 结果推断持续写入能力。
+
+一次 20 秒 queue=1 直接 run 在退出前报告 segmentation fault，后续同一场景的 gdb run 和三次
+10 秒重复均以 exit code 0 完成；系统 core limit 为 0、未安装 `coredumpctl`，因此尚未取得栈。
+该问题仍为未稳定复现的风险；若再次出现，应以 gdb 或启用可保存的 core dump 记录后再归因。
