@@ -251,6 +251,16 @@ Tracker ReID 配置（`tracker.*`）：
 本轮 `fast` / `optimal` 对照证据见
 `docs/issue80_hik_mvs_frame_contract_baseline.md`。
 
+`#85` 已补充同源 Bayer、含人受控 detector/ReID/tracking 和完整 `balanced` live 30 FPS 证据，
+见 `docs/issue85_bayer_preprocess_audit.md`。当前配置文件/参数声明仍以 `optimal` 为默认，直到
+required `#93` 独立实施；`bench_hik_mvs_camera.sh` 的 `fast` 默认是性能对照基准，不代表 runtime
+默认。
+
+`benchmark_bayer_input` 是仅 MVS-enabled 构建中的 headless 审计工具。它对一批自持有 Bayer
+buffers 比较全部 SDK quality、写出 FFV1 variants、检测 CSV 和分段 p50/p95/p99；可用
+`--input-video` 生成明确标记的 synthetic Bayer 控制输入。它启用 detector timing metrics，普通
+`PreprocessInfer` 默认不启用，避免因审计改变 production inference 行为。
+
 历史 RTSP 基线（仅作迁移前对照，不是当前 live input）：
 - `A(gmc_off)` 平均 FPS 约 `24.07`
 - `B(sparseOptFlow, downscale=2)` 平均 FPS 约 `15.87`

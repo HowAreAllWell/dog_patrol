@@ -116,6 +116,15 @@ add_executable(offline_eval_recordings src/tools/offline_eval_recordings.cpp)
 target_compile_features(offline_eval_recordings PUBLIC cxx_std_17)
 target_link_libraries(offline_eval_recordings ${PROJECT_NAME}_modules ${OpenCV_LIBS})
 
+if(HIK_MVS_AVAILABLE)
+  add_executable(benchmark_bayer_input src/tools/benchmark_bayer_input.cpp)
+  target_compile_features(benchmark_bayer_input PUBLIC cxx_std_17)
+  target_include_directories(benchmark_bayer_input PRIVATE ${MVS_INCLUDE_DIR})
+  target_link_libraries(benchmark_bayer_input ${PROJECT_NAME}_modules ${OpenCV_LIBS} ${MVS_LIB})
+  set_property(TARGET benchmark_bayer_input APPEND PROPERTY BUILD_RPATH "${MVS_LIB_DIR}")
+  set_property(TARGET benchmark_bayer_input APPEND PROPERTY INSTALL_RPATH "${MVS_LIB_DIR}")
+endif()
+
 install(TARGETS
   ${PROJECT_NAME}_modules
   vision_demo_node
@@ -123,6 +132,10 @@ install(TARGETS
   capture_ffv1
   offline_eval_recordings
   DESTINATION lib/${PROJECT_NAME})
+
+if(HIK_MVS_AVAILABLE)
+  install(TARGETS benchmark_bayer_input DESTINATION lib/${PROJECT_NAME})
+endif()
 
 install(DIRECTORY include/
   DESTINATION include)
@@ -138,6 +151,13 @@ if(BUILD_TESTING)
     target_compile_features(test_camera_ingest_contract PUBLIC cxx_std_17)
     target_include_directories(test_camera_ingest_contract PRIVATE include)
     target_link_libraries(test_camera_ingest_contract ${PROJECT_NAME}_modules)
+  endif()
+
+  ament_add_gtest(test_preprocess_infer_timing test/test_preprocess_infer_timing.cpp)
+  if(TARGET test_preprocess_infer_timing)
+    target_compile_features(test_preprocess_infer_timing PUBLIC cxx_std_17)
+    target_include_directories(test_preprocess_infer_timing PRIVATE include)
+    target_link_libraries(test_preprocess_infer_timing ${PROJECT_NAME}_modules)
   endif()
 
   ament_add_gtest(test_ffv1_capture_workflow test/test_ffv1_capture_workflow.cpp)

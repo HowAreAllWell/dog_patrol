@@ -7,12 +7,14 @@
 #include "vision_demo_host/modules/yolo26_output_contract.hpp"
 
 #include <algorithm>
+#include <chrono>
 #include <cstdint>
 #include <cstring>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
 #include <limits>
+#include <cmath>
 #include <memory>
 #include <numeric>
 #include <string>
@@ -21,6 +23,12 @@
 
 namespace vision_demo_host {
 namespace {
+
+using SteadyClock = std::chrono::steady_clock;
+
+double ElapsedMilliseconds(const SteadyClock::time_point start) {
+  return std::chrono::duration<double, std::milli>(SteadyClock::now() - start).count();
+}
 
 class TrtLogger : public nvinfer1::ILogger {
  public:
@@ -60,9 +68,11 @@ struct LetterboxTransform {
   int resized_h{0};
 };
 
-LetterboxTransform ApplyLetterbox(const cv::Mat &frame, const int input_w, const int input_h, cv::Mat *out) {
+LetterboxTransform CalculateLetterboxTransform(const cv::Mat &frame,
+                                               const int input_w,
+                                               const int input_h) {
   LetterboxTransform tf;
-  if (out == nullptr || frame.empty() || input_w <= 0 || input_h <= 0) {
+  if (frame.empty() || input_w <= 0 || input_h <= 0) {
     return tf;
   }
 
@@ -72,23 +82,51 @@ LetterboxTransform ApplyLetterbox(const cv::Mat &frame, const int input_w, const
   tf.resized_w = std::max(1, static_cast<int>(std::round(static_cast<float>(frame.cols) * tf.scale)));
   tf.resized_h = std::max(1, static_cast<int>(std::round(static_cast<float>(frame.rows) * tf.scale)));
 
-  cv::Mat resized;
-  cv::resize(frame, resized, cv::Size(tf.resized_w, tf.resized_h));
-
   tf.pad_x = static_cast<float>(input_w - tf.resized_w) * 0.5F;
   tf.pad_y = static_cast<float>(input_h - tf.resized_h) * 0.5F;
 
-  const int left = std::max(0, static_cast<int>(std::floor(tf.pad_x)));
-  const int right = std::max(0, input_w - tf.resized_w - left);
-  const int top = std::max(0, static_cast<int>(std::floor(tf.pad_y)));
-  const int bottom = std::max(0, input_h - tf.resized_h - top);
-  cv::copyMakeBorder(resized, *out, top, bottom, left, right, cv::BORDER_CONSTANT, cv::Scalar(114, 114, 114));
-  tf.pad_x = static_cast<float>(left);
-  tf.pad_y = static_cast<float>(top);
+  tf.pad_x = static_cast<float>(std::max(0, static_cast<int>(std::floor(tf.pad_x))));
+  tf.pad_y = static_cast<float>(std::max(0, static_cast<int>(std::floor(tf.pad_y))));
   return tf;
 }
 
 }  // namespace
+
+void PreprocessInfer::StageTiming::ObserveMilliseconds(const double milliseconds) {
+  if (!std::isfinite(milliseconds) || milliseconds < 0.0) {
+    return;
+  }
+  if (samples_.size() == kMaxSamples) {
+    samples_.erase(samples_.begin());
+  }
+  samples_.push_back(milliseconds);
+}
+
+PreprocessInfer::PercentileSummary PreprocessInfer::StageTiming::Summary() const {
+  PercentileSummary result;
+  result.samples = samples_.size();
+  if (samples_.empty()) {
+    return result;
+  }
+
+  std::vector<double> sorted = samples_;
+  std::sort(sorted.begin(), sorted.end());
+  const auto percentile = [&sorted](const double fraction) {
+    const double rank = std::ceil(fraction * static_cast<double>(sorted.size()));
+    const std::size_t index = std::min(
+        sorted.size() - 1U,
+        static_cast<std::size_t>(std::max(1.0, rank) - 1.0));
+    return sorted[index];
+  };
+  result.p50_ms = percentile(0.50);
+  result.p95_ms = percentile(0.95);
+  result.p99_ms = percentile(0.99);
+  return result;
+}
+
+void PreprocessInfer::StageTiming::Clear() {
+  samples_.clear();
+}
 
 struct PreprocessInfer::Impl {
   Config config;
@@ -108,6 +146,23 @@ struct PreprocessInfer::Impl {
   std::size_t input_bytes{0};
   std::size_t output_bytes{0};
   cudaStream_t stream{nullptr};
+  cudaEvent_t h2d_start{nullptr};
+  cudaEvent_t h2d_end{nullptr};
+  cudaEvent_t tensor_rt_start{nullptr};
+  cudaEvent_t tensor_rt_end{nullptr};
+  cudaEvent_t d2h_start{nullptr};
+  cudaEvent_t d2h_end{nullptr};
+
+  StageTiming resize_timing;
+  StageTiming border_timing;
+  StageTiming channel_swap_timing;
+  StageTiming normalize_timing;
+  StageTiming layout_timing;
+  StageTiming h2d_timing;
+  StageTiming tensor_rt_timing;
+  StageTiming d2h_timing;
+  StageTiming parser_timing;
+  StageTiming total_timing;
 
   bool initialized{false};
 
@@ -121,6 +176,30 @@ struct PreprocessInfer::Impl {
     if (device_output != nullptr) {
       cudaFree(device_output);
       device_output = nullptr;
+    }
+    if (h2d_start != nullptr) {
+      cudaEventDestroy(h2d_start);
+      h2d_start = nullptr;
+    }
+    if (h2d_end != nullptr) {
+      cudaEventDestroy(h2d_end);
+      h2d_end = nullptr;
+    }
+    if (tensor_rt_start != nullptr) {
+      cudaEventDestroy(tensor_rt_start);
+      tensor_rt_start = nullptr;
+    }
+    if (tensor_rt_end != nullptr) {
+      cudaEventDestroy(tensor_rt_end);
+      tensor_rt_end = nullptr;
+    }
+    if (d2h_start != nullptr) {
+      cudaEventDestroy(d2h_start);
+      d2h_start = nullptr;
+    }
+    if (d2h_end != nullptr) {
+      cudaEventDestroy(d2h_end);
+      d2h_end = nullptr;
     }
     if (stream != nullptr) {
       cudaStreamDestroy(stream);
@@ -255,6 +334,16 @@ struct PreprocessInfer::Impl {
       return false;
     }
 
+    if (config.enable_timing_metrics &&
+        (cudaEventCreate(&h2d_start) != cudaSuccess || cudaEventCreate(&h2d_end) != cudaSuccess ||
+         cudaEventCreate(&tensor_rt_start) != cudaSuccess || cudaEventCreate(&tensor_rt_end) != cudaSuccess ||
+         cudaEventCreate(&d2h_start) != cudaSuccess || cudaEventCreate(&d2h_end) != cudaSuccess)) {
+      if (error != nullptr) {
+        *error = "cudaEventCreate failed for requested detector timing metrics.";
+      }
+      return false;
+    }
+
     if (!context->setTensorAddress(input_name.c_str(), device_input) ||
         !context->setTensorAddress(output_name.c_str(), device_output)) {
       if (error != nullptr) {
@@ -362,19 +451,46 @@ std::vector<Detection> PreprocessInfer::Infer(const cv::Mat &frame) {
 
   const int input_h = impl_->input_dims.d[2];
   const int input_w = impl_->input_dims.d[3];
+  const bool collect_timing = config_.enable_timing_metrics;
+  const auto total_start = SteadyClock::now();
 
+  const LetterboxTransform tf = CalculateLetterboxTransform(frame, input_w, input_h);
   cv::Mat resized;
-  const LetterboxTransform tf = ApplyLetterbox(frame, input_w, input_h, &resized);
+  const auto resize_start = SteadyClock::now();
+  cv::resize(frame, resized, cv::Size(tf.resized_w, tf.resized_h));
+  if (collect_timing) {
+    impl_->resize_timing.ObserveMilliseconds(ElapsedMilliseconds(resize_start));
+  }
   if (resized.empty()) {
     return detections;
   }
 
+  const int left = std::max(0, static_cast<int>(std::floor(tf.pad_x)));
+  const int right = std::max(0, input_w - tf.resized_w - left);
+  const int top = std::max(0, static_cast<int>(std::floor(tf.pad_y)));
+  const int bottom = std::max(0, input_h - tf.resized_h - top);
+  cv::Mat letterboxed;
+  const auto border_start = SteadyClock::now();
+  cv::copyMakeBorder(resized, letterboxed, top, bottom, left, right, cv::BORDER_CONSTANT, cv::Scalar(114, 114, 114));
+  if (collect_timing) {
+    impl_->border_timing.ObserveMilliseconds(ElapsedMilliseconds(border_start));
+  }
+
   cv::Mat rgb;
-  cv::cvtColor(resized, rgb, cv::COLOR_BGR2RGB);
+  const auto channel_swap_start = SteadyClock::now();
+  cv::cvtColor(letterboxed, rgb, cv::COLOR_BGR2RGB);
+  if (collect_timing) {
+    impl_->channel_swap_timing.ObserveMilliseconds(ElapsedMilliseconds(channel_swap_start));
+  }
 
   cv::Mat float_img;
+  const auto normalize_start = SteadyClock::now();
   rgb.convertTo(float_img, CV_32FC3, 1.0 / 255.0);
+  if (collect_timing) {
+    impl_->normalize_timing.ObserveMilliseconds(ElapsedMilliseconds(normalize_start));
+  }
 
+  const auto layout_start = SteadyClock::now();
   std::vector<float> chw(static_cast<std::size_t>(3) * static_cast<std::size_t>(input_h) *
                          static_cast<std::size_t>(input_w));
   std::vector<cv::Mat> channels(3);
@@ -383,13 +499,29 @@ std::vector<Detection> PreprocessInfer::Infer(const cv::Mat &frame) {
                                                         static_cast<std::size_t>(i) * input_h * input_w);
   }
   cv::split(float_img, channels);
+  if (collect_timing) {
+    impl_->layout_timing.ObserveMilliseconds(ElapsedMilliseconds(layout_start));
+  }
 
+  if (collect_timing && cudaEventRecord(impl_->h2d_start, impl_->stream) != cudaSuccess) {
+    return detections;
+  }
   if (cudaMemcpyAsync(impl_->device_input, chw.data(), impl_->input_bytes, cudaMemcpyHostToDevice,
                       impl_->stream) != cudaSuccess) {
     return detections;
   }
 
+  if (collect_timing && (cudaEventRecord(impl_->h2d_end, impl_->stream) != cudaSuccess ||
+                         cudaEventRecord(impl_->tensor_rt_start, impl_->stream) != cudaSuccess)) {
+    return detections;
+  }
+
   if (!impl_->context->enqueueV3(impl_->stream)) {
+    return detections;
+  }
+
+  if (collect_timing && (cudaEventRecord(impl_->tensor_rt_end, impl_->stream) != cudaSuccess ||
+                         cudaEventRecord(impl_->d2h_start, impl_->stream) != cudaSuccess)) {
     return detections;
   }
 
@@ -399,12 +531,32 @@ std::vector<Detection> PreprocessInfer::Infer(const cv::Mat &frame) {
     return detections;
   }
 
+  if (collect_timing && cudaEventRecord(impl_->d2h_end, impl_->stream) != cudaSuccess) {
+    return detections;
+  }
+
   if (cudaStreamSynchronize(impl_->stream) != cudaSuccess) {
     return detections;
   }
 
+  if (collect_timing) {
+    float h2d_ms = 0.0F;
+    float tensor_rt_ms = 0.0F;
+    float d2h_ms = 0.0F;
+    if (cudaEventElapsedTime(&h2d_ms, impl_->h2d_start, impl_->h2d_end) != cudaSuccess ||
+        cudaEventElapsedTime(&tensor_rt_ms, impl_->tensor_rt_start, impl_->tensor_rt_end) != cudaSuccess ||
+        cudaEventElapsedTime(&d2h_ms, impl_->d2h_start, impl_->d2h_end) != cudaSuccess) {
+      return detections;
+    }
+    impl_->h2d_timing.ObserveMilliseconds(static_cast<double>(h2d_ms));
+    impl_->tensor_rt_timing.ObserveMilliseconds(static_cast<double>(tensor_rt_ms));
+    impl_->d2h_timing.ObserveMilliseconds(static_cast<double>(d2h_ms));
+  }
+
   const std::size_t rows = output.size() / 6;
   detections.reserve(rows);
+
+  const auto parser_start = SteadyClock::now();
 
   for (std::size_t i = 0; i < rows; ++i) {
     const float x1 = (output[i * 6 + 0] - tf.pad_x) / tf.scale;
@@ -443,7 +595,40 @@ std::vector<Detection> PreprocessInfer::Infer(const cv::Mat &frame) {
     detections.push_back(det);
   }
 
+  if (collect_timing) {
+    impl_->parser_timing.ObserveMilliseconds(ElapsedMilliseconds(parser_start));
+    impl_->total_timing.ObserveMilliseconds(ElapsedMilliseconds(total_start));
+  }
+
   return detections;
+}
+
+PreprocessInfer::MetricsSnapshot PreprocessInfer::Metrics() const {
+  MetricsSnapshot result;
+  result.resize = impl_->resize_timing.Summary();
+  result.border = impl_->border_timing.Summary();
+  result.channel_swap = impl_->channel_swap_timing.Summary();
+  result.normalize = impl_->normalize_timing.Summary();
+  result.layout = impl_->layout_timing.Summary();
+  result.h2d = impl_->h2d_timing.Summary();
+  result.tensor_rt = impl_->tensor_rt_timing.Summary();
+  result.d2h = impl_->d2h_timing.Summary();
+  result.parser = impl_->parser_timing.Summary();
+  result.total = impl_->total_timing.Summary();
+  return result;
+}
+
+void PreprocessInfer::ResetMetrics() {
+  impl_->resize_timing.Clear();
+  impl_->border_timing.Clear();
+  impl_->channel_swap_timing.Clear();
+  impl_->normalize_timing.Clear();
+  impl_->layout_timing.Clear();
+  impl_->h2d_timing.Clear();
+  impl_->tensor_rt_timing.Clear();
+  impl_->d2h_timing.Clear();
+  impl_->parser_timing.Clear();
+  impl_->total_timing.Clear();
 }
 
 }  // namespace vision_demo_host
