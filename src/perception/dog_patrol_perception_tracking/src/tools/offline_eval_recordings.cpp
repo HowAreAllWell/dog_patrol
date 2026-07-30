@@ -21,6 +21,7 @@
 #include "vision_demo_host/modules/primary_recovery_debug.hpp"
 #include "vision_demo_host/modules/primary_target_manager.hpp"
 #include "vision_demo_host/modules/udp_json_adapter.hpp"
+#include "vision_demo_host/tools/offline_eval_input.hpp"
 #include "vision_demo_host/tools/offline_eval_schema.hpp"
 #include "vision_demo_host/tools/identity_offline_metrics.hpp"
 #include "vision_demo_host/types.hpp"
@@ -47,9 +48,11 @@ struct Options {
   bool save_frame_csv{true};
   bool save_sid_scores{true};
   bool save_tracks_csv{true};
-  bool save_eval_video{true};
+  bool overlay_preview{false};
+  bool overlay_record{false};
   bool short_dataset_dir_names{true};
-  std::string eval_video_name{"eval_overlay.mp4"};
+  std::string overlay_video_name{"eval_overlay.mkv"};
+  std::filesystem::path explicit_video_path;
   int target_lost_threshold_frames{180};
   int sid_feat_bank_size{30};
   float sid_recover_sim_thresh_strict{0.85F};
@@ -86,6 +89,12 @@ struct Options {
 struct DatasetMetrics {
   std::string dataset_name;
   std::filesystem::path dataset_dir;
+  std::filesystem::path source_video_path;
+  std::string source_kind;
+  std::string overlay_mode;
+  bool capture_metadata_present{false};
+  std::size_t capture_metadata_written_frames{0};
+  std::size_t timestamp_rows{0};
   bool ok{false};
   std::string error;
 
@@ -101,6 +110,14 @@ struct DatasetMetrics {
   double avg_fps{0.0};
   double bearing_diff_abs_mean{0.0};
   double bearing_diff_stddev{0.0};
+};
+
+struct EvaluationRequest {
+  std::size_t index{0U};
+  std::string name;
+  std::string short_name;
+  std::filesystem::path dataset_dir;
+  std::filesystem::path explicit_video_path;
 };
 
 std::string Trim(const std::string &s) {
@@ -182,16 +199,20 @@ void PrintUsage() {
       << "  --tracker-reid-model-path <path>      (default: \"\")\n"
       << "  --tracker-reid-input-width <n>        (default: 128)\n"
       << "  --tracker-reid-input-height <n>       (default: 256)\n"
-      << "  --datasets <a,b,c>            (default: orin_hik_h264_MOT/01,02,03)\n"
+      << "  --datasets <a,b,c>            (default: historical orin_hik_h264_MOT/01,02,03)\n"
+      << "  --video <path>                (one explicit FFV1 MKV or historical video; overrides --datasets)\n"
       << "  --enable-udp                  (default: off)\n"
       << "  --udp-ip <ip>                 (default: 127.0.0.1)\n"
       << "  --udp-port <port>             (default: 5005)\n"
       << "  --save-frame-csv <true|false> (default: true)\n"
       << "  --save-sid-scores <true|false> (default: true)\n"
       << "  --save-tracks-csv <true|false> (default: true)\n"
-      << "  --save-eval-video <true|false> (default: true)\n"
+      << "  --overlay-preview <true|false> (default: false)\n"
+      << "  --overlay-record <true|false>  (default: false; FFV1 MKV)\n"
+      << "  --save-eval-video <true|false> (compatibility alias for --overlay-record)\n"
       << "  --short-dataset-dir-names <true|false> (default: true, output s01/s02/...)\n"
-      << "  --eval-video-name <name>      (default: eval_overlay.mp4)\n"
+      << "  --overlay-video-name <name>   (default: eval_overlay.mkv; filename only)\n"
+      << "  --eval-video-name <name>      (compatibility alias for --overlay-video-name)\n"
       << "  --target-lost-threshold-frames <n>     (default: 180)\n"
       << "  --sid-feat-bank-size <n>               (default: 30)\n"
       << "  --sid-recover-sim-thresh-strict <f>    (default: 0.85)\n"
@@ -367,6 +388,26 @@ bool ParseArgs(int argc, char **argv, Options *opt, std::string *error) {
         return false;
       }
       opt->save_tracks_csv = v;
+    } else if (arg == "--video") {
+      opt->explicit_video_path = need(arg);
+    } else if (arg == "--overlay-preview") {
+      bool v = false;
+      if (!ParseBool(need(arg), &v)) {
+        if (error != nullptr) {
+          *error = "Invalid value for --overlay-preview";
+        }
+        return false;
+      }
+      opt->overlay_preview = v;
+    } else if (arg == "--overlay-record") {
+      bool v = false;
+      if (!ParseBool(need(arg), &v)) {
+        if (error != nullptr) {
+          *error = "Invalid value for --overlay-record";
+        }
+        return false;
+      }
+      opt->overlay_record = v;
     } else if (arg == "--save-eval-video") {
       bool v = true;
       if (!ParseBool(need(arg), &v)) {
@@ -375,7 +416,7 @@ bool ParseArgs(int argc, char **argv, Options *opt, std::string *error) {
         }
         return false;
       }
-      opt->save_eval_video = v;
+      opt->overlay_record = v;
     } else if (arg == "--short-dataset-dir-names") {
       bool v = true;
       if (!ParseBool(need(arg), &v)) {
@@ -385,8 +426,8 @@ bool ParseArgs(int argc, char **argv, Options *opt, std::string *error) {
         return false;
       }
       opt->short_dataset_dir_names = v;
-    } else if (arg == "--eval-video-name") {
-      opt->eval_video_name = need(arg);
+    } else if (arg == "--overlay-video-name" || arg == "--eval-video-name") {
+      opt->overlay_video_name = need(arg);
     } else if (arg == "--target-lost-threshold-frames") {
       const std::string s = need(arg);
       try {
@@ -664,6 +705,12 @@ void WriteDatasetJson(const std::filesystem::path &out_path, const DatasetMetric
   ofs << "{\n"
       << "  \"dataset_name\": \"" << JsonEscape(m.dataset_name) << "\",\n"
       << "  \"dataset_dir\": \"" << JsonEscape(m.dataset_dir.string()) << "\",\n"
+      << "  \"source_video_path\": \"" << JsonEscape(m.source_video_path.string()) << "\",\n"
+      << "  \"source_kind\": \"" << JsonEscape(m.source_kind) << "\",\n"
+      << "  \"overlay_mode\": \"" << JsonEscape(m.overlay_mode) << "\",\n"
+      << "  \"capture_metadata_present\": " << (m.capture_metadata_present ? "true" : "false") << ",\n"
+      << "  \"capture_metadata_written_frames\": " << m.capture_metadata_written_frames << ",\n"
+      << "  \"timestamp_rows\": " << m.timestamp_rows << ",\n"
       << "  \"ok\": " << (m.ok ? "true" : "false") << ",\n"
       << "  \"error\": \"" << JsonEscape(m.error) << "\",\n"
       << "  \"total_frames\": " << m.total_frames << ",\n"
@@ -735,6 +782,14 @@ void WriteDatasetMd(const std::filesystem::path &out_path, const DatasetMetrics 
   std::ofstream ofs(out_path);
   ofs << "# Offline Eval Summary: " << m.dataset_name << "\n\n";
   ofs << "- dataset_dir: `" << m.dataset_dir.string() << "`\n";
+  ofs << "- source_video_path: `" << m.source_video_path.string() << "`\n";
+  ofs << "- source_kind: `" << m.source_kind << "`\n";
+  ofs << "- overlay_mode: `" << m.overlay_mode << "`\n";
+  ofs << "- capture_metadata_present: `" << (m.capture_metadata_present ? "true" : "false") << "`\n";
+  if (m.capture_metadata_present) {
+    ofs << "- capture_metadata_written_frames: `" << m.capture_metadata_written_frames << "`\n";
+    ofs << "- timestamp_rows: `" << m.timestamp_rows << "`\n";
+  }
   ofs << "- ok: `" << (m.ok ? "true" : "false") << "`\n";
   if (!m.error.empty()) {
     ofs << "- error: `" << m.error << "`\n";
@@ -776,14 +831,34 @@ void WriteGlobalSummary(const std::filesystem::path &out_path, const std::vector
 }
 
 DatasetMetrics EvaluateOne(const Options &opt, const std::filesystem::path &dataset_dir,
-                           const std::filesystem::path &result_dir) {
+                           const std::filesystem::path &result_dir,
+                           const std::filesystem::path &explicit_video_path = {}) {
   DatasetMetrics m;
   m.dataset_name = dataset_dir.filename().string();
   m.dataset_dir = dataset_dir;
 
-  const std::filesystem::path video_path = dataset_dir / "video.mp4";
-  if (!std::filesystem::exists(video_path)) {
-    m.error = "video.mp4 not found";
+  const auto input_discovery =
+      vision_demo_host::tools::DiscoverOfflineEvalInput({dataset_dir, explicit_video_path});
+  if (!input_discovery.ok) {
+    m.error = input_discovery.error;
+    return m;
+  }
+  const auto &input = input_discovery.input;
+  const std::filesystem::path &video_path = input.video_path;
+  m.source_video_path = video_path;
+  m.source_kind = vision_demo_host::tools::OfflineEvalSourceKindToString(input.source_kind);
+  m.overlay_mode = vision_demo_host::tools::OfflineEvalOverlayModeToString(
+      vision_demo_host::tools::OfflineEvalOverlayModeFor(opt.overlay_preview, opt.overlay_record));
+  m.capture_metadata_present = input.capture.has_value();
+  if (input.capture.has_value()) {
+    m.capture_metadata_written_frames = input.capture->written_frames;
+    m.timestamp_rows = input.timestamp_validation.rows;
+  }
+
+  const auto overlay_plan = vision_demo_host::tools::PlanOfflineEvalOverlayArtifacts(
+      input, result_dir, opt.overlay_record, opt.overlay_video_name);
+  if (!overlay_plan.ok) {
+    m.error = overlay_plan.error;
     return m;
   }
 
@@ -933,9 +1008,10 @@ DatasetMetrics EvaluateOne(const Options &opt, const std::filesystem::path &data
                       "assignment_accepted,assignment_reject_reason\n";
   }
 
-  cv::VideoWriter eval_writer;
-  const auto eval_video_path = result_dir / opt.eval_video_name;
-  bool eval_writer_open_failed = false;
+  cv::VideoWriter overlay_writer;
+  bool overlay_writer_open_failed = false;
+  bool preview_window_open = false;
+  constexpr const char *kOverlayWindowName = "offline_eval_overlay";
 
   std::vector<double> bearing_diffs;
   std::optional<float> prev_bearing_locked;
@@ -1144,25 +1220,44 @@ DatasetMetrics EvaluateOne(const Options &opt, const std::filesystem::path &data
       }
     }
 
-    if (opt.save_eval_video && !eval_writer.isOpened() && !eval_writer_open_failed) {
-      const int fourcc = cv::VideoWriter::fourcc('m', 'p', '4', 'v');
+    if (opt.overlay_record && !overlay_writer.isOpened() && !overlay_writer_open_failed) {
+      const int fourcc = cv::VideoWriter::fourcc('F', 'F', 'V', '1');
       const double src_fps = cap.get(cv::CAP_PROP_FPS);
       const double write_fps = (src_fps > 1.0 && src_fps < 120.0) ? src_fps : 25.0;
-      if (!eval_writer.open(eval_video_path.string(), fourcc, write_fps, frame.size(), true)) {
-        eval_writer_open_failed = true;
-        m.error = "Failed to open eval video writer: " + eval_video_path.string();
+      if (!overlay_writer.open(overlay_plan.output_path.string(), fourcc, write_fps, frame.size(), true)) {
+        overlay_writer_open_failed = true;
+        m.error = "Failed to open FFV1 overlay writer: " + overlay_plan.output_path.string();
       } else {
-        std::cout << "  [offline_eval] eval video writer opened: " << eval_video_path
+        std::cout << "  [offline_eval] FFV1 overlay writer opened: " << overlay_plan.output_path
                   << " fps=" << write_fps << " size=" << frame.cols << "x" << frame.rows << std::endl;
       }
     }
 
-    if (eval_writer.isOpened()) {
+    if (opt.overlay_preview || overlay_writer.isOpened()) {
       cv::Mat canvas = frame.clone();
-      (void)identity_result;
       DrawEvalOverlay(&canvas, tracks, identity_result, primary, bo, frame_idx, detections.size(),
                       primary_mgr.LastDecisionReason(), primary_mgr.LastRejectReason());
-      eval_writer.write(canvas);
+      if (opt.overlay_preview) {
+        if (!preview_window_open) {
+          try {
+            cv::namedWindow(kOverlayWindowName, cv::WINDOW_NORMAL);
+            preview_window_open = true;
+          } catch (const cv::Exception &exception) {
+            m.error = "Failed to create overlay preview window: " + std::string(exception.what());
+          }
+        }
+        if (preview_window_open) {
+          try {
+            cv::imshow(kOverlayWindowName, canvas);
+            (void)cv::waitKey(1);
+          } catch (const cv::Exception &exception) {
+            m.error = "Failed to render overlay preview: " + std::string(exception.what());
+          }
+        }
+      }
+      if (overlay_writer.isOpened()) {
+        overlay_writer.write(canvas);
+      }
     }
     frame_idx++;
   }
@@ -1183,7 +1278,16 @@ DatasetMetrics EvaluateOne(const Options &opt, const std::filesystem::path &data
     m.bearing_diff_stddev = std::sqrt(var);
   }
 
-  if (opt.save_eval_video && !m.error.empty()) {
+  if (preview_window_open) {
+    cv::destroyWindow(kOverlayWindowName);
+  }
+
+  const auto replay_validation = vision_demo_host::tools::ValidateOfflineEvalReplay(input, m.total_frames);
+  if (!replay_validation.ok && m.error.empty()) {
+    m.error = replay_validation.error;
+  }
+
+  if (!m.error.empty()) {
     m.ok = false;
     return m;
   }
@@ -1206,37 +1310,70 @@ int main(int argc, char **argv) {
     return 0;
   }
 
-  const std::filesystem::path run_dir =
-      opt.results_root / (opt.run_name + "_" + TimestampCompactNow());
-  std::filesystem::create_directories(run_dir);
+  const std::filesystem::path run_dir = opt.results_root / (opt.run_name + "_" + TimestampCompactNow());
+  const bool use_explicit_video = !opt.explicit_video_path.empty();
+  const std::size_t requested_input_count = use_explicit_video ? 1U : opt.datasets.size();
+  std::vector<EvaluationRequest> requests;
+  requests.reserve(requested_input_count);
+  for (std::size_t i = 0; i < requested_input_count; ++i) {
+    EvaluationRequest request;
+    request.index = i + 1U;
+    request.name = use_explicit_video ? opt.explicit_video_path.parent_path().filename().string() : opt.datasets[i];
+    request.dataset_dir = use_explicit_video ? opt.explicit_video_path.parent_path() : opt.recordings_root / request.name;
+    request.explicit_video_path = use_explicit_video ? opt.explicit_video_path : std::filesystem::path{};
+    std::ostringstream short_name_ss;
+    short_name_ss << "s" << std::setfill('0') << std::setw(2) << request.index;
+    request.short_name = short_name_ss.str();
+    requests.push_back(std::move(request));
+  }
 
+  // Reject a result root inside a valid source before creating the run directory.
+  // This protects clean capture datasets even when every output switch is disabled.
+  for (const auto &request : requests) {
+    vision_demo_host::tools::OfflineEvalInput source_boundary;
+    source_boundary.dataset_directory = request.dataset_dir;
+    const auto preflight_result_dir =
+        run_dir / (opt.short_dataset_dir_names ? request.short_name : request.name);
+    const auto artifact_plan = vision_demo_host::tools::PlanOfflineEvalOverlayArtifacts(
+        source_boundary, preflight_result_dir, false, opt.overlay_video_name);
+    if (!artifact_plan.ok) {
+      std::cerr << "Result directory error: " << artifact_plan.error << std::endl;
+      return 2;
+    }
+  }
+
+  std::filesystem::create_directories(run_dir);
   std::vector<DatasetMetrics> all_results;
-  all_results.reserve(opt.datasets.size());
+  all_results.reserve(requested_input_count);
   std::ofstream dataset_map_csv(run_dir / "dataset_dir_map.csv");
-  dataset_map_csv << "index,short_dir,dataset_name,dataset_dir\n";
+  dataset_map_csv << "index,short_dir,dataset_name,dataset_dir,source_video_path,source_kind\n";
 
   std::cout << "[offline_eval] run_dir: " << run_dir << std::endl;
-  std::cout << "[offline_eval] save_eval_video=" << (opt.save_eval_video ? "true" : "false")
-            << " eval_video_name=" << opt.eval_video_name << std::endl;
+  std::cout << "[offline_eval] overlay_mode="
+            << vision_demo_host::tools::OfflineEvalOverlayModeToString(
+                   vision_demo_host::tools::OfflineEvalOverlayModeFor(opt.overlay_preview, opt.overlay_record))
+            << " overlay_video_name=" << opt.overlay_video_name << std::endl;
   std::cout << "[offline_eval] det_thresholds raw=" << opt.det_raw_conf_threshold
             << " person=" << opt.det_person_conf_threshold
             << " car=" << opt.det_car_conf_threshold << std::endl;
   std::cout << "[offline_eval] target_lost_threshold_frames=" << opt.target_lost_threshold_frames << std::endl;
-  for (std::size_t i = 0; i < opt.datasets.size(); ++i) {
-    const auto &name = opt.datasets[i];
-    const std::filesystem::path dataset_dir = opt.recordings_root / name;
-    std::ostringstream short_name_ss;
-    short_name_ss << "s" << std::setfill('0') << std::setw(2) << (i + 1);
-    const std::string short_name = short_name_ss.str();
-    const std::filesystem::path out_dir = run_dir / (opt.short_dataset_dir_names ? short_name : name);
+  bool all_ok = true;
+  for (const auto &request : requests) {
+    const std::filesystem::path out_dir =
+        run_dir / (opt.short_dataset_dir_names ? request.short_name : request.name);
     std::filesystem::create_directories(out_dir);
-    dataset_map_csv << (i + 1) << "," << short_name << "," << name << "," << dataset_dir.string() << "\n";
-
-    std::cout << "[offline_eval] processing[" << short_name << "]: " << dataset_dir << std::endl;
-    DatasetMetrics m = EvaluateOne(opt, dataset_dir, out_dir);
+    std::cout << "[offline_eval] processing[" << request.short_name << "]: " << request.dataset_dir;
+    if (!request.explicit_video_path.empty()) {
+      std::cout << " video=" << request.explicit_video_path;
+    }
+    std::cout << std::endl;
+    DatasetMetrics m = EvaluateOne(opt, request.dataset_dir, out_dir, request.explicit_video_path);
+    dataset_map_csv << request.index << "," << request.short_name << "," << request.name << ","
+                    << request.dataset_dir.string() << "," << m.source_video_path.string() << ","
+                    << m.source_kind << "\n";
     WriteDatasetJson(out_dir / "summary.json", m);
     WriteDatasetMd(out_dir / "summary.md", m);
-    const auto identity_metrics = vision_demo_host::tools::BuildIdentityOfflineMetrics(out_dir, name);
+    const auto identity_metrics = vision_demo_host::tools::BuildIdentityOfflineMetrics(out_dir, request.name);
     std::string metrics_error;
     if (!vision_demo_host::tools::WriteIdentityOfflineMetricsFiles(out_dir, identity_metrics, &metrics_error)) {
       std::cout << "  [offline_eval] warning: identity metrics write failed: " << metrics_error << std::endl;
@@ -1248,11 +1385,12 @@ int main(int argc, char **argv) {
                 << " locked_ratio=" << std::setprecision(2) << Ratio(m.locked_frames, m.total_frames) * 100.0 << "%"
                 << std::endl;
     } else {
+      all_ok = false;
       std::cout << "  failed: " << m.error << std::endl;
     }
   }
 
   WriteGlobalSummary(run_dir / "global_summary.md", all_results);
   std::cout << "[offline_eval] global summary: " << (run_dir / "global_summary.md") << std::endl;
-  return 0;
+  return all_ok ? 0 : 1;
 }

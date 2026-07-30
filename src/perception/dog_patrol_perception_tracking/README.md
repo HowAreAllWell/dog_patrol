@@ -335,7 +335,7 @@ ros2 run vision_demo_host capture_ffv1 \
   - `primary_target_manager`
   - `bearing_estimator`
 
-运行（默认处理 `orin_hik_h264_MOT/01,02,03`）：
+运行（默认处理历史 `orin_hik_h264_MOT/01,02,03`，仅作为迁移回归）：
 
 ```bash
 cd /path/to/my_workplace/vision_demo_ws
@@ -343,6 +343,34 @@ source /opt/ros/humble/setup.bash
 source install/setup.bash
 ros2 run vision_demo_host offline_eval_recordings
 ```
+
+新的 canonical 回放入口是 #81 完整 take 的显式 `video.mkv` 路径；它不依赖数据集目录中曾经
+硬编码的 `video.mp4`：
+
+```bash
+ros2 run vision_demo_host offline_eval_recordings \
+  --video /absolute/path/to/capture_session/take_001/video.mkv \
+  --results-root /absolute/path/to/eval_results \
+  --run-name ffv1_baseline
+```
+
+当 `video.mkv` 同目录有 `metadata.json` 时，工具只接受 `complete` 的 FFV1/MKV capture metadata，
+并校验 `counts.written_frames`、`frame_timestamps.csv` 行数、capture index/source timestamp 单调性，
+以及实际从首帧到末帧解码出的帧数。任何不一致都会在 `summary.json`/`summary.md` 和进程退出码中
+显式失败。若没有 capture metadata，目录发现优先 `video.mkv`，再保留历史 `video.mp4` 作为迁移
+回归输入。
+
+overlay 是结果工件，不是 source dataset。四种独立模式如下；所有 CSV 和可选 overlay 都只能写入
+`--results-root` 生成的 run 目录，工具拒绝把它们放进 source dataset。
+
+- headless（默认）：`--overlay-preview false --overlay-record false`
+- preview-only：`--overlay-preview true --overlay-record false`
+- record-only：`--overlay-preview false --overlay-record true`
+- preview + record：`--overlay-preview true --overlay-record true`
+
+record-only/preview+record 将当前 tracking/identity/primary overlay 写成 FFV1 `eval_overlay.mkv`；
+overlay 的渲染画布从 source BGR8 frame clone，绝不回写或标注 clean source video。带 preview 的模式
+需要本地可用的图形显示；无显示环境使用默认 headless 或 record-only。
 
 常用参数：
 - `--detector-engine <path>`
@@ -354,9 +382,12 @@ ros2 run vision_demo_host offline_eval_recordings
 - `--tracker-reid-model-path <path>`
 - `--enable-udp`（默认关闭）
 - `--save-frame-csv <true|false>`
-- `--save-eval-video <true|false>`（默认开启）
+- `--video <path>`（显式单视频输入，会覆盖 `--datasets`）
+- `--overlay-preview <true|false>`（默认关闭）
+- `--overlay-record <true|false>`（默认关闭；record 时只写 FFV1 MKV）
+- `--overlay-video-name <name>`（默认 `eval_overlay.mkv`，仅接受文件名）
+- `--save-eval-video <true|false>` / `--eval-video-name <name>`（旧参数别名，分别等同 overlay record/name）
 - `--short-dataset-dir-names <true|false>`（默认开启，子目录用 `s01/s02/...`）
-- `--eval-video-name <name>`（默认 `eval_overlay.mp4`）
 - `--target-lost-threshold-frames <n>`（默认 `180`）
 - `--results-root <path>`
 - `--run-name <name>`
@@ -381,7 +412,7 @@ ros2 run vision_demo_host offline_eval_recordings
 - `/path/to/my_workplace/vision_demo_ws/data/eval_results/<run_name>_<timestamp>/`
 - 每个测试集子目录（默认短名）：
   - `s01/`, `s02/`, ...（可通过参数关闭短名）
-  - `eval_overlay.mp4`（默认开启，叠加轨迹与状态）
+  - `eval_overlay.mkv`（仅 `--overlay-record=true`；FFV1 的诊断 overlay，不是 source dataset）
   - `summary.json`
   - `summary.md`
   - `per_frame.csv`（可关闭）
@@ -390,7 +421,7 @@ ros2 run vision_demo_host offline_eval_recordings
   - `sid_scores.csv`（默认输出，用于当前 identity assignment、birth / hidden candidate 与 update-policy 证据）
   - `identity_metrics.json` / `identity_metrics.md`（每个数据集固定输出的 additive identity acceptance metrics）
 - 映射表：
-  - `dataset_dir_map.csv`（`sXX` 与原始数据集目录的对应关系）
+  - `dataset_dir_map.csv`（`sXX`、原始数据集目录、实际 source video 与 source kind 的对应关系）
 - 总表：
   - `global_summary.md`
 
