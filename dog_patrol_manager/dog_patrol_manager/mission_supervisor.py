@@ -121,6 +121,7 @@ class MissionSupervisor(Node):
         msg.state = int(snapshot.state)
         msg.target_id = int(snapshot.target_id)
         msg.blocked = bool(snapshot.blocked)
+        msg.block_cause = int(snapshot.block_cause)
         msg.detail = str(snapshot.detail)[: self._max_detail_length]
         self._state_pub.publish(msg)
 

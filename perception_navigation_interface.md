@@ -18,13 +18,17 @@ mission_supervisor
 感知和导航模块根据全局状态执行自己的内部流程，并通过统一事件接口向
 `mission_supervisor` 报告已经发生的业务结果。
 
+视觉仓库只提供感知拥有的语义 `target_id`、目标事件和新鲜 bbox；身份授权结论
+由独立的授权模块产生，目标位置、停车和路线等导航决策由独立的导航模块产生。
+`mission_supervisor` 只验证和编排这些结果，不实现授权或导航决策。
+
 首版协议重点解决：
 
 - 巡逻过程中发现可疑目标；
 - 感知向导航传递目标 bounding box；
 - 导航利用雷达和标定结果计算目标位置与距离；
 - 机器狗接近目标并在约 3 米处停车；
-- 感知模块执行内部身份认证；
+- 独立授权模块返回身份认证结论；
 - 认证成功后恢复巡逻；
 - 认证失败后持续跟踪目标。
 
@@ -43,6 +47,7 @@ mission_supervisor
 - 检查事件是否合法；
 - 执行状态转换；
 - 保存当前目标 ID；
+- 保存阻塞原因；
 - 标记任务是否因故障阻塞。
 
 ### 2.2 只有状态机可以修改全局状态
@@ -51,6 +56,7 @@ mission_supervisor
 
 ```text
 TARGET_CONFIRMED
+TARGET_REACQUIRED
 AUTHORIZED
 UNAUTHORIZED
 ```
@@ -99,9 +105,14 @@ ARRIVED_AND_STOPPED
 - 模块发布 `TARGET_LOST` 或 `EXECUTION_ERROR`；
 - 状态机保持当前业务状态；
 - 状态机设置 `blocked=true`；
+- 状态机发布可区分的 `block_cause`；
 - 等待人工处理或后续版本增加复位策略。
 
 首版不自动换目标、不自动恢复巡逻，也不增加搜索或重试状态。
+
+同一语义目标在 `TARGET_LOST` 后重新被感知到时，感知可以发送
+`TARGET_REACQUIRED`。状态机只清除该 `TARGET_LOST` 阻塞，保留当前业务状态和
+`target_id`；`EXECUTION_ERROR` 阻塞不能由此事件清除。
 
 ## 3. 系统组成
 
@@ -137,8 +148,8 @@ ARRIVED_AND_STOPPED
 - 报告 `TARGET_CONFIRMED`；
 - 持续发布当前目标 bbox；
 - 在接近过程中维持同一目标的视觉跟踪；
-- 在认证状态执行完整身份认证流程；
-- 最终报告 `AUTHORIZED` 或 `UNAUTHORIZED`；
+- 在认证状态向授权模块提供当前目标上下文；
+- 经感知接入适配器上报独立授权模块产生的 `AUTHORIZED` 或 `UNAUTHORIZED`；
 - 在入侵者跟踪状态继续发布同一目标 bbox；
 - 目标丢失或算法故障时报告错误事件。
 
@@ -223,8 +234,10 @@ PATROL          TRACK_INTRUDER
 | `VERIFY_IDENTITY` | 感知 | `AUTHORIZED` | `PATROL` |
 | `VERIFY_IDENTITY` | 感知 | `UNAUTHORIZED` | `TRACK_INTRUDER` |
 | `TRACK_INTRUDER` | 上位机 | `HANDLING_COMPLETE` | `PATROL` |
+| 任一有活动目标的业务状态 | 感知 | `TARGET_REACQUIRED` | 保持原状态，仅解除 `TARGET_LOST` 阻塞 |
 
-`TARGET_LOST` 和 `EXECUTION_ERROR` 不切换业务状态，只将当前状态标记为阻塞。
+`TARGET_LOST` 和 `EXECUTION_ERROR` 不切换业务状态，只将当前状态标记为阻塞，并分别
+设置 `BLOCK_TARGET_LOST` 和 `BLOCK_EXECUTION_ERROR`。
 
 ## 5. ROS 2 接口总览
 
@@ -266,11 +279,16 @@ uint8 APPROACH_TARGET=3
 uint8 VERIFY_IDENTITY=4
 uint8 TRACK_INTRUDER=5
 
+uint8 BLOCK_NONE=0
+uint8 BLOCK_TARGET_LOST=1
+uint8 BLOCK_EXECUTION_ERROR=2
+
 std_msgs/Header header
 uint32 state_seq
 uint8 state
 uint32 target_id
 bool blocked
+uint8 block_cause
 string detail
 ```
 
@@ -281,6 +299,8 @@ string detail
 - `state`：当前全局状态；
 - `target_id`：当前目标，`0` 表示没有活动目标；
 - `blocked`：当前任务是否因错误停止推进；
+- `block_cause`：阻塞原因；未阻塞时为 `BLOCK_NONE`，目标丢失和技术故障分别为
+  `BLOCK_TARGET_LOST`、`BLOCK_EXECUTION_ERROR`；
 - `detail`：供日志和界面显示的说明，程序不能解析该字符串决定业务逻辑。
 
 `state_seq` 在以下任一权威状态发生变化时加一：
@@ -288,6 +308,7 @@ string detail
 - `state` 改变；
 - `target_id` 改变；
 - `blocked` 状态改变。
+- `block_cause` 改变。
 
 周期性重复发布同一个状态时，`state_seq` 不变。
 
@@ -316,6 +337,7 @@ uint8 UNAUTHORIZED=5
 uint8 TARGET_LOST=6
 uint8 EXECUTION_ERROR=7
 uint8 HANDLING_COMPLETE=8
+uint8 TARGET_REACQUIRED=9
 
 std_msgs/Header header
 uint32 observed_state_seq
@@ -333,6 +355,10 @@ string detail
 - `source`：事件来源；
 - `event`：事件类型；
 - `detail`：诊断信息。
+
+`TARGET_REACQUIRED` 必须由感知发布，并携带产生该事件时观察到的
+`observed_state_seq` 和当前语义 `target_id`。它只在该目标已因 `TARGET_LOST` 被阻塞时
+有效。
 
 推荐 QoS：
 
@@ -369,6 +395,20 @@ float32 confidence
 - x 向右，y 向下；
 - bbox 区间为 `[x_min, x_max)` 和 `[y_min, y_max)`；
 - bbox 必须位于图像尺寸范围内。
+
+导航只在下列未阻塞状态接受与当前权威 `target_id` 相同且未过期的新鲜 bbox：
+
+| 全局状态 | 是否接受新鲜 bbox | 用途 |
+|---|---|---|
+| `STARTUP` | 否 | 尚无活动目标 |
+| `PATROL` | 否 | 忽略上一次任务的旧 bbox |
+| `CONFIRM_TARGET` | 是 | 建立目标位置，机器人保持停车 |
+| `APPROACH_TARGET` | 是 | 更新目标位置并安全接近 |
+| `VERIFY_IDENTITY` | 否 | 认证期间保持停车，不因 bbox 重启运动 |
+| `TRACK_INTRUDER` | 是 | 更新目标位置并持续跟随 |
+
+`blocked=true` 时导航不得继续使用 bbox 驱动运动；收到有效
+`TARGET_REACQUIRED` 且状态机解除 `TARGET_LOST` 阻塞后，才按上表恢复处理。
 
 推荐 QoS：
 
@@ -467,6 +507,10 @@ target_id: 87
 
 后续 bbox、导航事件和认证事件都必须继续使用目标 `87`。
 
+在 `PATROL` 中，首个包含 eligible person 的帧必须立即选择其中面积最大的 eligible
+person，分配非零语义 `target_id` 并发送 `TARGET_CONFIRMED`。此规则不等待多帧确认；
+eligible 的判定由感知模块负责。
+
 ## 8. 各事件的产生条件
 
 ### 8.1 READY
@@ -495,14 +539,9 @@ target_id: 87
 
 该事件只能由感知在 `PATROL` 中发送。
 
-不能由单帧检测直接触发。初始建议条件：
-
-```text
-连续 3～5 帧检测到同一目标
-目标跟踪 ID 稳定
-置信度达到感知阈值
-当前状态仍为 PATROL
-```
+当首个包含 eligible person 的帧到达时，感知立即选择该帧面积最大的 eligible person，
+分配稳定的语义 `target_id` 并发送事件；不等待多帧确认。感知仍须保证当前状态为
+`PATROL`，并按自身规则决定 person 是否 eligible。
 
 同一 `state_seq + target_id` 逻辑上只产生一次目标确认事件。
 
@@ -560,7 +599,8 @@ abs(angular_speed) < 0.10 rad/s
 
 该事件只能由感知在 `VERIFY_IDENTITY` 中发送。
 
-它表示感知内部的完整认证流程已经结束，并确认人员获得授权。
+它表示独立授权模块的认证流程已经结束并确认人员获得授权；感知接入适配器只转发该
+结果，不能自行作出授权决定。
 
 状态机收到后：
 
@@ -574,7 +614,8 @@ abs(angular_speed) < 0.10 rad/s
 
 该事件只能由感知在 `VERIFY_IDENTITY` 中发送。
 
-它表示认证流程正常执行完毕，但人员未通过认证。
+它表示独立授权模块的认证流程正常执行完毕，但人员未通过认证；感知接入适配器只转发
+该结果，不能自行作出授权决定。
 
 状态机收到后：
 
@@ -606,8 +647,14 @@ abs(angular_speed) < 0.10 rad/s
 
 ```text
 blocked=true
+block_cause=BLOCK_TARGET_LOST
 detail="target lost: ..."
 ```
+
+同一语义目标重新可见且可信 bbox 恢复时，感知以当前 `state_seq` 和相同 `target_id`
+发送 `TARGET_REACQUIRED`。状态机只在当前阻塞原因为 `BLOCK_TARGET_LOST` 时接受它：
+保留业务状态和活动目标，清除阻塞并递增 `state_seq`。错误目标、旧序号、重复或在目标
+丢失前到达的事件都被拒绝。
 
 ### 8.8 EXECUTION_ERROR
 
@@ -619,7 +666,8 @@ detail="target lost: ..."
 - planner 或 controller 不可用；
 - 认证服务调用失败。
 
-状态机不自动改变业务状态，只设置阻塞信息。
+状态机不自动改变业务状态，只设置 `blocked=true` 和
+`block_cause=BLOCK_EXECUTION_ERROR`。`TARGET_REACQUIRED` 不能清除这种阻塞。
 
 ### 8.9 HANDLING_COMPLETE
 
@@ -660,8 +708,8 @@ detail="target lost: ..."
 感知：
 
 - 持续检测可疑人员；
-- 选择并确认一个主目标；
-- 分配 `target_id`；
+- 在首个包含 eligible person 的帧中立即选择面积最大的目标；
+- 分配语义 `target_id`；
 - 发送 `TARGET_CONFIRMED`。
 
 导航：
@@ -705,9 +753,9 @@ detail="target lost: ..."
 
 感知：
 
-- 看到新的 `state_seq` 后只启动一次完整认证流程；
-- 内部执行人脸、提示和口令等步骤；
-- 最终只发送 `AUTHORIZED` 或 `UNAUTHORIZED`。
+- 看到新的 `state_seq` 后向授权模块启动一次请求；
+- 提供所需的人脸、提示和口令等感知上下文；
+- 只转发授权模块给出的 `AUTHORIZED` 或 `UNAUTHORIZED`。
 
 导航：
 
@@ -770,7 +818,8 @@ detail="target lost: ..."
 
 导航按照 waypoint 巡逻，感知同时检测可疑人员。
 
-感知连续多帧确认目标后分配 `target_id`，发送 `TARGET_CONFIRMED`。
+首个包含 eligible person 的帧到达时，感知立即选择其中面积最大的目标，分配
+`target_id` 并发送 `TARGET_CONFIRMED`。
 
 ### 10.3 建立目标位置
 
@@ -794,9 +843,10 @@ detail="target lost: ..."
 
 导航保持停车，感知在内部执行完整认证。
 
-认证成功时发送 `AUTHORIZED`，状态机返回 `PATROL`。
+授权模块确认成功后，感知接入适配器发送 `AUTHORIZED`，状态机返回 `PATROL`。
 
-认证未通过时发送 `UNAUTHORIZED`，状态机进入 `TRACK_INTRUDER`。
+授权模块确认未通过后，感知接入适配器发送 `UNAUTHORIZED`，状态机进入
+`TRACK_INTRUDER`。
 
 ### 10.6 入侵者跟踪
 
@@ -926,8 +976,8 @@ TARGET_LOST 或 EXECUTION_ERROR
 
 - 导航正常巡逻；
 - 感知同时检测；
-- 单帧误检不触发状态变化；
-- 感知只确认一个主目标；
+- 首个包含 eligible person 的帧立即选择面积最大的主目标并触发状态变化；
+- 感知只确认一个主目标，不设置多帧确认延迟；
 - 状态机保存正确 `target_id`。
 
 ### 13.3 CONFIRM_TARGET
@@ -971,7 +1021,7 @@ TARGET_LOST 或 EXECUTION_ERROR
 
 | 参数 | 负责方 | 初始建议 |
 |---|---|---|
-| 可疑目标连续确认帧数 | 感知 | 3～5 帧 |
+| 首帧目标选择规则 | 感知 | 首个含 eligible person 的帧中面积最大的目标立即确认 |
 | 目标检测置信度 | 感知 | 根据模型测试 |
 | bbox 发布频率 | 感知 | 不低于 10 Hz |
 | bbox 最大允许年龄 | 导航 | 0.3 s |

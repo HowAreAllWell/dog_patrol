@@ -1,4 +1,5 @@
 from dog_patrol_manager.state_machine import (
+    BlockCause,
     EventSource,
     EventType,
     GlobalState,
@@ -170,6 +171,223 @@ def test_target_lost_blocks_without_changing_business_state():
         event=int(EventType.TARGET_POSITION_READY),
     )
     assert not machine.handle_event(follow_up).accepted
+
+
+def test_same_target_reacquired_clears_only_target_lost_block():
+    machine = MissionStateMachine()
+    start_patrol(machine)
+    machine.handle_event(
+        event(
+            machine,
+            EventSource.PERCEPTION,
+            EventType.TARGET_CONFIRMED,
+            42,
+        )
+    )
+    state_before_loss = machine.snapshot.state
+
+    loss = machine.handle_event(
+        event(
+            machine,
+            EventSource.PERCEPTION,
+            EventType.TARGET_LOST,
+            42,
+        )
+    )
+    assert loss.snapshot.block_cause == BlockCause.TARGET_LOST
+
+    reacquired = machine.handle_event(
+        event(
+            machine,
+            EventSource.PERCEPTION,
+            EventType.TARGET_REACQUIRED,
+            42,
+        )
+    )
+    assert reacquired.accepted
+    assert reacquired.changed
+    assert reacquired.snapshot.state == state_before_loss
+    assert reacquired.snapshot.target_id == 42
+    assert not reacquired.snapshot.blocked
+    assert reacquired.snapshot.block_cause == BlockCause.NONE
+    assert reacquired.snapshot.state_seq == loss.snapshot.state_seq + 1
+
+
+def test_target_reacquired_rejects_wrong_target_stale_duplicate_and_out_of_order():
+    machine = MissionStateMachine()
+    start_patrol(machine)
+    machine.handle_event(
+        event(
+            machine,
+            EventSource.PERCEPTION,
+            EventType.TARGET_CONFIRMED,
+            42,
+        )
+    )
+
+    out_of_order = machine.handle_event(
+        event(
+            machine,
+            EventSource.PERCEPTION,
+            EventType.TARGET_REACQUIRED,
+            42,
+        )
+    )
+    assert not out_of_order.accepted
+    assert not out_of_order.changed
+
+    loss = machine.handle_event(
+        event(
+            machine,
+            EventSource.PERCEPTION,
+            EventType.TARGET_LOST,
+            42,
+        )
+    )
+    state_before_rejections = machine.snapshot
+
+    wrong_target = machine.handle_event(
+        event(
+            machine,
+            EventSource.PERCEPTION,
+            EventType.TARGET_REACQUIRED,
+            99,
+        )
+    )
+    assert not wrong_target.accepted
+    assert machine.snapshot == state_before_rejections
+
+    stale = MissionEventData(
+        observed_state_seq=loss.snapshot.state_seq - 2,
+        target_id=42,
+        source=int(EventSource.PERCEPTION),
+        event=int(EventType.TARGET_REACQUIRED),
+    )
+    assert not machine.handle_event(stale).accepted
+    assert machine.snapshot == state_before_rejections
+
+    reacquired_event = event(
+        machine,
+        EventSource.PERCEPTION,
+        EventType.TARGET_REACQUIRED,
+        42,
+    )
+    assert machine.handle_event(reacquired_event).accepted
+    state_after_reacquisition = machine.snapshot
+
+    duplicate = machine.handle_event(reacquired_event)
+    assert not duplicate.accepted
+    assert duplicate.duplicate
+    assert machine.snapshot == state_after_reacquisition
+
+
+def test_target_reacquired_cannot_clear_execution_error_block():
+    machine = MissionStateMachine()
+    start_patrol(machine)
+    machine.handle_event(
+        event(
+            machine,
+            EventSource.PERCEPTION,
+            EventType.TARGET_CONFIRMED,
+            42,
+        )
+    )
+    error = machine.handle_event(
+        event(
+            machine,
+            EventSource.NAVIGATION,
+            EventType.EXECUTION_ERROR,
+            42,
+            "planner unavailable",
+        )
+    )
+    assert error.snapshot.block_cause == BlockCause.EXECUTION_ERROR
+
+    reacquired = machine.handle_event(
+        event(
+            machine,
+            EventSource.PERCEPTION,
+            EventType.TARGET_REACQUIRED,
+            42,
+        )
+    )
+    assert not reacquired.accepted
+    assert machine.snapshot == error.snapshot
+
+
+def test_blocked_mission_rejects_a_new_error_event():
+    machine = MissionStateMachine()
+    start_patrol(machine)
+    machine.handle_event(
+        event(
+            machine,
+            EventSource.PERCEPTION,
+            EventType.TARGET_CONFIRMED,
+            42,
+        )
+    )
+    loss = machine.handle_event(
+        event(
+            machine,
+            EventSource.PERCEPTION,
+            EventType.TARGET_LOST,
+            42,
+        )
+    )
+
+    error = machine.handle_event(
+        event(
+            machine,
+            EventSource.NAVIGATION,
+            EventType.EXECUTION_ERROR,
+            42,
+        )
+    )
+    assert not error.accepted
+    assert machine.snapshot == loss.snapshot
+
+
+def test_target_lost_and_reacquired_cycles_preserve_active_mission():
+    machine = MissionStateMachine()
+    start_patrol(machine)
+    machine.handle_event(
+        event(
+            machine,
+            EventSource.PERCEPTION,
+            EventType.TARGET_CONFIRMED,
+            42,
+        )
+    )
+    state_before_cycles = machine.snapshot.state
+    seq_before_cycles = machine.snapshot.state_seq
+
+    for cycle in range(2):
+        loss = machine.handle_event(
+            event(
+                machine,
+                EventSource.PERCEPTION,
+                EventType.TARGET_LOST,
+                42,
+                f"cycle {cycle}",
+            )
+        )
+        assert loss.accepted
+        assert loss.snapshot.block_cause == BlockCause.TARGET_LOST
+
+        reacquired = machine.handle_event(
+            event(
+                machine,
+                EventSource.PERCEPTION,
+                EventType.TARGET_REACQUIRED,
+                42,
+            )
+        )
+        assert reacquired.accepted
+        assert reacquired.snapshot.state == state_before_cycles
+        assert reacquired.snapshot.target_id == 42
+        assert not reacquired.snapshot.blocked
+
+    assert machine.snapshot.state_seq == seq_before_cycles + 4
 
 
 def test_duplicate_ready_event_is_idempotent():

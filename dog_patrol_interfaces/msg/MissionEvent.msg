@@ -11,6 +11,7 @@ uint8 UNAUTHORIZED=5
 uint8 TARGET_LOST=6
 uint8 EXECUTION_ERROR=7
 uint8 HANDLING_COMPLETE=8
+uint8 TARGET_REACQUIRED=9
 
 std_msgs/Header header
 uint32 observed_state_seq

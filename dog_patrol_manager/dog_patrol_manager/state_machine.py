@@ -13,6 +13,12 @@ class GlobalState(IntEnum):
     TRACK_INTRUDER = 5
 
 
+class BlockCause(IntEnum):
+    NONE = 0
+    TARGET_LOST = 1
+    EXECUTION_ERROR = 2
+
+
 class EventSource(IntEnum):
     PERCEPTION = 0
     NAVIGATION = 1
@@ -29,6 +35,7 @@ class EventType(IntEnum):
     TARGET_LOST = 6
     EXECUTION_ERROR = 7
     HANDLING_COMPLETE = 8
+    TARGET_REACQUIRED = 9
 
 
 @dataclass(frozen=True)
@@ -46,6 +53,7 @@ class MissionSnapshot:
     state: GlobalState
     target_id: int
     blocked: bool
+    block_cause: BlockCause
     detail: str
 
 
@@ -78,6 +86,7 @@ class MissionStateMachine:
         EventType.EXECUTION_ERROR: frozenset(
             {EventSource.PERCEPTION, EventSource.NAVIGATION}
         ),
+        EventType.TARGET_REACQUIRED: frozenset({EventSource.PERCEPTION}),
         EventType.HANDLING_COMPLETE: frozenset({EventSource.OPERATOR}),
     }
 
@@ -119,6 +128,7 @@ class MissionStateMachine:
         self._state = GlobalState.STARTUP
         self._target_id = 0
         self._blocked = False
+        self._block_cause = BlockCause.NONE
         self._detail = "waiting for perception and navigation ready"
 
         self._perception_ready = False
@@ -135,6 +145,7 @@ class MissionStateMachine:
             state=self._state,
             target_id=self._target_id,
             blocked=self._blocked,
+            block_cause=self._block_cause,
             detail=self._detail,
         )
 
@@ -180,6 +191,9 @@ class MissionStateMachine:
                 f"current is {self._state_seq}"
             )
 
+        if event == EventType.TARGET_REACQUIRED:
+            return self._handle_target_reacquired(source, raw_event, key)
+
         if self._blocked:
             return self._reject("mission is blocked")
 
@@ -215,6 +229,7 @@ class MissionStateMachine:
 
         self._state = next_state
         self._blocked = False
+        self._block_cause = BlockCause.NONE
         self._detail = (
             f"{previous_state.name} -> {next_state.name}: "
             f"{source.name}/{event.name}"
@@ -257,6 +272,7 @@ class MissionStateMachine:
         self._state = GlobalState.PATROL
         self._target_id = 0
         self._blocked = False
+        self._block_cause = BlockCause.NONE
         self._detail = "STARTUP -> PATROL: perception and navigation ready"
         self._advance_seq()
         return EventResult(
@@ -291,9 +307,45 @@ class MissionStateMachine:
 
         self._remember_event(key)
         self._blocked = True
+        self._block_cause = (
+            BlockCause.TARGET_LOST
+            if event == EventType.TARGET_LOST
+            else BlockCause.EXECUTION_ERROR
+        )
         detail = str(raw_event.detail).strip()
         suffix = f": {detail}" if detail else ""
         self._detail = f"blocked by {source.name}/{event.name}{suffix}"
+        self._advance_seq()
+        return EventResult(
+            accepted=True,
+            changed=True,
+            duplicate=False,
+            reason=self._detail,
+            snapshot=self.snapshot,
+        )
+
+    def _handle_target_reacquired(
+        self,
+        source: EventSource,
+        raw_event: MissionEventData,
+        key: EventKey,
+    ) -> EventResult:
+        if not self._blocked or self._block_cause != BlockCause.TARGET_LOST:
+            return self._reject("TARGET_REACQUIRED requires a TARGET_LOST block")
+
+        target_id = int(raw_event.target_id)
+        if self._target_id <= 0 or target_id != self._target_id:
+            return self._reject(
+                f"target_id {target_id} does not match active target "
+                f"{self._target_id}"
+            )
+
+        self._remember_event(key)
+        self._blocked = False
+        self._block_cause = BlockCause.NONE
+        self._detail = (
+            f"TARGET_LOST block cleared by {source.name}/TARGET_REACQUIRED"
+        )
         self._advance_seq()
         return EventResult(
             accepted=True,
