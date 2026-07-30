@@ -1,0 +1,24 @@
+<?xml version="1.0"?>
+<package format="3">
+  <name>dog_patrol_manager</name>
+  <version>0.1.0</version>
+  <description>Global mission supervisor for the M20 patrol workflow.</description>
+  <maintainer email="1193040110@qq.com">zby</maintainer>
+  <license>BSD-3-Clause</license>
+
+  <buildtool_depend>ament_python</buildtool_depend>
+
+  <depend>dog_patrol_interfaces</depend>
+  <depend>rclpy</depend>
+  <depend>std_msgs</depend>
+  <exec_depend>launch</exec_depend>
+  <exec_depend>launch_ros</exec_depend>
+
+  <test_depend>ament_flake8</test_depend>
+  <test_depend>ament_pep257</test_depend>
+  <test_depend>python3-pytest</test_depend>
+
+  <export>
+    <build_type>ament_python</build_type>
+  </export>
+</package>

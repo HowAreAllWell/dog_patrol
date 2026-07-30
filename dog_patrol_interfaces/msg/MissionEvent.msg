@@ -1,0 +1,20 @@
+uint8 SOURCE_PERCEPTION=0
+uint8 SOURCE_NAVIGATION=1
+uint8 SOURCE_OPERATOR=2
+
+uint8 READY=0
+uint8 TARGET_CONFIRMED=1
+uint8 TARGET_POSITION_READY=2
+uint8 ARRIVED_AND_STOPPED=3
+uint8 AUTHORIZED=4
+uint8 UNAUTHORIZED=5
+uint8 TARGET_LOST=6
+uint8 EXECUTION_ERROR=7
+uint8 HANDLING_COMPLETE=8
+
+std_msgs/Header header
+uint32 observed_state_seq
+uint32 target_id
+uint8 source
+uint8 event
+string detail
