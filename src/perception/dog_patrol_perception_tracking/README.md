@@ -374,7 +374,9 @@ ros2 run vision_demo_host offline_eval_recordings \
 当 `video.mkv` 同目录有 `metadata.json` 时，工具只接受 `complete` 的 FFV1/MKV capture metadata，
 并校验 `counts.written_frames`、`frame_timestamps.csv` 行数、capture index/source timestamp 单调性，
 以及实际从首帧到末帧解码出的帧数。任何不一致都会在 `summary.json`/`summary.md` 和进程退出码中
-显式失败。若没有 capture metadata，目录发现优先 `video.mkv`。历史 `video.mp4` 只保留为
+显式失败。若没有 capture metadata，目录发现优先 `video.mkv`。MP4 只允许
+`orin_hik_h264_MOT/.../video.mp4` historical migration 路径，并标记为 `historical_h264`；
+其他 MP4 和非 MKV 扩展明确拒绝。该路径只保留为
 `docs/issue82_ffv1_offline_eval_baseline.md` 记录的 migration regression 输入，不是默认或 canonical 数据集。
 
 overlay 是结果工件，不是 source dataset。四种独立模式如下；所有 CSV 和可选 overlay 都只能写入

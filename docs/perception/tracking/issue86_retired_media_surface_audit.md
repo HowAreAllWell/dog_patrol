@@ -28,7 +28,9 @@
 
 ## 历史兼容边界
 
-`OfflineEvalInput` 保留 `video.mp4` discovery 和 `historical_h264` source kind，仅用于迁移回归。
+`OfflineEvalInput` 只为路径组件属于 `orin_hik_h264_MOT` 且文件名为 `video.mp4` 的输入保留
+discovery，并统一标记为 `historical_h264`。其他 MP4 和非 MKV 显式视频会失败，不能作为未标记
+的 `explicit_video` 穿透。该边界仅用于迁移回归。
 对应自动化在 `test_offline_eval_input`，实际历史证据在
 `docs/issue82_ffv1_offline_eval_baseline.md` 和 `docs/issue85_bayer_preprocess_audit.md`。
 `orin_hik_h264_MOT` 问题复盘、架构记录、旧 worklog 与上述 evidence docs 保持历史原文；这些内容
@@ -49,5 +51,5 @@ builder。源码树与 CMake 不再含 `record_test_set` / `bench_gmc_rtsp`，�
 - `orin_hik_h264_MOT/03` historical migration：显式指定 `data/datasets` 根，539/539 帧解码通过。
 
 最终 `colcon build`、全量 `colcon test` 和 `colcon test-result --verbose --all` 通过：
-47 个 CTest targets、368 tests、0 errors/failures/skipped。`git diff --check` 与 shell syntax
+47 个 CTest targets、371 tests、0 errors/failures/skipped。`git diff --check` 与 shell syntax
 检查通过。

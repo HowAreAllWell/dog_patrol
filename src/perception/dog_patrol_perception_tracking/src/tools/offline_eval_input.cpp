@@ -197,6 +197,18 @@ bool IsWithin(const std::filesystem::path &ancestor, const std::filesystem::path
   return ancestor_it == resolved_ancestor.end();
 }
 
+bool IsHistoricalH264MigrationPath(const std::filesystem::path &video_path) {
+  bool has_historical_dataset_component = false;
+  for (const auto &component : video_path.lexically_normal()) {
+    if (component == "orin_hik_h264_MOT") {
+      has_historical_dataset_component = true;
+      break;
+    }
+  }
+  return has_historical_dataset_component &&
+         ToLower(video_path.filename().string()) == "video.mp4";
+}
+
 }  // namespace
 
 OfflineEvalInputDiscovery DiscoverOfflineEvalInput(const OfflineEvalInputRequest &request) {
@@ -233,7 +245,19 @@ OfflineEvalInputDiscovery DiscoverOfflineEvalInput(const OfflineEvalInputRequest
   }
 
   const auto metadata_path = input.video_path.parent_path() / "metadata.json";
-  const bool source_is_mkv = ToLower(input.video_path.extension().string()) == ".mkv";
+  const std::string source_extension = ToLower(input.video_path.extension().string());
+  const bool source_is_mkv = source_extension == ".mkv";
+  if (!source_is_mkv && source_extension != ".mp4") {
+    discovery.error = "Explicit replay video must be FFV1/MKV or historical MP4: " +
+                      input.video_path.string();
+    return discovery;
+  }
+  if (source_extension == ".mp4" && !IsHistoricalH264MigrationPath(input.video_path)) {
+    discovery.error =
+        "MP4 replay is limited to historical orin_hik_h264_MOT migration data: " +
+        input.video_path.string();
+    return discovery;
+  }
   if (source_is_mkv && std::filesystem::exists(metadata_path)) {
     std::string metadata_text;
     if (!ReadTextFile(metadata_path, &metadata_text, &discovery.error)) {
@@ -263,9 +287,7 @@ OfflineEvalInputDiscovery DiscoverOfflineEvalInput(const OfflineEvalInputRequest
       return discovery;
     }
     input.source_kind = OfflineEvalSourceKind::kFfv1Capture;
-  } else if (!request.explicit_video_path.empty()) {
-    input.source_kind = OfflineEvalSourceKind::kExplicitVideo;
-  } else if (ToLower(input.video_path.extension().string()) == ".mp4") {
+  } else if (source_extension == ".mp4") {
     input.source_kind = OfflineEvalSourceKind::kHistoricalH264;
   } else {
     input.source_kind = OfflineEvalSourceKind::kExplicitVideo;

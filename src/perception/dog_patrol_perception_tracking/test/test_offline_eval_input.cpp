@@ -87,6 +87,39 @@ TEST_F(OfflineEvalInputTest, ExplicitVideoPathWinsOverDatasetDefault) {
   EXPECT_EQ(discovery.input.source_kind, vision_demo_host::tools::OfflineEvalSourceKind::kExplicitVideo);
 }
 
+TEST_F(OfflineEvalInputTest, ExplicitHistoricalMp4UsesMigrationSourceKind) {
+  const auto historical_video = root_ / "orin_hik_h264_MOT" / "03" / "video.mp4";
+  WriteFile(historical_video, "historical H264 placeholder");
+
+  const auto discovery = vision_demo_host::tools::DiscoverOfflineEvalInput({{}, historical_video});
+
+  ASSERT_TRUE(discovery.ok) << discovery.error;
+  EXPECT_EQ(discovery.input.source_kind,
+            vision_demo_host::tools::OfflineEvalSourceKind::kHistoricalH264);
+}
+
+TEST_F(OfflineEvalInputTest, RejectsMp4OutsideHistoricalMigrationDataset) {
+  const auto unrelated_mp4 = root_ / "external" / "clip.mp4";
+  WriteFile(unrelated_mp4, "unrelated MP4 placeholder");
+
+  const auto discovery = vision_demo_host::tools::DiscoverOfflineEvalInput({{}, unrelated_mp4});
+
+  EXPECT_FALSE(discovery.ok);
+  EXPECT_NE(discovery.error.find("orin_hik_h264_MOT migration data"), std::string::npos);
+}
+
+TEST_F(OfflineEvalInputTest, RejectsUnsupportedExplicitVideoExtension) {
+  const auto unsupported_video = root_ / "external" / "clip.avi";
+  WriteFile(unsupported_video, "unsupported video placeholder");
+
+  const auto discovery =
+      vision_demo_host::tools::DiscoverOfflineEvalInput({{}, unsupported_video});
+
+  EXPECT_FALSE(discovery.ok);
+  EXPECT_NE(discovery.error.find("must be FFV1/MKV or historical MP4"),
+            std::string::npos);
+}
+
 TEST_F(OfflineEvalInputTest, RetainsHistoricalMp4FallbackForMigrationRegression) {
   const auto dataset_dir = root_ / "orin_hik_h264_MOT" / "01";
   WriteFile(dataset_dir / "video.mp4", "historical H264 placeholder");
