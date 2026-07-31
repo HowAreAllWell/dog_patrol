@@ -196,16 +196,28 @@ supervisor；真人 live overlay 继续引用 #83 已接受的现场证据。
 ### 当前环境吞吐边界
 
 #85/#93 已接受的 headless、无 override、balanced full-live 证据为稳定 29.97–30.04 FPS，只有启动期
-两个 frame discontinuity。本次复验时 GNOME Shell、远程桌面、Xorg 和 terminal 持续占用 CPU，且
-无法以当前用户执行 `jetson_clocks` 锁频：
+两个 frame discontinuity。#87 初次复验时 GNOME Shell、远程桌面、Xorg 和 terminal 持续占用 CPU，
+且 Orin 未锁频：
 
 - 未绑核 inference-only 约 22 FPS，最终 296 frames、107 estimated drops；
 - `taskset -c 0-3` 后约 27–28 FPS，最终观测 275 frames、35 estimated drops；
 - preview+record 约 24–25 FPS，diagnostic writer 保持 bounded queue 且无 render/write error。
 
-因此本次不把当前桌面负载下的实时 run 写成 30 FPS 通过，也没有推翻同硬件、干净 headless 条件下
-已接受的 #85/#93 30 FPS baseline。部署验收应在关闭远程桌面负载并锁定性能模式后复跑 35 秒
-inference-only；功能链路、无损 capture 和非阻塞输出本次均已通过。
+随后在同一台本机 Orin 上切换 MAXN 并锁定频率，保持远程桌面和桌面进程运行；sysfs 观测到三个 CPU
+policy 的 min/max/current 均为 2201600 kHz，GPU min/max/current 均为 1300500000 Hz。按 #93 的
+headless、无 override、balanced full-live 命令连续复跑两次 35 秒：
+
+- 第一轮 32 个稳态报告为 29.94–30.60 FPS，均值 30.026 FPS；最终观测 977 frames，
+  acquisition failure/MVS lost packet 均为 0，2 dropped/1 non-contiguous 只在启动期出现；
+- 第二轮 32 个稳态报告为 29.91–30.85 FPS，均值 30.034 FPS；最终观测 975 frames，
+  acquisition failure/MVS lost packet 均为 0，1 dropped/1 non-contiguous 只在启动期出现；
+- 两轮 CPU 均保持 2201 MHz；CPU 最高 53.375C、GPU 最高 48.468C，未见热限制迹象；测试期间
+  GNOME Shell、`gnome-remote-desktop-daemon` 和 Xorg 持续运行。
+
+完整忽略日志位于 `log/locked_clocks_remote_desktop_20260731_214448/` 和
+`log/locked_clocks_remote_desktop_repeat_20260731_214905/`。这说明初次 22–28 FPS 不应归因于必须关闭
+远程桌面；在当前桌面负载下，锁定性能模式和频率后仍能稳定达到 30 FPS。正式运行/性能验收应先核验
+MAXN 与实际 CPU/GPU 频率，关闭远程桌面不是当前基线的前置条件。
 
 ### 当前 HEAD offline replay
 
