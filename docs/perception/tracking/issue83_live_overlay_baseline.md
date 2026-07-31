@@ -50,9 +50,50 @@ log/issue83_live_modes_20260731/record_only_final_sha256.txt
 data/diagnostics/live_overlays/issue83_record_final_20260731_010442.mkv
 ```
 
-## 仍需图形验收
+## Orin X11 mode matrix（2026-07-31）
 
-本环境 `DISPLAY` 为空。因此 `preview`、`preview_record` 还没有真实窗口人工验收，Issue 必须保持 OPEN。接入本地显示器的 Orin 会话后，分别执行以下命令至少 30 秒并目检同一当前 overlay；第二条再对输出运行 `ffprobe -count_frames`：
+`DISPLAY=:1` 的本地 X11 会话已可用。对同一台 AGX Orin / `MV-CU013-A0UC`、1280x1024@30、`balanced` /
+`smoothing=false`、真实 TensorRT engine 和真实 detector/tracker/identity 执行了四模式现场采样。所有运行均在
+SIGINT 后输出 `overlay_metrics phase=final`。
+
+| mode | 运行时长 | capture p50/p95/p99 (ms) | inference p50/p95/p99 (ms) | overlay p50/p95/p99 (ms) | final 结果 |
+| --- | ---: | --- | --- | --- | --- |
+| `inference_only` | 35 s | acquisition 0.035/0.160/1.697; conversion 10.124/10.309/10.486; copy 0.623/0.753/0.901 | 28.305/35.305/38.544 | N/A | 22.98 FPS；不启动 worker，output counters 全为 0。 |
+| `preview` | 65 s | acquisition 0.035/2.118/7.680; conversion 9.905/10.422/10.830; copy 0.599/0.722/0.937 | 25.683/32.430/34.314 | queue wait 0.052/0.084/0.311; render 0.718/1.044/1.419 | `submitted/enqueued/rendered/previewed=1530/1530/1530/1530` (24.24 FPS), all queue/render/write drops and errors 0. |
+| `record` | 35 s | acquisition 0.031/7.756/11.016; conversion 4.161/6.928/8.681; copy 0.498/1.449/2.244 | 20.118/28.808/34.839 | queue wait 11.070/54.370/73.652; render 0.672/0.901/1.188; write 30.690/43.824/48.656 | `submitted/enqueued/rendered/written=977/977/977/977` (29.36 FPS), all queue/render/write drops and errors 0. |
+| `preview_record` | 45 s | acquisition 0.030/5.975/9.763; conversion 4.565/7.799/9.876; copy 0.518/1.921/2.904 | 22.140/31.573/35.660 | queue wait 149.243/175.680/186.616; render 0.681/0.905/1.161; write 32.903/46.837/52.067 | `submitted/enqueued/rendered/previewed/written=1202/1011/1011/1011/1011`; 191 bounded queue drops, no render/write drop or error. |
+
+`preview` 的 X11 窗口 `vision_demo_host` 已实际映射并用屏幕截图目检；画布持续刷新，当前现场画面的
+primary line 为 `IDLE id=-1 raw=-1`。`preview_record` 的第一个 decoded FFV1 frame 有相同的当前画布和
+primary line，因此未把 preview 与 recording 当作两套 overlay 实现。
+
+两个结果 artifact 均在可信 diagnostic root 下，`ffprobe -count_frames` 与 final worker `written`
+完全一致：
+
+| mode | artifact | `ffprobe` | SHA-256 |
+| --- | --- | --- | --- |
+| `record` | `issue83_record_only_20260731_160500.mkv` | FFV1, 1280x1024, `bgr0`, 30/1, 977 decoded frames | `2d29c7c279a7dab52631c66238817f256c7d37383e5414465dfdb6d51a7261c6` |
+| `preview_record` | `issue83_preview_record_20260731_155700.mkv` | FFV1, 1280x1024, `bgr0`, 30/1, 1011 decoded frames | `509139cb8af61f6ac7e5ad190d776d6e0e4912a136718eaa9dbbd6a23b3f2b43` |
+
+Raw local evidence (ignored runtime output):
+
+```text
+log/issue83_graphical_acceptance_20260731/inference_only_current.log
+log/issue83_graphical_acceptance_20260731/preview_window_inspection.log
+log/issue83_graphical_acceptance_20260731/preview_active_window.png
+log/issue83_graphical_acceptance_20260731/record_only_current.log
+log/issue83_graphical_acceptance_20260731/preview_record.log
+log/issue83_graphical_acceptance_20260731/*_ffprobe.txt
+log/issue83_graphical_acceptance_20260731/*_sha256.txt
+data/diagnostics/live_overlays/issue83_{record_only,preview_record}_20260731_*.mkv
+```
+
+## 仍需现场人像证据
+
+图形 mode matrix 已完成，但本次相机视场内没有 person：四次运行的 `runtime_monitor` 都是
+`det=0 filtered=0 tracks=0 state=IDLE`。因此这批 artifact 只能目检 IDLE overlay，不能代替真实 person 的
+track/identity/primary overlay 验收。Issue 必须保持 OPEN / `ready-for-human`，直到现场将 person 置入视场后，至少在
+`preview` 和 `preview_record` 再做一次目检并保存同样的 final metrics/artifact 对账。
 
 ```bash
 ros2 run vision_demo_host vision_demo_node --ros-args \
