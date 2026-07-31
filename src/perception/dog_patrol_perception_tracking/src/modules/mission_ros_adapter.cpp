@@ -5,6 +5,7 @@
 #include <limits>
 #include <stdexcept>
 #include <utility>
+#include <vector>
 
 namespace vision_demo_host {
 namespace {
@@ -287,8 +288,22 @@ void MissionRosAdapter::ProcessFrame(const MissionCoordinator::FrameInput &input
     return;
   }
 
-  MissionCoordinator::FrameInput current_input = input;
-  current_input.mission = latest_mission_.value();
+  // The coordinator's fresh-observation latch must only see geometry that can
+  // actually be represented by the shared TargetBoundingBox contract. Otherwise
+  // an off-image identity could reset loss timing while no bbox is publishable.
+  std::vector<IdentityObservation> projectable_identities;
+  projectable_identities.reserve(input.identities.size());
+  for (const auto &identity : input.identities) {
+    FreshTargetBoxAction candidate;
+    candidate.target_id = identity.semantic_id;
+    candidate.bbox = identity.bbox;
+    candidate.confidence = identity.confidence;
+    if (TargetBoxFromAction(candidate, metadata).has_value()) {
+      projectable_identities.push_back(identity);
+    }
+  }
+  const MissionCoordinator::FrameInput current_input{
+      latest_mission_.value(), projectable_identities, input.primary, input.source_time};
   const MissionCoordinator::Output output = coordinator_.Update(current_input);
   for (const auto &event : output.events) {
     mission_event_publisher_->publish(

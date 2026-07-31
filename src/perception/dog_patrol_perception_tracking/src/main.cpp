@@ -622,10 +622,8 @@ class VisionDemoNode : public rclcpp::Node {
     return metadata;
   }
 
-  vision_demo_host::MissionCoordinator::TimePoint SourceTime(
-      const vision_demo_host::CameraIngest::AcquiredFrame &frame) const {
-    return vision_demo_host::MissionCoordinator::TimePoint{
-        std::chrono::nanoseconds{frame.source_timestamp_ns}};
+  vision_demo_host::MissionCoordinator::TimePoint MonotonicSourceTime() const {
+    return vision_demo_host::MissionCoordinator::Clock::now();
   }
 
   void Tick() {
@@ -661,6 +659,7 @@ class VisionDemoNode : public rclcpp::Node {
     }
     mission_ros_adapter_->detection_tracking_readiness().ReportRuntimeStatus({true, true, {}});
 
+    const auto source_time = MonotonicSourceTime();
     const auto mission = mission_ros_adapter_->CurrentMission();
     ApplyMissionPrimaryLifecycle(mission, mission_ros_adapter_->PreviousMission());
     const auto primary_prev = primary_manager_.GetState();
@@ -669,7 +668,7 @@ class VisionDemoNode : public rclcpp::Node {
         &frame);
     auto primary = mission.has_value() && mission->phase == vision_demo_host::MissionPhase::kPatrol
                        ? primary_manager_.UpdateForPatrol(identity_result.identities,
-                                                          SourceTime(acquired_frame))
+                                                          source_time)
                        : primary_manager_.Update(identity_result.identities);
     const auto source_metadata = SourceMetadata(acquired_frame);
     if (mission.has_value() && mission->phase == vision_demo_host::MissionPhase::kPatrol) {
@@ -677,7 +676,7 @@ class VisionDemoNode : public rclcpp::Node {
     }
     mission_ros_adapter_->ProcessFrame(
         {vision_demo_host::MissionSnapshot{}, identity_result.identities, primary,
-         SourceTime(acquired_frame)},
+         source_time},
         source_metadata);
 
     vision_demo_host::BearingOutput output{};

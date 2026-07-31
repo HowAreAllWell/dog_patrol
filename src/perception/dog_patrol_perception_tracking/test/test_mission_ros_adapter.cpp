@@ -346,6 +346,49 @@ TEST_F(MissionRosAdapterTest, EmitsLossForTheLatestStateSequenceAfterTargetState
   (void)event_subscription;
 }
 
+TEST_F(MissionRosAdapterTest, TreatsAnOffImageIdentityAsMissingForTargetLoss) {
+  auto adapter_node = std::make_shared<rclcpp::Node>("mission_ros_adapter_off_image_loss");
+  MissionRosAdapter::Config config;
+  config.mission_state_topic = "/issue84/off_image_loss/mission/state";
+  config.mission_event_topic = "/issue84/off_image_loss/mission/event";
+  config.target_bbox_topic = "/issue84/off_image_loss/perception/selected_target_bbox";
+  MissionRosAdapter adapter(*adapter_node, config);
+
+  auto probe = std::make_shared<rclcpp::Node>("mission_ros_adapter_off_image_loss_probe");
+  std::vector<MissionEventMessage> events;
+  std::vector<TargetBoundingBoxMessage> boxes;
+  auto event_subscription = probe->create_subscription<MissionEventMessage>(
+      config.mission_event_topic, MissionRosAdapter::MissionEventQos(),
+      [&events](const MissionEventMessage::SharedPtr message) { events.push_back(*message); });
+  auto bbox_subscription = probe->create_subscription<TargetBoundingBoxMessage>(
+      config.target_bbox_topic, MissionRosAdapter::TargetBoundingBoxQos(),
+      [&boxes](const TargetBoundingBoxMessage::SharedPtr message) { boxes.push_back(*message); });
+  rclcpp::executors::SingleThreadedExecutor executor;
+  executor.add_node(adapter_node);
+  executor.add_node(probe);
+
+  ASSERT_TRUE(adapter.StoreMissionState(
+      State(102U, MissionStateMessage::CONFIRM_TARGET, 42U)));
+  const auto source_time = MissionCoordinator::TimePoint{};
+  adapter.ProcessFrame({MissionSnapshot{}, {TrustedPerson(42, 7)}, LockedPrimary(42, 7), source_time},
+                       Metadata(1710000000000000000ULL));
+  ASSERT_TRUE(SpinUntil(executor, [&boxes] { return boxes.size() == 1U; }));
+
+  const auto off_image_person = TrustedPerson(42, 7, cv::Rect2f{700.0F, 2.0F, 4.0F, 4.0F});
+  adapter.ProcessFrame({MissionSnapshot{}, {off_image_person}, LockedPrimary(42, 7),
+                        source_time + std::chrono::milliseconds{500}},
+                       Metadata(1710000000500000000ULL));
+  ASSERT_TRUE(SpinUntil(executor, [&events] { return events.size() == 1U; }));
+  EXPECT_EQ(events.front().event, MissionEventMessage::TARGET_LOST);
+  EXPECT_EQ(events.front().target_id, 42U);
+  EXPECT_EQ(boxes.size(), 1U);
+
+  executor.remove_node(probe);
+  executor.remove_node(adapter_node);
+  (void)event_subscription;
+  (void)bbox_subscription;
+}
+
 TEST_F(MissionRosAdapterTest, ExplicitAuthorizationConfigurationAllowsReady) {
   auto adapter_node = std::make_shared<rclcpp::Node>("mission_ros_adapter_explicit_authorization");
   MissionRosAdapter::Config config;
