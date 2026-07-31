@@ -219,6 +219,37 @@ PrimaryTargetResult PrimaryTargetManager::UpdateForPatrol(const std::vector<Iden
   return UpdateInternal(identities, true);
 }
 
+PrimaryTargetResult PrimaryTargetManager::UpdateForMission(
+    const std::vector<IdentityObservation> &identities,
+    const std::optional<MissionSnapshot> &mission,
+    const std::optional<MissionSnapshot> &previous_mission,
+    const TimePoint now) {
+  if (!mission.has_value()) {
+    return Update(identities);
+  }
+
+  if (mission->phase == MissionPhase::kPatrol &&
+      (!last_mission_for_primary_.has_value() ||
+       last_mission_for_primary_->state_seq != mission->state_seq ||
+       last_mission_for_primary_->phase != MissionPhase::kPatrol)) {
+    int handled_semantic_id = -1;
+    const auto preceding_mission =
+        previous_mission.has_value() && previous_mission->state_seq != mission->state_seq
+            ? previous_mission
+            : last_mission_for_primary_;
+    if (preceding_mission.has_value() && preceding_mission->target_id > 0 &&
+        (preceding_mission->phase == MissionPhase::kVerifyIdentity ||
+         preceding_mission->phase == MissionPhase::kTrackIntruder)) {
+      handled_semantic_id = preceding_mission->target_id;
+    }
+    ResetForPatrolCycle(handled_semantic_id);
+  }
+
+  last_mission_for_primary_ = mission;
+  return mission->phase == MissionPhase::kPatrol ? UpdateForPatrol(identities, now)
+                                                 : Update(identities);
+}
+
 PrimaryTargetResult PrimaryTargetManager::UpdateInternal(const std::vector<IdentityObservation> &identities,
                                                          const bool require_mission_eligibility) {
   last_decision_reason_.clear();

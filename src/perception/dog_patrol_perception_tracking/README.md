@@ -116,6 +116,13 @@ TARGET_CONFIRMED、当前帧 bbox、TARGET_LOST 与 TARGET_REACQUIRED。该 fixt
 默认 `smoke.reacquire_retention_sec=30` 只为给 CLI 操作留出时间；production node 仍使用
 `target.reacquire_retention_sec=6`。
 
+完整 lifecycle 回归由 CTest `test_mission_pipeline_integration` 覆盖。它启动安装后的真实
+`dog_patrol_manager mission_supervisor`，再通过 production `PrimaryTargetManager`、
+`MissionCoordinator` 和 `MissionRosAdapter` 验证 STARTUP readiness、PATROL 首帧确认、fresh bbox、
+loss/block/reacquire/unblock、VERIFY、handled suppression 和 next-target selection。运行测试前必须
+source `/path/to/workspace/dog_patrol/install/setup.bash`；fixture 使用独立 ROS domain，并在退出时清理
+整个 supervisor process group。验收细节见 `docs/issue87_integrated_acceptance.md`。
+
 建议 engine 路径：
 - `/path/to/my_workplace/vision_demo_ws/assets/models/engines/orin_jp621_trt_local/yolo26n_fp16_640.engine`
 

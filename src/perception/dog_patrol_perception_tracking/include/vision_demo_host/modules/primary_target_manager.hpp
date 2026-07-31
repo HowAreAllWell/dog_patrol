@@ -6,6 +6,7 @@
 #include <unordered_map>
 #include <vector>
 
+#include "vision_demo_host/modules/mission_coordinator.hpp"
 #include "vision_demo_host/types.hpp"
 
 namespace vision_demo_host {
@@ -43,6 +44,16 @@ class PrimaryTargetManager {
   // for both runtime callers and tests.
   PrimaryTargetResult UpdateForPatrol(const std::vector<IdentityObservation> &identities, TimePoint now);
 
+  // Applies the authoritative mission transition and primary selection as one
+  // public runtime operation. Returning from verification or intruder tracking
+  // to a new patrol cycle marks the prior semantic target handled before the
+  // first patrol frame is selected.
+  PrimaryTargetResult UpdateForMission(
+      const std::vector<IdentityObservation> &identities,
+      const std::optional<MissionSnapshot> &mission,
+      const std::optional<MissionSnapshot> &previous_mission,
+      TimePoint now);
+
   PrimaryTargetResult GetState() const;
   const std::string &LastDecisionReason() const { return last_decision_reason_; }
   const std::string &LastRejectReason() const { return last_reject_reason_; }
@@ -73,6 +84,7 @@ class PrimaryTargetManager {
   std::string last_decision_reason_;
   std::string last_reject_reason_;
   std::unordered_map<int, std::optional<TimePoint>> handled_identity_absence_started_at_;
+  std::optional<MissionSnapshot> last_mission_for_primary_;
 };
 
 }  // namespace vision_demo_host

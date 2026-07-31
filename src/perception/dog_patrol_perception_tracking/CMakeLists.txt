@@ -221,6 +221,20 @@ if(BUILD_TESTING)
     ament_target_dependencies(test_mission_ros_adapter rclcpp dog_patrol_interfaces)
   endif()
 
+  add_executable(test_mission_pipeline_integration_driver
+    test/mission_pipeline_integration_driver.cpp)
+  target_compile_features(test_mission_pipeline_integration_driver PUBLIC cxx_std_17)
+  target_include_directories(test_mission_pipeline_integration_driver PRIVATE include)
+  target_link_libraries(test_mission_pipeline_integration_driver ${PROJECT_NAME}_modules)
+  ament_target_dependencies(test_mission_pipeline_integration_driver rclcpp dog_patrol_interfaces)
+  add_test(
+    NAME test_mission_pipeline_integration
+    COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/test/test_mission_pipeline_integration.sh
+            $<TARGET_FILE:test_mission_pipeline_integration_driver>)
+  set_tests_properties(test_mission_pipeline_integration PROPERTIES
+    ENVIRONMENT "ROS_DOMAIN_ID=187;ROS_LOCALHOST_ONLY=1"
+    TIMEOUT 45)
+
   ament_add_gtest(test_primary_recovery_debug test/test_primary_recovery_debug.cpp)
   if(TARGET test_primary_recovery_debug)
     target_compile_features(test_primary_recovery_debug PUBLIC cxx_std_17)

@@ -3,6 +3,7 @@
 #include <chrono>
 #include <vector>
 
+#include "vision_demo_host/modules/mission_coordinator.hpp"
 #include "vision_demo_host/modules/primary_target_manager.hpp"
 
 namespace {
@@ -84,6 +85,49 @@ TEST(PrimaryTargetManagerTest, PatrolCycleExcludesHandledIdentityAndChoosesNextL
   EXPECT_EQ(state.primary_target_id, 22);
   ASSERT_TRUE(state.primary_track.has_value());
   EXPECT_EQ(state.primary_track->id, 202);
+  EXPECT_EQ(handled.semantic_id, 11);
+  EXPECT_EQ(handled.supporting_raw_track_id, 101);
+}
+
+TEST(PrimaryTargetManagerTest,
+     MissionReturnToPatrolMarksHandledTargetAndSelectsNextEligibleOnFirstFrame) {
+  using namespace std::chrono_literals;
+
+  vision_demo_host::PrimaryTargetManager::Config cfg;
+  cfg.min_person_area_px = 100.0F;
+  vision_demo_host::PrimaryTargetManager mgr(cfg);
+  const vision_demo_host::PrimaryTargetManager::TimePoint start{};
+  const auto handled =
+      MakeIdentity(11, 101, vision_demo_host::ClassId::kPerson, cv::Rect2f(0, 0, 80, 80));
+  const auto next_eligible =
+      MakeIdentity(22, 202, vision_demo_host::ClassId::kPerson, cv::Rect2f(0, 0, 60, 60));
+
+  const vision_demo_host::MissionSnapshot first_patrol{
+      10U, vision_demo_host::MissionPhase::kPatrol, 0, false,
+      vision_demo_host::MissionBlockCause::kNone};
+  const auto first = mgr.UpdateForMission(
+      {handled, next_eligible}, first_patrol, std::nullopt, start);
+  ASSERT_TRUE(first.primary_track.has_value());
+  ASSERT_EQ(first.primary_target_id, 11);
+
+  const vision_demo_host::MissionSnapshot verification{
+      11U, vision_demo_host::MissionPhase::kVerifyIdentity, 11, false,
+      vision_demo_host::MissionBlockCause::kNone};
+  const auto verified = mgr.UpdateForMission(
+      {handled, next_eligible}, verification, first_patrol, start + 1ms);
+  ASSERT_EQ(verified.primary_target_id, 11);
+
+  const vision_demo_host::MissionSnapshot next_patrol{
+      12U, vision_demo_host::MissionPhase::kPatrol, 0, false,
+      vision_demo_host::MissionBlockCause::kNone};
+  const auto selected = mgr.UpdateForMission(
+      {handled, next_eligible}, next_patrol, verification, start + 2ms);
+
+  EXPECT_FALSE(mgr.IsMissionEligible(handled));
+  ASSERT_TRUE(selected.primary_track.has_value());
+  EXPECT_EQ(selected.state, vision_demo_host::PrimaryState::kLocked);
+  EXPECT_EQ(selected.primary_target_id, 22);
+  EXPECT_EQ(selected.primary_track->id, 202);
   EXPECT_EQ(handled.semantic_id, 11);
   EXPECT_EQ(handled.supporting_raw_track_id, 101);
 }

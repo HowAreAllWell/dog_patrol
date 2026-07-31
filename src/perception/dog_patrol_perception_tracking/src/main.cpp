@@ -545,32 +545,6 @@ class VisionDemoNode : public rclcpp::Node {
     }
   }
 
-  void ApplyMissionPrimaryLifecycle(
-      const std::optional<vision_demo_host::MissionSnapshot> &mission,
-      const std::optional<vision_demo_host::MissionSnapshot> &previous_mission) {
-    if (!mission.has_value()) {
-      return;
-    }
-
-    if (mission->phase == vision_demo_host::MissionPhase::kPatrol &&
-        (!last_mission_for_primary_.has_value() ||
-         last_mission_for_primary_->state_seq != mission->state_seq ||
-         last_mission_for_primary_->phase != vision_demo_host::MissionPhase::kPatrol)) {
-      int handled_semantic_id = -1;
-      const auto preceding_mission = previous_mission.has_value() &&
-                                           previous_mission->state_seq != mission->state_seq
-                                       ? previous_mission
-                                       : last_mission_for_primary_;
-      if (preceding_mission.has_value() && preceding_mission->target_id > 0 &&
-          (preceding_mission->phase == vision_demo_host::MissionPhase::kVerifyIdentity ||
-           preceding_mission->phase == vision_demo_host::MissionPhase::kTrackIntruder)) {
-        handled_semantic_id = preceding_mission->target_id;
-      }
-      primary_manager_.ResetForPatrolCycle(handled_semantic_id);
-    }
-    last_mission_for_primary_ = mission;
-  }
-
   vision_demo_host::SourceFrameMetadata SourceMetadata(
       const vision_demo_host::CameraIngest::AcquiredFrame &frame) const {
     vision_demo_host::SourceFrameMetadata metadata;
@@ -622,15 +596,12 @@ class VisionDemoNode : public rclcpp::Node {
 
     const auto source_time = MonotonicSourceTime();
     const auto mission = mission_ros_adapter_->CurrentMission();
-    ApplyMissionPrimaryLifecycle(mission, mission_ros_adapter_->PreviousMission());
     const auto primary_prev = primary_manager_.GetState();
     auto identity_result = identity_manager_.Update(
         vision_demo_host::TrackletObservationsFromTracks(tracks), tracker_.LastTrackletHypotheses(), primary_prev,
         &frame);
-    auto primary = mission.has_value() && mission->phase == vision_demo_host::MissionPhase::kPatrol
-                       ? primary_manager_.UpdateForPatrol(identity_result.identities,
-                                                          source_time)
-                       : primary_manager_.Update(identity_result.identities);
+    auto primary = primary_manager_.UpdateForMission(
+        identity_result.identities, mission, mission_ros_adapter_->PreviousMission(), source_time);
     const auto source_metadata = SourceMetadata(acquired_frame);
     if (mission.has_value() && mission->phase == vision_demo_host::MissionPhase::kPatrol) {
       mission_ros_adapter_->PublishTargetConfirmed(mission.value(), primary, source_metadata);
@@ -687,7 +658,6 @@ class VisionDemoNode : public rclcpp::Node {
   std::unique_ptr<vision_demo_host::MissionRosAdapter> mission_ros_adapter_;
   rclcpp::CallbackGroup::SharedPtr mission_state_callback_group_;
   std::string camera_optical_frame_id_;
-  std::optional<vision_demo_host::MissionSnapshot> last_mission_for_primary_;
   std::mutex pipeline_mutex_;
   vision_demo_host::PrimaryTargetManager primary_manager_;
   vision_demo_host::IdentityManager identity_manager_;
