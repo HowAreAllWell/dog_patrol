@@ -135,6 +135,28 @@ TEST_F(OfflineEvalInputTest, OverlayArtifactsCannotBePlacedInsideSourceDataset) 
   EXPECT_NE(plan.error.find("source dataset"), std::string::npos);
 }
 
+TEST_F(OfflineEvalInputTest, OverlayArtifactsCannotReachSourceDatasetThroughSymlink) {
+  const auto take_dir = root_ / "capture" / "take_001";
+  const auto results_link = root_ / "results_link";
+  WriteCompletedFfv1Take(take_dir);
+
+  std::error_code filesystem_error;
+  std::filesystem::create_directory_symlink(take_dir, results_link, filesystem_error);
+  if (filesystem_error) {
+    GTEST_SKIP() << "Cannot create temporary symlink: " << filesystem_error.message();
+  }
+
+  const auto discovery = vision_demo_host::tools::DiscoverOfflineEvalInput({take_dir, {}});
+  ASSERT_TRUE(discovery.ok) << discovery.error;
+
+  const auto plan = vision_demo_host::tools::PlanOfflineEvalOverlayArtifacts(
+      discovery.input, results_link / "issue82_run" / "s01", true, "eval_overlay.mkv");
+
+  EXPECT_FALSE(plan.ok);
+  EXPECT_NE(plan.error.find("source dataset"), std::string::npos);
+  EXPECT_FALSE(std::filesystem::exists(take_dir / "issue82_run"));
+}
+
 TEST_F(OfflineEvalInputTest, SourceBoundaryStillRejectsArtifactsForAnInvalidCaptureTake) {
   const auto take_dir = root_ / "capture" / "incomplete_take";
   WriteFile(take_dir / "video.mkv", "incomplete capture placeholder");

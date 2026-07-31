@@ -21,6 +21,8 @@ b1ebb5b91383cf5d0551fb3f078f264a76bc4adbacdc041300103d266c5c9b9c
 ```
 
 它们与回放前值一致，证明 source dataset 没有被 CSV、overlay 或其他评估结果覆盖或标注。
+结果目录边界在比较前会解析符号链接；指向 source take 的 `--results-root` 也会在创建任何
+run 目录前被拒绝。
 
 ## 回放命令与结果
 
@@ -49,11 +51,26 @@ decoded `901`，吞吐 `11.122 FPS`。它的 `eval_overlay.mkv` 由 `ffprobe -co
 `524734159` bytes。逐帧抽取的 frame 450 显示 source 场景未被改写，而结果 overlay 有
 `frame=450 det=0 tracks=0`、`IDLE` 和历史第三行诊断文字；这也是本 take 的无检测 review window。
 
-当前环境没有 `DISPLAY`，因此没有虚构本地 interactive preview 证据。preview-only 与
-preview+record 复用 record-only 已检视的同一 `DrawEvalOverlay` canvas，运行时只额外调用
-`namedWindow`/`imshow`；需要实际窗口验收时在本地显示器上分别用
-`--overlay-preview true --overlay-record false/true` 运行。无显示环境应使用 headless 或
-record-only。
+## 本地图形会话验收
+
+2026-07-31 在本机 seat0 的 X11 会话执行：`DISPLAY=:1`、
+`XDG_SESSION_TYPE=x11`，并使用 `/run/user/1000/gdm/Xauthority`。`xdpyinfo` 确认该会话为
+1920x1080 本地 X server；不使用 Xvfb、远程 X11 或无头窗口替代。
+
+- preview-only run `issue82_preview_only_local_x11_20260731_152654/s01` 以
+  `--overlay-preview true --overlay-record false` 正常退出。summary 为 metadata/timestamps/decoded
+  `901/901/901`、`avg_fps=32.743`；运行中 X11 window tree 和 active-window 都确认
+  `offline_eval_overlay` 由 `offline_eval_recordings` 创建。
+- preview+record run `issue82_preview_record_local_x11_20260731_152756/s01` 以
+  `--overlay-preview true --overlay-record true` 正常退出。窗口在运行中仍为 active，连续两次本地
+  GNOME screen capture 分别显示 `frame=185` 和 `frame=513` 的实际 canvas，含 `IDLE` 诊断文字，
+  证明窗口持续刷新。summary 为 metadata/timestamps/decoded `901/901/901`、`avg_fps=10.168`。
+- 同一 preview+record run 的结果 `eval_overlay.mkv` 为 `520107210` bytes；`ffprobe` 确认为
+  `ffv1`、`bgra`、1280x1024、2997/100 FPS，`ffprobe -count_frames` 实解码
+  `nb_read_frames=901`。这只是结果目录内的 overlay；随后复算 source video、metadata、timestamps
+  三个 SHA-256，仍与本页所列值相同。
+
+这补齐四种独立 overlay mode 的本地图形验收。无图形环境仍应使用 headless 或 record-only。
 
 ## 历史 H.264 migration smoke
 

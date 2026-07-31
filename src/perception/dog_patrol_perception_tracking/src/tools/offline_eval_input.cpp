@@ -162,18 +162,39 @@ OfflineEvalTimestampValidation ValidateTimestampArtifact(const std::filesystem::
   return validation;
 }
 
-bool IsWithin(const std::filesystem::path &ancestor, const std::filesystem::path &candidate) {
-  const auto normalized_ancestor = std::filesystem::absolute(ancestor).lexically_normal();
-  const auto normalized_candidate = std::filesystem::absolute(candidate).lexically_normal();
-  auto ancestor_it = normalized_ancestor.begin();
-  auto candidate_it = normalized_candidate.begin();
-  for (; ancestor_it != normalized_ancestor.end() && candidate_it != normalized_candidate.end();
+bool ResolveReplayBoundaryPath(const std::filesystem::path &path, const char *name,
+                               std::filesystem::path *resolved, std::string *error) {
+  std::error_code filesystem_error;
+  const auto absolute_path = std::filesystem::absolute(path, filesystem_error).lexically_normal();
+  if (filesystem_error) {
+    *error = std::string("Unable to resolve ") + name + ": " + filesystem_error.message();
+    return false;
+  }
+  *resolved = std::filesystem::weakly_canonical(absolute_path, filesystem_error);
+  if (filesystem_error) {
+    *error = std::string("Unable to canonicalize ") + name + ": " + filesystem_error.message();
+    return false;
+  }
+  return true;
+}
+
+bool IsWithin(const std::filesystem::path &ancestor, const std::filesystem::path &candidate,
+              std::string *error) {
+  std::filesystem::path resolved_ancestor;
+  std::filesystem::path resolved_candidate;
+  if (!ResolveReplayBoundaryPath(ancestor, "source dataset", &resolved_ancestor, error) ||
+      !ResolveReplayBoundaryPath(candidate, "result directory", &resolved_candidate, error)) {
+    return false;
+  }
+  auto ancestor_it = resolved_ancestor.begin();
+  auto candidate_it = resolved_candidate.begin();
+  for (; ancestor_it != resolved_ancestor.end() && candidate_it != resolved_candidate.end();
        ++ancestor_it, ++candidate_it) {
     if (*ancestor_it != *candidate_it) {
       return false;
     }
   }
-  return ancestor_it == normalized_ancestor.end();
+  return ancestor_it == resolved_ancestor.end();
 }
 
 }  // namespace
@@ -272,8 +293,13 @@ OfflineEvalOverlayArtifactPlan PlanOfflineEvalOverlayArtifacts(
     const OfflineEvalInput &input, const std::filesystem::path &result_directory, const bool record_overlay,
     const std::string &overlay_video_name) {
   OfflineEvalOverlayArtifactPlan plan;
-  if (IsWithin(input.dataset_directory, result_directory)) {
+  std::string boundary_error;
+  if (IsWithin(input.dataset_directory, result_directory, &boundary_error)) {
     plan.error = "Offline evaluation artifacts must be written outside the source dataset";
+    return plan;
+  }
+  if (!boundary_error.empty()) {
+    plan.error = boundary_error;
     return plan;
   }
   if (!record_overlay) {
