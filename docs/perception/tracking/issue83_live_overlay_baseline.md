@@ -88,19 +88,63 @@ log/issue83_graphical_acceptance_20260731/*_sha256.txt
 data/diagnostics/live_overlays/issue83_{record_only,preview_record}_20260731_*.mkv
 ```
 
-## 仍需现场人像证据
+## 现场人像验收（2026-07-31）
 
-图形 mode matrix 已完成，但本次相机视场内没有 person：四次运行的 `runtime_monitor` 都是
-`det=0 filtered=0 tracks=0 state=IDLE`。因此这批 artifact 只能目检 IDLE overlay，不能代替真实 person 的
-track/identity/primary overlay 验收。Issue 必须保持 OPEN / `ready-for-human`，直到现场将 person 置入视场后，至少在
-`preview` 和 `preview_record` 再做一次目检并保存同样的 final metrics/artifact 对账。
+在同一 Orin/X11/Hik MVS 环境把真实 person 置入视场后，重新执行 `preview` 和
+`preview_record`。两个模式的 `runtime_monitor` 都连续出现
+`det=1 filtered=1 tracks=1 state=LOCKED primary_id=1 raw_track_id=1`。
 
-```bash
-ros2 run vision_demo_host vision_demo_node --ros-args \
-  -p visualization.enable:=true -p recording.enable:=false
-ros2 run vision_demo_host vision_demo_node --ros-args \
-  -p visualization.enable:=true -p recording.enable:=true \
-  -p recording.path:="$PWD/data/diagnostics/live_overlays/issue83_preview_record_$(date +%Y%m%d_%H%M%S).mkv"
+- `preview` 的实际 X11 `vision_demo_host` 窗口显示真人红色 box、`id=1 ACTIVE raw=1` 标签和
+  `LOCKED id=1 raw=1` primary line。60 秒运行 final 为 submitted/enqueued `1519/1519`，
+  queue/render/write drops 和 errors 全为 0，previewed FPS 26.17；queue wait p50/p95/p99 为
+  0.054/0.305/2.526 ms，render 为 0.972/1.301/1.957 ms。相机最后采样的
+  acquisition/conversion/copy p50/p95/p99 分别为 0.034/4.146/7.387、
+  6.823/10.339/11.686、0.575/0.765/1.307 ms；inference 为
+  20.518/29.516/33.292 ms。
+- `preview_record` 的同一 canvas decoded FFV1 frame 显示相同真人 box、identity 与 primary
+  语义，运行日志在对应时段连续报告上述 `LOCKED` 状态。50 秒运行 final submitted/enqueued 为
+  `1392/1143`，249 个 bounded queue drop，
+  render/write drops 和 errors 全为 0；rendered/previewed/written FPS 都为 23.70。queue wait、
+  render、write p50/p95/p99 分别为 148.244/174.195/182.022、0.763/0.993/1.317、
+  31.999/45.364/50.324 ms。相机最后采样的 acquisition/conversion/copy 为
+  0.030/7.685/10.871、4.382/7.457/10.865、0.517/0.756/1.295 ms；inference 为
+  19.079/28.148/35.358 ms。
+- `issue83_person_preview_record_20260731_1721.mkv` 为 FFV1、`bgr0`、1280x1024、30/1；
+  `ffprobe -count_frames` 实解码 1143 帧，与 final enqueued 且无 render/write drop/error 的
+  drain 结果精确一致。SHA-256 为
+  `1ce0667b50d336a435cee4b7de46b346dc803d4780f7b35c06d77dbd4bb5a0e4`。
+
+本次证据补齐了先前 IDLE-only mode matrix 缺少的真人 tracking/identity/primary 目检；四种
+live mode 和同 canvas 的 preview/record 合同均已验收。
+
+Raw local evidence (ignored runtime output):
+
+```text
+log/issue83_person_acceptance_20260731/preview.log
+log/issue83_person_acceptance_20260731/preview_person_window.png
+log/issue83_person_acceptance_20260731/preview_record_person.log
+log/issue83_person_acceptance_20260731/preview_record_person_frame_1s.png
+data/diagnostics/live_overlays/issue83_person_preview_record_20260731_1721.mkv
 ```
 
-验收记录应保存 terminal `camera_metrics`、`inference_metrics`、`overlay_metrics phase=final`，确认 preview 持续刷新，record artifact 为 FFV1/MKV 且 decoded frame count 与 final worker `written` count 精确一致。现场还须保留一段含 person 的 primary/identity/track overlay 目检证据。
+可复现命令必须加载参数文件；本机资产路径显式覆盖参数文件中部署相关的绝对路径：
+
+```bash
+source /opt/ros/humble/setup.bash
+source /path/to/workspace/dog_patrol/install/setup.bash
+source install/setup.bash
+export DISPLAY=:1
+export XAUTHORITY=/run/user/1000/gdm/Xauthority
+
+ros2 run vision_demo_host vision_demo_node --ros-args \
+  --params-file src/vision_demo_host/config/demo_params.yaml \
+  -p detector.runtime_path:="$PWD/assets/models/engines/orin_jp621_trt_local/yolo26n_fp16_640.engine" \
+  -p tracker.config_path:="$PWD/src/vision_demo_host/config/bot_sort.yaml" \
+  -p visualization.enable:=true -p recording.enable:=false
+ros2 run vision_demo_host vision_demo_node --ros-args \
+  --params-file src/vision_demo_host/config/demo_params.yaml \
+  -p detector.runtime_path:="$PWD/assets/models/engines/orin_jp621_trt_local/yolo26n_fp16_640.engine" \
+  -p tracker.config_path:="$PWD/src/vision_demo_host/config/bot_sort.yaml" \
+  -p visualization.enable:=true -p recording.enable:=true \
+  -p recording.path:="data/diagnostics/live_overlays/issue83_preview_record_$(date +%Y%m%d_%H%M%S).mkv"
+```
