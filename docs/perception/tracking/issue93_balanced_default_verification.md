@@ -1,7 +1,7 @@
 # Issue #93 `balanced` Bayer 默认验证
 
 本页记录 #93 对 #85 决策的最小可回滚配置实施与验证。变更只统一 active Hik MVS
-live/capture/record entry 的默认 Bayer interpolation；不改变 detector、tracker、ReID、identity、
+live/capture entry 的默认 Bayer interpolation；不改变 detector、tracker、ReID、identity、
 `CameraIngest::AcquiredFrame` 的自持有 BGR8 合同，或 gamma/CCM 控制，也不加入 GPU preprocessing
 或 demosaic。
 
@@ -12,8 +12,6 @@ live/capture/record entry 的默认 Bayer interpolation；不改变 detector、t
 | `CameraIngest::Config`、ROS node parameter declaration、`config/demo_params.yaml` | `balanced` | `false` |
 | `vision_demo_node` | `balanced` | `false` |
 | `capture_ffv1` 与 `Ffv1CaptureWorkflow::Config` | `balanced` | `false` |
-| `record_test_set` 的 Hik MVS path | `balanced` | `false` |
-
 `bench_hik_mvs_camera.sh` 仍以显式 `fast` 作为固定性能比较，不是 production runtime 默认。
 `fast`、`optimal`、`optimal_plus` 都继续由既有 parser 接受；旧 `optimal` 比较/回滚可使用：
 

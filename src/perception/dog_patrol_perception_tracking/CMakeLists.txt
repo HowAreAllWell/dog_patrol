@@ -117,10 +117,6 @@ target_compile_features(mission_ros_adapter_smoke PUBLIC cxx_std_17)
 ament_target_dependencies(mission_ros_adapter_smoke rclcpp dog_patrol_interfaces)
 target_link_libraries(mission_ros_adapter_smoke ${PROJECT_NAME}_modules)
 
-add_executable(record_test_set src/tools/record_test_set.cpp)
-target_compile_features(record_test_set PUBLIC cxx_std_17)
-target_link_libraries(record_test_set ${PROJECT_NAME}_modules ${OpenCV_LIBS})
-
 add_executable(capture_ffv1 src/tools/capture_ffv1.cpp)
 target_compile_features(capture_ffv1 PUBLIC cxx_std_17)
 target_link_libraries(capture_ffv1 ${PROJECT_NAME}_modules ${OpenCV_LIBS})
@@ -142,7 +138,6 @@ install(TARGETS
   ${PROJECT_NAME}_modules
   vision_demo_node
   mission_ros_adapter_smoke
-  record_test_set
   capture_ffv1
   offline_eval_recordings
   DESTINATION lib/${PROJECT_NAME})
@@ -161,6 +156,12 @@ ament_export_dependencies(dog_patrol_interfaces)
 
 if(BUILD_TESTING)
   find_package(ament_cmake_gtest REQUIRED)
+
+  add_test(
+    NAME test_retired_media_cli
+    COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/test/test_retired_media_cli.sh
+            $<TARGET_FILE:vision_demo_node>
+            $<TARGET_FILE:offline_eval_recordings>)
 
   ament_add_gtest(test_camera_ingest_contract test/test_camera_ingest_contract.cpp)
   if(TARGET test_camera_ingest_contract)

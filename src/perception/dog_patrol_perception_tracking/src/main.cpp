@@ -41,6 +41,7 @@ class VisionDemoNode : public rclcpp::Node {
         tracker_(vision_demo_host::MotTracker::Config{}),
         primary_manager_(vision_demo_host::PrimaryTargetManager::Config{}),
         identity_manager_(vision_demo_host::IdentityManager::Config{}) {
+    RejectRetiredCameraParameterOverrides();
     DeclareParameters();
     InitializeMissionRosAdapter();
     LoadConfigAndInitialize();
@@ -60,6 +61,20 @@ class VisionDemoNode : public rclcpp::Node {
   }
 
  private:
+  void RejectRetiredCameraParameterOverrides() {
+    const auto &overrides =
+        this->get_node_parameters_interface()->get_parameter_overrides();
+    const std::vector<std::string> retired_parameters{
+        "camera.backend", "camera.rtsp_url", "camera.gstreamer_pipeline"};
+    for (const auto &name : retired_parameters) {
+      if (overrides.find(name) != overrides.end()) {
+        throw std::invalid_argument(
+            "Retired camera parameter override '" + name +
+            "' is not supported; live input is Hik MVS-only. Remove the override.");
+      }
+    }
+  }
+
   void DeclareParameters() {
     this->declare_parameter<std::string>("camera.mvs_model", "MV-CU013-A0UC");
     this->declare_parameter<std::string>("camera.mvs_serial", "");
@@ -682,6 +697,7 @@ class VisionDemoNode : public rclcpp::Node {
 
 int main(int argc, char *argv[]) {
   rclcpp::init(argc, argv);
+  int exit_code = 0;
   try {
     auto node = std::make_shared<VisionDemoNode>();
     rclcpp::executors::MultiThreadedExecutor executor(rclcpp::ExecutorOptions{}, 2U);
@@ -690,7 +706,8 @@ int main(int argc, char *argv[]) {
     node->ShutdownAndLog();
   } catch (const std::exception &e) {
     RCLCPP_FATAL(rclcpp::get_logger("vision_demo_host_node"), "Fatal init/runtime error: %s", e.what());
+    exit_code = 1;
   }
   rclcpp::shutdown();
-  return 0;
+  return exit_code;
 }

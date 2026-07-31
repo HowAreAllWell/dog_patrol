@@ -25,8 +25,8 @@
 namespace {
 
 struct Options {
-  std::filesystem::path recordings_root{"/path/to/my_workplace/vision_demo_ws/data/datasets"};
-  std::filesystem::path results_root{"/path/to/my_workplace/vision_demo_ws/data/eval_results"};
+  std::filesystem::path recordings_root{"data/captures"};
+  std::filesystem::path results_root{"data/eval_results"};
   std::string run_name{"oe"};
   std::string detector_engine_path{
       "/path/to/my_workplace/vision_demo_ws/assets/models/engines/orin_jp621_trt_local/yolo26n_fp16_640.engine"};
@@ -73,10 +73,7 @@ struct Options {
   std::string sid_reid_model_path{};
   int sid_reid_input_width{128};
   int sid_reid_input_height{256};
-  std::vector<std::string> datasets{
-      "orin_hik_h264_MOT/01",
-      "orin_hik_h264_MOT/02",
-      "orin_hik_h264_MOT/03"};
+  std::vector<std::string> datasets;
 };
 
 struct DatasetMetrics {
@@ -178,8 +175,8 @@ std::string TimestampCompactNow() {
 void PrintUsage() {
   std::cout
       << "Usage: offline_eval_recordings [options]\n"
-      << "  --recordings-root <path>      (default: /path/to/my_workplace/vision_demo_ws/data/datasets)\n"
-      << "  --results-root <path>         (default: /path/to/my_workplace/vision_demo_ws/data/eval_results)\n"
+      << "  --recordings-root <path>      (default: data/captures)\n"
+      << "  --results-root <path>         (default: data/eval_results)\n"
       << "  --run-name <name>             (default: oe)\n"
       << "  --detector-engine <path>\n"
       << "  --det-raw-conf <f>             (default: 0.10)\n"
@@ -190,8 +187,9 @@ void PrintUsage() {
       << "  --tracker-reid-model-path <path>      (default: \"\")\n"
       << "  --tracker-reid-input-width <n>        (default: 128)\n"
       << "  --tracker-reid-input-height <n>       (default: 256)\n"
-      << "  --datasets <a,b,c>            (default: historical orin_hik_h264_MOT/01,02,03)\n"
-      << "  --video <path>                (one explicit FFV1 MKV or historical video; overrides --datasets)\n"
+      << "  --datasets <a,b,c>            (FFV1 take directories below --recordings-root)\n"
+      << "  --video <path>                (one explicit FFV1/MKV take; overrides --datasets)\n"
+      << "  One of --video or --datasets is required. Historical MP4 is migration-regression input only.\n"
       << "  --save-frame-csv <true|false> (default: true)\n"
       << "  --save-sid-scores <true|false> (default: true)\n"
       << "  --save-tracks-csv <true|false> (default: true)\n"
@@ -663,6 +661,12 @@ bool ParseArgs(int argc, char **argv, Options *opt, std::string *error) {
       }
       return false;
     }
+  }
+  if (opt->explicit_video_path.empty() && opt->datasets.empty()) {
+    if (error != nullptr) {
+      *error = "Choose an FFV1 capture with --video or --datasets; there is no historical default dataset.";
+    }
+    return false;
   }
   return true;
 }

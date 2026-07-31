@@ -18,7 +18,7 @@ CameraIngest
 
 各模块职责：
 
-- `CameraIngest`：读取 RTSP/GStreamer 或 Hikrobot MVS 相机帧。
+- `CameraIngest`：通过 Hikrobot MVS SDK 读取相机帧，并向下游提供自持有 BGR8 图像与源帧元数据。
 - `PreprocessInfer`：加载 YOLO TensorRT engine，输出原始检测框。
 - `DetFilter`：只保留当前业务需要的 `person` 和 `car`，并按类别阈值过滤。
 - `MotTracker`：短期多目标跟踪层，维护 raw track。

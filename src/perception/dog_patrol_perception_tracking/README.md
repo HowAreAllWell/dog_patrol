@@ -19,6 +19,11 @@ Orin 宿主机侧视觉验收 demo，包含检测、短期跟踪、语义身份�
 - 距离/2D 相对位置
 - 控制逻辑
 
+当前工作流分为三个独立入口：`capture_ffv1` 只采集 Hik MVS clean BGR8 并写 FFV1/MKV；
+`vision_demo_node` 执行 live inference，并可独立开启 diagnostic overlay preview/record；
+`offline_eval_recordings` 只回放显式选择的 capture take 或视频并把结果写入 eval 目录。三者不共享
+录制开关，也不会把 overlay 写回 clean source dataset。
+
 ## 关键配置
 
 默认参数文件：`config/demo_params.yaml`
@@ -245,10 +250,11 @@ Tracker ReID 配置（`tracker.*`）：
 - `config/legacy/tracker_new_core_no_app.yaml`
 - `config/legacy/tracker_new_core_with_app.yaml`
 
-一键离线评估对照脚本：
+离线评估对照脚本必须显式传入 capture take 的 FFV1/MKV：
 
 ```bash
-/path/to/my_workplace/vision_demo_ws/src/vision_demo_host/scripts/eval_tracker_core_round1.sh
+/path/to/my_workplace/vision_demo_ws/src/vision_demo_host/scripts/eval_tracker_core_round1.sh \
+  /absolute/path/to/capture_session/take_001/video.mkv
 ```
 
 ## 问题文档
@@ -272,22 +278,14 @@ Tracker ReID 配置（`tracker.*`）：
 
 `#85` 已补充同源 Bayer、含人受控 detector/ReID/tracking 和完整 `balanced` live 30 FPS 证据，
 见 `docs/issue85_bayer_preprocess_audit.md`。当前 config file、参数声明、live helper 和 Hik MVS
-capture/record 工具均默认 `balanced`，且 smoothing 默认关闭；`optimal` rollback 可用
-`-p camera.bayer_interpolation:=optimal` 或 capture/record 的 `--bayer-interpolation optimal`。
+capture 工具均默认 `balanced`，且 smoothing 默认关闭；`optimal` rollback 可用
+`-p camera.bayer_interpolation:=optimal` 或 capture 的 `--bayer-interpolation optimal`。
 `bench_hik_mvs_camera.sh` 的 `fast` 默认只作为性能对照基准，不代表 runtime 默认。
 
 `benchmark_bayer_input` 是仅 MVS-enabled 构建中的 headless 审计工具。它对一批自持有 Bayer
 buffers 比较全部 SDK quality、写出 FFV1 variants、检测 CSV 和分段 p50/p95/p99；可用
 `--input-video` 生成明确标记的 synthetic Bayer 控制输入。它启用 detector timing metrics，普通
 `PreprocessInfer` 默认不启用，避免因审计改变 production inference 行为。
-
-历史 RTSP 基线（仅作迁移前对照，不是当前 live input）：
-- `A(gmc_off)` 平均 FPS 约 `24.07`
-- `B(sparseOptFlow, downscale=2)` 平均 FPS 约 `15.87`
-- `C(sparseOptFlow, downscale=4)` 平均 FPS 约 `21.49`（init 日志显示 `gmc_downscale=4` 已生效）
-
-旧 `scripts/bench_gmc_rtsp.sh` 保留给 #86 统一清理；当前 live inference
-节点已不再接受 RTSP 参数，不应把该历史脚本用于新的 #80 基线。
 
 建议默认配置（当前）：
 - `gmc_enabled=true`
@@ -349,15 +347,13 @@ ros2 run vision_demo_host capture_ffv1 \
   --session-name headless_capture_01
 ```
 
-`record_test_set` 仍保留旧 RTSP/GStreamer/H.264 路径，等待 `#86` 统一清理；不要将其用于
-新的无损 Hik MVS 数据集采集。
-
 ## 离线回放评估工具（offline_eval_recordings）
 
 入口：
 - 可执行：`offline_eval_recordings`
-- 默认数据集根目录：`/path/to/my_workplace/vision_demo_ws/data/datasets`
-- 默认结果目录：`/path/to/my_workplace/vision_demo_ws/data/eval_results`
+- 默认数据集根目录：`data/captures`
+- 默认结果目录：`data/eval_results`
+- 必须显式传 `--video` 或 `--datasets`；没有隐含的历史默认数据集
 
 用途：
 - 对固定录制集逐帧回放，复用当前主链模块做可重复评估：
@@ -366,17 +362,7 @@ ros2 run vision_demo_host capture_ffv1 \
   - `mot_tracker`
   - `primary_target_manager`
 
-运行（默认处理历史 `orin_hik_h264_MOT/01,02,03`，仅作为迁移回归）：
-
-```bash
-cd /path/to/my_workplace/vision_demo_ws
-source /opt/ros/humble/setup.bash
-source install/setup.bash
-ros2 run vision_demo_host offline_eval_recordings
-```
-
-新的 canonical 回放入口是 #81 完整 take 的显式 `video.mkv` 路径；它不依赖数据集目录中曾经
-硬编码的 `video.mp4`：
+canonical 回放入口是 #81 格式完整 take 的显式 `video.mkv` 路径：
 
 ```bash
 ros2 run vision_demo_host offline_eval_recordings \
@@ -388,8 +374,8 @@ ros2 run vision_demo_host offline_eval_recordings \
 当 `video.mkv` 同目录有 `metadata.json` 时，工具只接受 `complete` 的 FFV1/MKV capture metadata，
 并校验 `counts.written_frames`、`frame_timestamps.csv` 行数、capture index/source timestamp 单调性，
 以及实际从首帧到末帧解码出的帧数。任何不一致都会在 `summary.json`/`summary.md` 和进程退出码中
-显式失败。若没有 capture metadata，目录发现优先 `video.mkv`，再保留历史 `video.mp4` 作为迁移
-回归输入。
+显式失败。若没有 capture metadata，目录发现优先 `video.mkv`。历史 `video.mp4` 只保留为
+`docs/issue82_ffv1_offline_eval_baseline.md` 记录的 migration regression 输入，不是默认或 canonical 数据集。
 
 overlay 是结果工件，不是 source dataset。四种独立模式如下；所有 CSV 和可选 overlay 都只能写入
 `--results-root` 生成的 run 目录，工具拒绝把它们放进 source dataset。

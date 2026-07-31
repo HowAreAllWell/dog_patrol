@@ -224,7 +224,10 @@ mission ROS output 当前包括：
 
 ## 5. 当前效果判断口径
 
-当前固定离线数据集为 `data/datasets/orin_hik_h264_MOT`，默认评估输出在 `data/eval_results/`。后续不能只看 primary switch 或 `LOCKED` ratio，还需要结合：
+当前 canonical 离线输入是 `data/captures/` 下完整的 FFV1/MKV take，评估时必须通过
+`--video` 或 `--datasets` 显式选择，默认输出在 `data/eval_results/`。历史
+`data/datasets/orin_hik_h264_MOT` 只保留为 migration regression 和既有问题复盘证据。
+后续不能只看 primary switch 或 `LOCKED` ratio，还需要结合：
 
 - primary locked ratio；
 - occluded ratio；

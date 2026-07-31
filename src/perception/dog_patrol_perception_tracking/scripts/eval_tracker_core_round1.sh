@@ -4,10 +4,15 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 WS_DIR="${WS_DIR:-$(cd "${SCRIPT_DIR}/../../.." && pwd)}"
 BIN="$WS_DIR/build/vision_demo_host/offline_eval_recordings"
+INPUT_VIDEO="${1:-}"
 
 if [[ ! -x "$BIN" ]]; then
   echo "[eval] missing binary: $BIN"
   exit 1
+fi
+if [[ -z "$INPUT_VIDEO" ]]; then
+  echo "Usage: $0 <ffv1-take-video.mkv>" >&2
+  exit 2
 fi
 
 run_case() {
@@ -15,9 +20,10 @@ run_case() {
   local cfg="$2"
   echo "[eval] running $name with $cfg"
   "$BIN" \
+    --video "$INPUT_VIDEO" \
     --run-name "$name" \
     --tracker-config "$cfg" \
-    --save-eval-video true \
+    --overlay-record true \
     --short-dataset-dir-names true
 }
 
