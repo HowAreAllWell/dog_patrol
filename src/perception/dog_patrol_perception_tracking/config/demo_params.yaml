@@ -57,15 +57,6 @@ vision_demo_host_node:
       authorization_placeholder_ready: false
       authorization_placeholder_detail: "authorization capability has not been integrated"
 
-    bearing:
-      camera_horizontal_fov_rad: 1.5708
-      camera_mount_x: 0.22646
-      camera_mount_y: 0.03
-      camera_mount_z: 0.20738
-      camera_mount_roll: 0.0
-      camera_mount_pitch: -1.57079
-      camera_mount_yaw: -3.14159
-
     sid:
       feat_bank_size: 30
       recover_sim_thresh_strict: 0.85
@@ -93,10 +84,6 @@ vision_demo_host_node:
       reid_model_path: ""
       reid_input_width: 128
       reid_input_height: 256
-
-    udp:
-      ip: "127.0.0.1"
-      port: 5005
 
     visualization:
       enable: false

@@ -2,25 +2,21 @@
 
 #include <algorithm>
 #include <chrono>
-#include <cmath>
 #include <filesystem>
 #include <fstream>
 #include <iomanip>
 #include <iostream>
-#include <numeric>
 #include <optional>
 #include <sstream>
 #include <string>
 #include <vector>
 
-#include "vision_demo_host/modules/bearing_estimator.hpp"
 #include "vision_demo_host/modules/det_filter.hpp"
 #include "vision_demo_host/modules/identity_manager.hpp"
 #include "vision_demo_host/modules/mot_tracker.hpp"
 #include "vision_demo_host/modules/preprocess_infer.hpp"
 #include "vision_demo_host/modules/primary_recovery_debug.hpp"
 #include "vision_demo_host/modules/primary_target_manager.hpp"
-#include "vision_demo_host/modules/udp_json_adapter.hpp"
 #include "vision_demo_host/tools/offline_eval_input.hpp"
 #include "vision_demo_host/tools/offline_eval_schema.hpp"
 #include "vision_demo_host/tools/identity_offline_metrics.hpp"
@@ -42,9 +38,6 @@ struct Options {
   std::string tracker_reid_model_path{};
   int tracker_reid_input_width{128};
   int tracker_reid_input_height{256};
-  bool enable_udp{false};
-  std::string udp_ip{"127.0.0.1"};
-  int udp_port{5005};
   bool save_frame_csv{true};
   bool save_sid_scores{true};
   bool save_tracks_csv{true};
@@ -108,8 +101,6 @@ struct DatasetMetrics {
   std::size_t locked_to_lost_count{0};
 
   double avg_fps{0.0};
-  double bearing_diff_abs_mean{0.0};
-  double bearing_diff_stddev{0.0};
 };
 
 struct EvaluationRequest {
@@ -201,9 +192,6 @@ void PrintUsage() {
       << "  --tracker-reid-input-height <n>       (default: 256)\n"
       << "  --datasets <a,b,c>            (default: historical orin_hik_h264_MOT/01,02,03)\n"
       << "  --video <path>                (one explicit FFV1 MKV or historical video; overrides --datasets)\n"
-      << "  --enable-udp                  (default: off)\n"
-      << "  --udp-ip <ip>                 (default: 127.0.0.1)\n"
-      << "  --udp-port <port>             (default: 5005)\n"
       << "  --save-frame-csv <true|false> (default: true)\n"
       << "  --save-sid-scores <true|false> (default: true)\n"
       << "  --save-tracks-csv <true|false> (default: true)\n"
@@ -346,20 +334,6 @@ bool ParseArgs(int argc, char **argv, Options *opt, std::string *error) {
         if (!item.empty()) {
           opt->datasets.push_back(item);
         }
-      }
-    } else if (arg == "--enable-udp") {
-      opt->enable_udp = true;
-    } else if (arg == "--udp-ip") {
-      opt->udp_ip = need(arg);
-    } else if (arg == "--udp-port") {
-      const std::string s = need(arg);
-      try {
-        opt->udp_port = std::stoi(s);
-      } catch (...) {
-        if (error != nullptr) {
-          *error = "Invalid --udp-port: " + s;
-        }
-        return false;
       }
     } else if (arg == "--save-frame-csv") {
       bool v = true;
@@ -726,15 +700,13 @@ void WriteDatasetJson(const std::filesystem::path &out_path, const DatasetMetric
       << "  \"lost_frames\": " << m.lost_frames << ",\n"
       << "  \"lost_ratio\": " << Ratio(m.lost_frames, m.total_frames) << ",\n"
       << "  \"primary_switch_count\": " << m.primary_switch_count << ",\n"
-      << "  \"locked_to_lost_count\": " << m.locked_to_lost_count << ",\n"
-      << "  \"bearing_diff_abs_mean\": " << m.bearing_diff_abs_mean << ",\n"
-      << "  \"bearing_diff_stddev\": " << m.bearing_diff_stddev << "\n"
+      << "  \"locked_to_lost_count\": " << m.locked_to_lost_count << "\n"
       << "}\n";
 }
 
 void DrawEvalOverlay(cv::Mat *canvas, const std::vector<vision_demo_host::Track> &tracks,
                      const vision_demo_host::IdentityManagerResult &identity_result,
-                     const vision_demo_host::PrimaryTargetResult &primary, const vision_demo_host::BearingOutput &bo,
+                     const vision_demo_host::PrimaryTargetResult &primary,
                      const std::size_t frame_idx, const std::size_t det_count,
                      const std::string &primary_decision_reason,
                      const std::string &primary_reject_reason) {
@@ -769,13 +741,8 @@ void DrawEvalOverlay(cv::Mat *canvas, const std::vector<vision_demo_host::Track>
   line1 << "frame=" << frame_idx << " det=" << det_count << " tracks=" << tracks.size();
   const std::string line2 = vision_demo_host::BuildPrimaryOverlayLine(
       primary, identity_result, primary_decision_reason, primary_reject_reason);
-  std::ostringstream line3;
-  line3 << std::fixed << std::setprecision(4) << "bearing_base_rad=" << bo.bearing_base_rad
-        << " conf=" << bo.bearing_confidence;
-
   cv::putText(*canvas, line1.str(), cv::Point(20, 30), cv::FONT_HERSHEY_SIMPLEX, 0.7, cv::Scalar(255, 255, 255), 2);
   cv::putText(*canvas, line2, cv::Point(20, 60), cv::FONT_HERSHEY_SIMPLEX, 0.7, cv::Scalar(255, 255, 255), 2);
-  cv::putText(*canvas, line3.str(), cv::Point(20, 90), cv::FONT_HERSHEY_SIMPLEX, 0.7, cv::Scalar(255, 255, 255), 2);
 }
 
 void WriteDatasetMd(const std::filesystem::path &out_path, const DatasetMetrics &m) {
@@ -808,15 +775,13 @@ void WriteDatasetMd(const std::filesystem::path &out_path, const DatasetMetrics 
       << Ratio(m.lost_frames, m.total_frames) * 100.0 << "%)\n";
   ofs << "- primary_switch_count: `" << m.primary_switch_count << "`\n";
   ofs << "- locked_to_lost_count: `" << m.locked_to_lost_count << "`\n";
-  ofs << "- bearing_diff_abs_mean: `" << std::setprecision(6) << m.bearing_diff_abs_mean << "`\n";
-  ofs << "- bearing_diff_stddev: `" << std::setprecision(6) << m.bearing_diff_stddev << "`\n";
 }
 
 void WriteGlobalSummary(const std::filesystem::path &out_path, const std::vector<DatasetMetrics> &all) {
   std::ofstream ofs(out_path);
   ofs << "# Offline Eval Global Summary\n\n";
-  ofs << "| dataset | ok | frames | avg_fps | det>0 ratio | tracks>0 ratio | LOCKED ratio | OCCLUDED ratio | LOST ratio | switches | locked->lost | bearing diff mean | bearing diff std |\n";
-  ofs << "|---|:---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|\n";
+  ofs << "| dataset | ok | frames | avg_fps | det>0 ratio | tracks>0 ratio | LOCKED ratio | OCCLUDED ratio | LOST ratio | switches | locked->lost |\n";
+  ofs << "|---|:---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|\n";
   for (const auto &m : all) {
     ofs << "| " << m.dataset_name << " | " << (m.ok ? "yes" : "no") << " | " << m.total_frames << " | "
         << std::fixed << std::setprecision(2) << m.avg_fps << " | " << std::setprecision(2)
@@ -825,8 +790,7 @@ void WriteGlobalSummary(const std::filesystem::path &out_path, const std::vector
         << Ratio(m.locked_frames, m.total_frames) * 100.0 << "% | "
         << Ratio(m.occluded_frames, m.total_frames) * 100.0 << "% | "
         << Ratio(m.lost_frames, m.total_frames) * 100.0 << "% | " << m.primary_switch_count << " | "
-        << m.locked_to_lost_count << " | " << std::setprecision(6) << m.bearing_diff_abs_mean << " | "
-        << m.bearing_diff_stddev << " |\n";
+        << m.locked_to_lost_count << " |\n";
   }
 }
 
@@ -954,19 +918,6 @@ DatasetMetrics EvaluateOne(const Options &opt, const std::filesystem::path &data
     return m;
   }
 
-  vision_demo_host::BearingEstimator::Config bearing_cfg;
-  bearing_cfg.camera_horizontal_fov_rad = 1.5708F;
-  vision_demo_host::BearingEstimator bearing(bearing_cfg);
-
-  std::optional<vision_demo_host::UdpJsonAdapter> udp;
-  if (opt.enable_udp) {
-    udp.emplace(opt.udp_ip, static_cast<uint16_t>(opt.udp_port));
-    if (!udp->Initialize(&err)) {
-      m.error = "udp init failed: " + err;
-      return m;
-    }
-  }
-
   cv::VideoCapture cap(video_path.string());
   if (!cap.isOpened()) {
     m.error = "Failed to open video: " + video_path.string();
@@ -1013,8 +964,6 @@ DatasetMetrics EvaluateOne(const Options &opt, const std::filesystem::path &data
   bool preview_window_open = false;
   constexpr const char *kOverlayWindowName = "offline_eval_overlay";
 
-  std::vector<double> bearing_diffs;
-  std::optional<float> prev_bearing_locked;
   std::optional<int> prev_primary_semantic_id;
   std::optional<vision_demo_host::PrimaryState> prev_state;
 
@@ -1035,17 +984,8 @@ DatasetMetrics EvaluateOne(const Options &opt, const std::filesystem::path &data
         vision_demo_host::TrackletObservationsFromTracks(tracks), tracklet_hypotheses, primary_prev, &frame);
     const auto primary = primary_mgr.Update(identity_result.identities);
 
-    vision_demo_host::BearingOutput bo{};
     const int primary_semantic_id = primary.primary_target_id;
     int raw_track_id = primary.raw_track_id;
-    if (primary.primary_track.has_value()) {
-      bo = bearing.Estimate(primary.primary_track.value(), frame.cols, frame.rows);
-    }
-
-    if (opt.enable_udp && udp.has_value()) {
-      std::string send_err;
-      (void)udp->Send(primary, bo, &send_err, &identity_result);
-    }
 
     m.total_frames++;
     if (!detections.empty()) {
@@ -1069,17 +1009,6 @@ DatasetMetrics EvaluateOne(const Options &opt, const std::filesystem::path &data
     if (prev_state.has_value() && prev_state.value() == vision_demo_host::PrimaryState::kLocked &&
         primary.state == vision_demo_host::PrimaryState::kLost) {
       m.locked_to_lost_count++;
-    }
-
-    if (primary.state == vision_demo_host::PrimaryState::kLocked && primary_semantic_id > 0) {
-      if (prev_bearing_locked.has_value()) {
-        const double d =
-            std::abs(static_cast<double>(bo.bearing_base_rad) - static_cast<double>(prev_bearing_locked.value()));
-        bearing_diffs.push_back(d);
-      }
-      prev_bearing_locked = bo.bearing_base_rad;
-    } else {
-      prev_bearing_locked.reset();
     }
 
     prev_primary_semantic_id = primary_semantic_id;
@@ -1107,7 +1036,6 @@ DatasetMetrics EvaluateOne(const Options &opt, const std::filesystem::path &data
       frame_csv << frame_idx << "," << detections.size() << "," << tracks.size() << ","
                 << vision_demo_host::PrimaryStateToString(primary.state) << "," << primary_semantic_id << ","
                 << raw_track_id << ","
-                << std::fixed << std::setprecision(6) << bo.bearing_base_rad << ","
                 << vision_demo_host::IdentityModeToString(identity_manager.CurrentMode()) << ","
                 << (identity_manager.IsFeatureUpdateFrozen() ? "1" : "0") << ","
                 << sid_list.str() << "," << primary_mgr.LastDecisionReason() << ","
@@ -1235,7 +1163,7 @@ DatasetMetrics EvaluateOne(const Options &opt, const std::filesystem::path &data
 
     if (opt.overlay_preview || overlay_writer.isOpened()) {
       cv::Mat canvas = frame.clone();
-      DrawEvalOverlay(&canvas, tracks, identity_result, primary, bo, frame_idx, detections.size(),
+      DrawEvalOverlay(&canvas, tracks, identity_result, primary, frame_idx, detections.size(),
                       primary_mgr.LastDecisionReason(), primary_mgr.LastRejectReason());
       if (opt.overlay_preview) {
         if (!preview_window_open) {
@@ -1265,18 +1193,6 @@ DatasetMetrics EvaluateOne(const Options &opt, const std::filesystem::path &data
 
   const double elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(t1 - t0).count() / 1000.0;
   m.avg_fps = (elapsed > 1e-6) ? static_cast<double>(m.total_frames) / elapsed : 0.0;
-
-  if (!bearing_diffs.empty()) {
-    m.bearing_diff_abs_mean =
-        std::accumulate(bearing_diffs.begin(), bearing_diffs.end(), 0.0) / static_cast<double>(bearing_diffs.size());
-    double var = 0.0;
-    for (const double d : bearing_diffs) {
-      const double delta = d - m.bearing_diff_abs_mean;
-      var += delta * delta;
-    }
-    var /= static_cast<double>(bearing_diffs.size());
-    m.bearing_diff_stddev = std::sqrt(var);
-  }
 
   if (preview_window_open) {
     cv::destroyWindow(kOverlayWindowName);

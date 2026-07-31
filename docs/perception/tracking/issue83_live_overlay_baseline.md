@@ -55,9 +55,11 @@ data/diagnostics/live_overlays/issue83_record_final_20260731_010442.mkv
 本环境 `DISPLAY` 为空。因此 `preview`、`preview_record` 还没有真实窗口人工验收，Issue 必须保持 OPEN。接入本地显示器的 Orin 会话后，分别执行以下命令至少 30 秒并目检同一当前 overlay；第二条再对输出运行 `ffprobe -count_frames`：
 
 ```bash
-src/vision_demo_host/scripts/live_bearing_test.sh --viz true --rec false
-src/vision_demo_host/scripts/live_bearing_test.sh --viz true --rec true \
-  --record-path "$PWD/data/diagnostics/live_overlays/issue83_preview_record_$(date +%Y%m%d_%H%M%S).mkv"
+ros2 run vision_demo_host vision_demo_node --ros-args \
+  -p visualization.enable:=true -p recording.enable:=false
+ros2 run vision_demo_host vision_demo_node --ros-args \
+  -p visualization.enable:=true -p recording.enable:=true \
+  -p recording.path:="$PWD/data/diagnostics/live_overlays/issue83_preview_record_$(date +%Y%m%d_%H%M%S).mkv"
 ```
 
 验收记录应保存 terminal `camera_metrics`、`inference_metrics`、`overlay_metrics phase=final`，确认 preview 持续刷新，record artifact 为 FFV1/MKV 且 decoded frame count 与 final worker `written` count 精确一致。现场还须保留一段含 person 的 primary/identity/track overlay 目检证据。

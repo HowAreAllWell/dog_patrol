@@ -48,8 +48,6 @@ set(MODULE_SOURCES
   src/modules/mission_ros_adapter.cpp
   src/modules/perception_readiness.cpp
   src/modules/primary_recovery_debug.cpp
-  src/modules/bearing_estimator.cpp
-  src/modules/udp_json_adapter.cpp
   src/modules/feature_update_policy.cpp
   src/modules/feature_bank_cost.cpp
   src/modules/feature_geometry_update_state.cpp
@@ -492,14 +490,6 @@ if(BUILD_TESTING)
     target_include_directories(test_appearance_feature_service PRIVATE include)
     target_link_libraries(test_appearance_feature_service ${PROJECT_NAME}_modules)
     ament_target_dependencies(test_appearance_feature_service rclcpp)
-  endif()
-
-  ament_add_gtest(test_udp_json_adapter test/test_udp_json_adapter.cpp)
-  if(TARGET test_udp_json_adapter)
-    target_compile_features(test_udp_json_adapter PUBLIC cxx_std_17)
-    target_include_directories(test_udp_json_adapter PRIVATE include)
-    target_link_libraries(test_udp_json_adapter ${PROJECT_NAME}_modules)
-    ament_target_dependencies(test_udp_json_adapter rclcpp)
   endif()
 
   ament_add_gtest(test_yolo26_output_contract test/test_yolo26_output_contract.cpp)

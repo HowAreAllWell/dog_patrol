@@ -195,14 +195,6 @@ struct IdentityManagerResult {
   }
 };
 
-struct BearingOutput {
-  float u_norm{0.5F};
-  float v_norm{0.5F};
-  float bearing_base_rad{0.0F};
-  float elevation_base_rad{0.0F};
-  float bearing_confidence{0.0F};
-};
-
 inline std::string ClassIdToString(ClassId class_id) {
   switch (class_id) {
     case ClassId::kPerson:

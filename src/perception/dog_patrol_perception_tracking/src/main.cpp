@@ -15,7 +15,6 @@
 #include <rclcpp/rclcpp.hpp>
 #include <rclcpp/executors/multi_threaded_executor.hpp>
 
-#include "vision_demo_host/modules/bearing_estimator.hpp"
 #include "vision_demo_host/modules/camera_ingest.hpp"
 #include "vision_demo_host/modules/det_filter.hpp"
 #include "vision_demo_host/modules/identity_manager.hpp"
@@ -25,7 +24,6 @@
 #include "vision_demo_host/modules/preprocess_infer.hpp"
 #include "vision_demo_host/modules/primary_target_manager.hpp"
 #include "vision_demo_host/modules/runtime_monitor.hpp"
-#include "vision_demo_host/modules/udp_json_adapter.hpp"
 #include "vision_demo_host/modules/visualizer_recorder.hpp"
 
 namespace {
@@ -42,9 +40,7 @@ class VisionDemoNode : public rclcpp::Node {
         det_filter_(vision_demo_host::DetFilter::Config{}),
         tracker_(vision_demo_host::MotTracker::Config{}),
         primary_manager_(vision_demo_host::PrimaryTargetManager::Config{}),
-        identity_manager_(vision_demo_host::IdentityManager::Config{}),
-        bearing_(vision_demo_host::BearingEstimator::Config{}),
-        udp_("127.0.0.1", 5005) {
+        identity_manager_(vision_demo_host::IdentityManager::Config{}) {
     DeclareParameters();
     InitializeMissionRosAdapter();
     LoadConfigAndInitialize();
@@ -122,14 +118,6 @@ class VisionDemoNode : public rclcpp::Node {
         "perception.authorization_placeholder_detail",
         "authorization capability has not been integrated");
 
-    this->declare_parameter<double>("bearing.camera_horizontal_fov_rad", 1.5708);
-    this->declare_parameter<double>("bearing.camera_mount_x", 0.22646);
-    this->declare_parameter<double>("bearing.camera_mount_y", 0.03);
-    this->declare_parameter<double>("bearing.camera_mount_z", 0.20738);
-    this->declare_parameter<double>("bearing.camera_mount_roll", 0.0);
-    this->declare_parameter<double>("bearing.camera_mount_pitch", -1.57079);
-    this->declare_parameter<double>("bearing.camera_mount_yaw", -3.14159);
-
     this->declare_parameter<int>("sid.feat_bank_size", 30);
     this->declare_parameter<double>("sid.recover_sim_thresh_strict", 0.85);
     this->declare_parameter<double>("sid.recover_sim_thresh_relaxed", 0.75);
@@ -156,9 +144,6 @@ class VisionDemoNode : public rclcpp::Node {
     this->declare_parameter<std::string>("sid.reid_model_path", "");
     this->declare_parameter<int>("sid.reid_input_width", 128);
     this->declare_parameter<int>("sid.reid_input_height", 256);
-
-    this->declare_parameter<std::string>("udp.ip", "127.0.0.1");
-    this->declare_parameter<int>("udp.port", 5005);
 
     this->declare_parameter<bool>("visualization.enable", false);
     this->declare_parameter<int>("visualization.queue_capacity", 4);
@@ -326,28 +311,6 @@ class VisionDemoNode : public rclcpp::Node {
         std::chrono::duration<double>(handled_ignore_absence_sec));
     primary_manager_ = vision_demo_host::PrimaryTargetManager(target_cfg);
 
-    vision_demo_host::BearingEstimator::Config bearing_cfg;
-    bearing_cfg.camera_horizontal_fov_rad =
-        static_cast<float>(this->get_parameter("bearing.camera_horizontal_fov_rad").as_double());
-    bearing_cfg.camera_mount_x =
-        static_cast<float>(this->get_parameter("bearing.camera_mount_x").as_double());
-    bearing_cfg.camera_mount_y =
-        static_cast<float>(this->get_parameter("bearing.camera_mount_y").as_double());
-    bearing_cfg.camera_mount_z =
-        static_cast<float>(this->get_parameter("bearing.camera_mount_z").as_double());
-    bearing_cfg.camera_mount_roll =
-        static_cast<float>(this->get_parameter("bearing.camera_mount_roll").as_double());
-    bearing_cfg.camera_mount_pitch =
-        static_cast<float>(this->get_parameter("bearing.camera_mount_pitch").as_double());
-    bearing_cfg.camera_mount_yaw =
-        static_cast<float>(this->get_parameter("bearing.camera_mount_yaw").as_double());
-    bearing_ = vision_demo_host::BearingEstimator(bearing_cfg);
-    if (bearing_.UsingConfiguredMountRotation()) {
-      RCLCPP_INFO(get_logger(), "%s", bearing_.ModeMessage().c_str());
-    } else {
-      RCLCPP_WARN(get_logger(), "%s", bearing_.ModeMessage().c_str());
-    }
-
     vision_demo_host::IdentityManager::Config sid_cfg;
     sid_cfg.max_missing_frames = target_cfg.lost_threshold_frames;
     sid_cfg.feat_bank_size =
@@ -405,16 +368,6 @@ class VisionDemoNode : public rclcpp::Node {
       throw std::runtime_error("identity_manager init failed: " + error);
     }
 
-    const std::string udp_ip = this->get_parameter("udp.ip").as_string();
-    const int udp_port_raw = this->get_parameter("udp.port").as_int();
-    if (udp_port_raw <= 0 || udp_port_raw > 65535) {
-      throw std::runtime_error("udp.port invalid: " + std::to_string(udp_port_raw));
-    }
-    udp_ = vision_demo_host::UdpJsonAdapter(udp_ip, static_cast<uint16_t>(udp_port_raw));
-    if (!udp_.Initialize(&error)) {
-      throw std::runtime_error("udp_json_adapter init failed: " + error);
-    }
-
     vision_demo_host::CameraIngest::AcquiredFrame acquired_frame;
     if (!camera_.Read(&acquired_frame, &error)) {
       mission_ros_adapter_->detection_tracking_readiness().ReportRuntimeStatus(
@@ -470,8 +423,7 @@ class VisionDemoNode : public rclcpp::Node {
     }
 
     LogEffectiveConfig(camera_cfg, acquired_frame, infer_cfg, filter_cfg,
-                       tracker_.EffectiveConfig(), target_cfg, bearing_cfg, sid_cfg, udp_ip,
-                       udp_port_raw, viz_cfg);
+                       tracker_.EffectiveConfig(), target_cfg, sid_cfg, viz_cfg);
   }
 
   void LogEffectiveConfig(const vision_demo_host::CameraIngest::Config &camera_cfg,
@@ -480,10 +432,7 @@ class VisionDemoNode : public rclcpp::Node {
                           const vision_demo_host::DetFilter::Config &filter_cfg,
                           const vision_demo_host::MotTracker::Config &tracker_cfg,
                           const vision_demo_host::PrimaryTargetManager::Config &target_cfg,
-                          const vision_demo_host::BearingEstimator::Config &bearing_cfg,
                           const vision_demo_host::IdentityManager::Config &identity_cfg,
-                          const std::string &udp_ip,
-                          const int udp_port,
                           const vision_demo_host::VisualizerRecorder::Config &viz_cfg) {
     RCLCPP_INFO(get_logger(),
                 "startup_effective_config camera backend=hik_mvs requested_size=%dx%d requested_fps=%.2f timeout_ms=%d mvs_model=%s mvs_serial=%s bayer_interpolation=%s bayer_smoothing=%s conversion_target=BGR8",
@@ -552,10 +501,7 @@ class VisionDemoNode : public rclcpp::Node {
                 target_cfg.lost_threshold_frames, target_cfg.min_person_area_px, target_cfg.max_center_jump_norm,
                 target_cfg.min_area_ratio, target_cfg.max_area_ratio, target_cfg.pending_recovery_frames);
     RCLCPP_INFO(get_logger(),
-                "startup_effective_config bearing hfov=%.5f mount_xyz=%.5f/%.5f/%.5f mount_rpy=%.5f/%.5f/%.5f udp=%s:%d live_mode=%s preview=%s recording=%s recording_output_root=%s recording_path=%s recording_fps=%.2f overlay_queue_capacity=%zu",
-                bearing_cfg.camera_horizontal_fov_rad, bearing_cfg.camera_mount_x, bearing_cfg.camera_mount_y,
-                bearing_cfg.camera_mount_z, bearing_cfg.camera_mount_roll, bearing_cfg.camera_mount_pitch,
-                bearing_cfg.camera_mount_yaw, udp_ip.c_str(), udp_port,
+                "startup_effective_config live_mode=%s preview=%s recording=%s recording_output_root=%s recording_path=%s recording_fps=%.2f overlay_queue_capacity=%zu",
                 vision_demo_host::VisualizerRecorder::ModeName(viz_cfg).c_str(), BoolStr(viz_cfg.enable_preview),
                 BoolStr(viz_cfg.enable_recording), viz_cfg.recording_output_root.c_str(),
                 viz_cfg.recording_path.c_str(), viz_cfg.recording_fps, viz_cfg.queue_capacity);
@@ -679,22 +625,6 @@ class VisionDemoNode : public rclcpp::Node {
          source_time},
         source_metadata);
 
-    vision_demo_host::BearingOutput output{};
-    if (primary.primary_track.has_value()) {
-      output = bearing_.Estimate(primary.primary_track.value(), frame.cols, frame.rows);
-    } else {
-      output.u_norm = 0.5F;
-      output.v_norm = 0.5F;
-      output.bearing_base_rad = 0.0F;
-      output.elevation_base_rad = 0.0F;
-      output.bearing_confidence = 0.0F;
-    }
-
-    if (!udp_.Send(primary, output, &error, &identity_result)) {
-      RCLCPP_WARN_THROTTLE(get_logger(), *this->get_clock(), 2000, "udp_json_adapter send failed: %s",
-                           error.c_str());
-    }
-
     if (monitor_.ShouldReport()) {
       const int primary_id = primary.primary_target_id;
       const auto camera_metrics = camera_.Metrics();
@@ -746,8 +676,6 @@ class VisionDemoNode : public rclcpp::Node {
   std::mutex pipeline_mutex_;
   vision_demo_host::PrimaryTargetManager primary_manager_;
   vision_demo_host::IdentityManager identity_manager_;
-  vision_demo_host::BearingEstimator bearing_;
-  vision_demo_host::UdpJsonAdapter udp_;
   std::unique_ptr<vision_demo_host::VisualizerRecorder> visualizer_;
   vision_demo_host::RuntimeMonitor monitor_;
 };

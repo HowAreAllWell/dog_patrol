@@ -10,7 +10,7 @@ live/capture/record entry 的默认 Bayer interpolation；不改变 detector、t
 | 入口 | 无 override 的 Bayer interpolation | smoothing |
 | --- | --- | --- |
 | `CameraIngest::Config`、ROS node parameter declaration、`config/demo_params.yaml` | `balanced` | `false` |
-| `live_bearing_test.sh` | `balanced` | `false` |
+| `vision_demo_node` | `balanced` | `false` |
 | `capture_ffv1` 与 `Ffv1CaptureWorkflow::Config` | `balanced` | `false` |
 | `record_test_set` 的 Hik MVS path | `balanced` | `false` |
 
@@ -50,6 +50,7 @@ colcon test --packages-select vision_demo_host --event-handlers console_direct+ 
 ```bash
 export LD_LIBRARY_PATH="/opt/MVS/lib/aarch64:/opt/MVS/lib/64:${LD_LIBRARY_PATH:-}"
 source /opt/ros/humble/setup.bash
+source /path/to/workspace/dog_patrol/install/setup.bash
 source install/setup.bash
 timeout --signal=INT 35s ros2 run vision_demo_host vision_demo_node --ros-args \
   -p camera.mvs_model:=MV-CU013-A0UC \

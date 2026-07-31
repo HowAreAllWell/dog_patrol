@@ -8,7 +8,7 @@ namespace vision_demo_host::tools {
 
 inline std::string PerFrameCsvHeader() {
   return "frame_idx,det_count,track_count,track_state,primary_semantic_id,primary_raw_track_id_debug,"
-         "bearing_base_rad,sid_mode,sid_freeze,visible_semantic_ids,primary_decision_reason,"
+         "sid_mode,sid_freeze,visible_semantic_ids,primary_decision_reason,"
          "primary_reject_reason,primary_recovery_reason,primary_supporting_raw_track_id_debug";
 }
 
@@ -18,8 +18,8 @@ inline std::string PerFrameCsvHelp() {
       "  per_frame.csv is written when --save-frame-csv=true.\n"
       "  Schema: " +
       PerFrameCsvHeader() + "\n"
-      "  Existing fields keep their order. Phase 7 appended primary_recovery_reason and\n"
-      "  primary_supporting_raw_track_id_debug so PENDING_RECOVERY frames can be reviewed without changing UDP.\n"
+      "  The schema records mission-facing identity and primary state; primary recovery fields are\n"
+      "  included so PENDING_RECOVERY frames can be reviewed without a legacy transport.\n"
       "  primary_recovery_reason is the compact token used by the video overlay. Tokens include center_jump,\n"
       "  low_score, assoc_gate, merged, split_recovery, and fallback pending.\n"
       "  primary_decision_reason includes pending_recovery_hold_missing_identity_evidence when the configured\n"
@@ -93,7 +93,7 @@ inline std::string Phase3ShadowStateCsvHelp() {
       "  Join candidate rows by frame_idx plus candidate_raw_track_id/raw_track_id, reason, and\n"
       "  related_raw_track_id. group_last_update_frame uses the same frame_idx convention.\n"
       "  This file is diagnostic. It records identity-layer debug rows derived from tracklet_hypotheses.csv\n"
-      "  and Phase 4/5 manager paths without changing primary state, overlay, or UDP output fields.\n"
+      "  and Phase 4/5 manager paths without changing primary state or the mission ROS output contract.\n"
       "  Phase 5 birth observability emits NewBirthCandidate lifecycle rows derived from sid_scores.csv\n"
       "  rows and current observations: event_type=new_birth_candidate_pending for small new-person\n"
       "  stability waits, event_type=new_birth_candidate_hidden for hidden or pending birth decisions,\n"

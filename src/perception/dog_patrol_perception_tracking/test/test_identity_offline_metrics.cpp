@@ -28,10 +28,10 @@ TEST(IdentityOfflineMetricsTest, AggregatesIdentityAcceptanceDistributionsFromDe
   WriteText(dir / "per_frame.csv",
             vision_demo_host::tools::PerFrameCsvHeader() +
                 "\n"
-                "0,2,1,LOCKED,1,10,0.000000,NORMAL,0,1,locked_primary,,,\n"
-                "1,2,1,PENDING_RECOVERY,1,-1,0.000000,MERGED,1,1,pending_recovery_from_identity_state,"
+                "0,2,1,LOCKED,1,10,NORMAL,0,1,locked_primary,,,\n"
+                "1,2,1,PENDING_RECOVERY,1,-1,MERGED,1,1,pending_recovery_from_identity_state,"
                 "visible_primary_low_score_update,low_score,10\n"
-                "2,2,1,PENDING_RECOVERY,1,-1,0.000000,MERGED,1,1,"
+                "2,2,1,PENDING_RECOVERY,1,-1,MERGED,1,1,"
                 "pending_recovery_hold_missing_identity_evidence,,pending,10\n");
   WriteText(dir / "identities.csv",
             "frame_idx,semantic_id,identity_state,visible,supporting_raw_track_id,class_id,score,x,y,w,h,"
@@ -101,7 +101,7 @@ TEST(IdentityOfflineMetricsTest, MarksMissingOptionalDebugInputsUnavailable) {
   WriteText(dir / "per_frame.csv",
             vision_demo_host::tools::PerFrameCsvHeader() +
                 "\n"
-                "0,0,0,OCCLUDED,-1,-1,0.000000,NORMAL,0,,no_primary_identity,,,\n");
+                "0,0,0,OCCLUDED,-1,-1,NORMAL,0,,no_primary_identity,,,\n");
 
   const auto metrics = vision_demo_host::tools::BuildIdentityOfflineMetrics(dir, "minimal");
 

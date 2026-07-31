@@ -454,7 +454,7 @@ std::string IdentityOfflineMetricsHelp() {
   return
       "Identity offline acceptance metrics:\n"
       "  identity_metrics.json and identity_metrics.md are additive per-dataset summaries written by offline eval.\n"
-      "  They aggregate existing debug CSVs without changing tracker, identity, primary, UDP, overlay, or CSV schemas.\n"
+      "  They aggregate existing debug CSVs without changing tracker, identity, primary, mission ROS, overlay, or CSV schemas.\n"
       "  Inputs are per_frame.csv, identities.csv, sid_scores.csv, phase3_shadow_state.csv, and\n"
       "  tracklet_hypotheses.csv. Missing optional inputs are marked unavailable with zero-count distributions.\n"
       "  Metrics include primary states such as PENDING_RECOVERY, primary decision/reject/recovery reasons,\n"

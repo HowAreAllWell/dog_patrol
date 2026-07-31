@@ -1,6 +1,6 @@
 # vision_demo_host
 
-Orin 宿主机侧视觉验收 demo，包含检测、短期跟踪、语义身份、主目标选择、方位估计、录制和离线评估工具。
+Orin 宿主机侧视觉验收 demo，包含检测、短期跟踪、语义身份、主目标选择、mission ROS 2 输出、录制和离线评估工具。
 
 ## 当前链路状态
 
@@ -13,8 +13,6 @@ Orin 宿主机侧视觉验收 demo，包含检测、短期跟踪、语义身份�
 - `mission_coordinator`：ROS-independent 任务输出协调 seam；按任务状态 / semantic target / state sequence 只产生当前帧可信 bbox，并负责配置化同目标 loss/reacquire event 时序
 - `perception_readiness`：ROS-independent READY 聚合 seam；以 required capability contribution 和 `STARTUP state_seq` 产生至多一次 aggregate READY action
 - `mission_ros_adapter`：`dog_patrol_interfaces` 的唯一 ROS transport seam；可靠/transient state 输入、aggregate READY/event 输出和 best-effort 新鲜 bbox 输出均在此处映射
-- `bearing_estimator`：demo 近似 bearing（非标定真值）
-- `udp_json_adapter`：localhost UDP JSON
 
 未接入或未完成：
 - identity 层尚未迁移为完整的新状态机；`IdentityManager` 是公开接口并持有当前 identity runtime state。内部 `IdentityAssignmentEngineAdapter` 只承担 assignment / recovery / update engine 适配，调用已抽取的 policy、cost、solver、birth、binding、store、mutation 和 projection helper，保持既有 debug row、raw-to-semantic mapping 与 public behavior。Phase 5 BirthManager 已固定为唯一运行时 birth / hidden candidate 路径，但 primary/output 仍保持当前公开语义。
@@ -38,10 +36,6 @@ Orin 宿主机侧视觉验收 demo，包含检测、短期跟踪、语义身份�
 - `target.lost_event_timeout_sec` / `target.reacquire_retention_sec` / `target.handled_ignore_absence_sec`
 - `mission.state_topic` / `mission.event_topic` / `mission.selected_target_bbox_topic`
 - `perception.camera_optical_frame_id`
-- `bearing.camera_horizontal_fov_rad`
-- `bearing.camera_mount_x/y/z`
-- `bearing.camera_mount_roll/pitch/yaw`
-- `udp.ip` / `udp.port`
 - `visualization.enable`（overlay preview；默认 `false`）
 - `visualization.queue_capacity`（异步 overlay render/write queue；默认 `4`）
 - `recording.enable` / `recording.output_root` / `recording.path` / `recording.fps`（当前 live result 录制强制为 FFV1/MKV；`path` 必须位于可信 diagnostic output root，且 result root 不得与受保护的 clean `data/captures/` 重叠或经符号链接指向它）
@@ -120,45 +114,12 @@ TARGET_CONFIRMED、当前帧 bbox、TARGET_LOST 与 TARGET_REACQUIRED。该 fixt
 建议 engine 路径：
 - `/path/to/my_workplace/vision_demo_ws/assets/models/engines/orin_jp621_trt_local/yolo26n_fp16_640.engine`
 
-## 输出 JSON 字段
+## 下游输出
 
-当前 UDP JSON 字段：
-- `target_id`
-- `track_state`
-- `target_class`
-- `bbox_xywh`
-- `u_norm`
-- `v_norm`
-- `bearing_base_rad`
-- `elevation_base_rad`
-- `bearing_confidence`
-
-`target_id` 当前语义（重要）：
-- `target_id` 是业务主目标 ID（`primary_target_id`），用于跨 raw tracker id 变化保持稳定。
-- `target_id` 初次通常为 `1`；当主目标长时丢失（超过 `target.lost_threshold_frames`）并重选后，`target_id` 可切到 `2/3/...`。
-- tracker 原生 ID（`raw_track_id`）仅作为内部调试语义，不作为对外稳定身份字段。
-
-`bearing_base_rad` 当前语义（重要）：
-- 当前实现会读取配置中的 `base_link -> camera_link` 静态外参初值（roll/pitch/yaw），
-  将相机视线方向旋转到 `base_link` 后计算 `bearing_base_rad = -atan2(y, x)`。
-- 相比纯框中心/FOV 近似更接近机身方位语义，但仍不是正式外参标定后的严格几何真值。
-- 当前不消费运行中的 `/tf_static` 或 `tf2 lookupTransform()`。
-- 若 bearing 外参配置无效，代码会回退到旧近似：
-  `bearing_base_rad ~= -(u_norm - 0.5) * camera_horizontal_fov_rad`，并在日志给出告警。
-- `camera_mount_x/y/z` 当前作为静态外参初值记录保留，当前方位角计算主要使用 roll/pitch/yaw 旋转链。
-- 当前采用“图像坐标近似光学视线 + 静态外参初值旋转”的假设；未来可在补齐
-  `camera_link -> camera_optical_frame` 与正式内外参后继续升级。
-- 符号约定：
-  - `bearing_base_rad > 0` 表示目标在机身左侧（left-positive）；
-  - `bearing_base_rad < 0` 表示目标在机身右侧（right-negative）。
-
-`elevation_base_rad` 当前语义（重要）：
-- 由同一条 `ray_base=[x,y,z]` 计算：
-  `elevation_base_rad = atan2(z, sqrt(x*x + y*y))`。
-- 语义：相对机身水平面的俯仰角/仰角。
-- 符号约定：
-  - `elevation_base_rad > 0` 表示目标方向高于水平面；
-  - `elevation_base_rad < 0` 表示目标方向低于水平面。
+下游 patrol 集成只使用 `dog_patrol_interfaces`：`/mission/event` 上的
+`SOURCE_PERCEPTION` READY、TARGET_CONFIRMED、TARGET_LOST、TARGET_REACQUIRED，以及
+`/perception/selected_target_bbox` 的当前帧 `TargetBoundingBox`。UDP JSON、upstream bearing
+和 `vision_msgs/Detection2DArray` 不属于支持的接口。
 
 ## 主目标绑定策略（当前）
 
@@ -206,52 +167,18 @@ ros2 run vision_demo_host vision_demo_node --ros-args \
 - `camera_metrics` 日志独立于录制开关，报告 acquisition、conversion、copy 的 p50/p95/p99，
   并报告相机帧号不连续、估计 drop 和 MVS 丢包计数。
 
-## UDP 接收
+## 一键现场运行
 
-```bash
-nc -u -l -p 5005
-```
+直接启动 `vision_demo_node`；mission ROS 2 输出由 `MissionRosAdapter` 发布。
 
-## 一键现场方位测试脚本
+四种 live mode 独立配置（追加到 `ros2 run ... vision_demo_node`）：
 
-脚本入口：
-- `/path/to/my_workplace/vision_demo_ws/src/vision_demo_host/scripts/live_bearing_test.sh`
-
-功能：
-- 自动启动 UDP 监听并实时打印：`track_state`、`target_id`、`u/v`、`bearing_base_rad`、`elevation_base_rad`（含角度制）
-- 前台启动 `vision_demo_node`
-- 支持可视化/录制开关参数
-
-四种 live mode 独立配置：
-
-- inference-only：`--viz false --rec false`（干净性能 baseline）
-- preview：`--viz true --rec false`（需要本地图形会话）
-- record：`--viz false --rec true --record-path /path/to/diagnostics/live.mkv`
-- preview+record：`--viz true --rec true --record-path /path/to/diagnostics/live.mkv`
+- inference-only：`-p visualization.enable:=false -p recording.enable:=false`（干净性能 baseline）
+- preview：`-p visualization.enable:=true -p recording.enable:=false`（需要本地图形会话）
+- record：`-p visualization.enable:=false -p recording.enable:=true -p recording.path:=/path/to/diagnostics/live.mkv`
+- preview+record：`-p visualization.enable:=true -p recording.enable:=true -p recording.path:=/path/to/diagnostics/live.mkv`
 
 预览和录制从同一 worker 产生同一 tracking/identity/primary overlay canvas。worker 队列有界、队满丢弃最新诊断帧而不等待编码或显示；每秒日志会输出 capture、inference、render/write 的 FPS、queue/render/write drop 和 p50/p95/p99。请将 live overlay 放在 `data/diagnostics/live_overlays/` 等结果目录，不能当作 source dataset。
-
-示例（实时预览 + 实时方位打印，不录制）：
-
-```bash
-cd /path/to/my_workplace/vision_demo_ws
-src/vision_demo_host/scripts/live_bearing_test.sh \
-  --mvs-model MV-CU013-A0UC \
-  --viz true \
-  --rec false
-```
-
-示例（实时预览 + FFV1 overlay 诊断录制）：
-
-```bash
-cd /path/to/my_workplace/vision_demo_ws
-src/vision_demo_host/scripts/live_bearing_test.sh \
-  --mvs-model MV-CU013-A0UC \
-  --viz true \
-  --rec true \
-  --record-path '/path/to/my_workplace/vision_demo_ws/data/diagnostics/live_overlays/live_$(date +%Y%m%d_%H%M%S).mkv' \
-  --record-fps 30.0
-```
 
 ## 基本验证重点
 
@@ -260,7 +187,7 @@ src/vision_demo_host/scripts/live_bearing_test.sh \
 - Hik MVS ingest 输出 BGR8 acquired-frame 并携带源帧元数据
 - detector 输出可驱动后续链路
 - BoT-SORT tracker 初始化并输出轨迹（画面有目标时）
-- UDP JSON 可接收并包含完整字段
+- mission ROS 2 event/bbox contract 可被外部节点观测
 
 ## Tracker-Core 配置
 
@@ -438,7 +365,6 @@ ros2 run vision_demo_host capture_ffv1 \
   - `det_filter`
   - `mot_tracker`
   - `primary_target_manager`
-  - `bearing_estimator`
 
 运行（默认处理历史 `orin_hik_h264_MOT/01,02,03`，仅作为迁移回归）：
 
@@ -485,7 +411,6 @@ overlay 的渲染画布从 source BGR8 frame clone，绝不回写或标注 clean
 - `--tracker-config <path>`
 - `--tracker-reid-backend <light|osnet_onnx>`
 - `--tracker-reid-model-path <path>`
-- `--enable-udp`（默认关闭）
 - `--save-frame-csv <true|false>`
 - `--video <path>`（显式单视频输入，会覆盖 `--datasets`）
 - `--overlay-preview <true|false>`（默认关闭）
@@ -544,7 +469,7 @@ overlay 的渲染画布从 source BGR8 frame clone，绝不回写或标注 clean
   - `sid_mode`（`NORMAL` / `MERGED` / `SPLIT_RECOVERY`）
   - `sid_freeze`（1=语义特征更新冻结，0=可更新）
 - `sid_scores.csv` 中 `feature_update_allowed`、`geometry_update_allowed` 和 `sid_freeze` 保持既有 boolean 语义；`feature_update_reason` / `geometry_update_reason` 是 Phase 6 决策证据字段，用于解释 feature-bank / reliable-geometry update 为什么允许、等待或阻断。当前 reason 包括 `allowed_update`、`global_merge_split_freeze`、`overlapping_track_freeze`、`unreliable_low_quality_observation`、`insufficient_stable_frames`、`update_blocked_by_rejected_assignment`。
-- `identity_metrics.json` / `identity_metrics.md` 聚合现有 debug CSV，不改变 tracker、identity、primary、UDP、overlay 或既有 CSV schema；缺失的可选输入会标记为 `unavailable`，对应分布保持空/零计数。当前聚合项包括 primary state（含 `PENDING_RECOVERY`）、primary decision/reject/recovery reason、identity state、assignment stage/reject reason、feature/geometry update reason、Phase 3 shadow `event_type`、NewBirthCandidate hidden/pending/allocated reason、Phase 4 handoff event、tracklet hypothesis status/reason。
+- `identity_metrics.json` / `identity_metrics.md` 聚合现有 debug CSV，不改变 tracker、identity、primary、overlay 或既有 CSV schema；缺失的可选输入会标记为 `unavailable`，对应分布保持空/零计数。当前聚合项包括 primary state（含 `PENDING_RECOVERY`）、primary decision/reject/recovery reason、identity state、assignment stage/reject reason、feature/geometry update reason、Phase 3 shadow `event_type`、NewBirthCandidate hidden/pending/allocated reason、Phase 4 handoff event、tracklet hypothesis status/reason。
 - `primary_raw_track_id_debug` 仅用于离线排障，不参与画面叠字语义
 - `tracklet_hypotheses.csv` 固定字段：
   - `frame_idx,hypothesis_idx,status,raw_track_id,class_id,score,x,y,w,h,reason,related_raw_track_id,assoc_stage,assoc_cost,assoc_iou,assoc_motion_dist,assoc_app_dist,assoc_appearance_used,assoc_final_gate,assoc_reject_reason`
@@ -567,7 +492,7 @@ overlay 的渲染画布从 source BGR8 frame clone，绝不回写或标注 clean
   - 回链方法：先按相同 `frame_idx` 筛两张表，再用 `candidate_raw_track_id` 对 `raw_track_id`，并核对 `reason`、`related_raw_track_id`、bbox/score；`duplicate_output_hidden` 行必须保留 hidden candidate 事实，不表示该候选参与显示或 semantic id 分配。
   - 离线 smoke 验收应先看 `phase3_shadow_state.csv` 的 `event_type` 分布，确认至少覆盖 `hypothesis_input`、`merged_group_enter/update/end` 和 `split_candidate_enter/update/end`；再看 `tracklet_hypotheses.csv` 的 #6 reason 分布仍只使用既有 reason 字符串。
   - 人工抽查窗口：`orin_hik_h264_MOT/01` 的 `746-771` 看 group lifecycle，`793-795` 看 hidden split candidate，`1015-1031` 看 split recovery evidence；`760`、`795`、`1030` 附近同时回查 `tracklet_hypotheses.csv`；`orin_hik_h264_MOT/02` 的 `790-850` 用于第二段 handoff/恢复场景抽查。
-  - 该 CSV 是 shadow-only debug 输出，不参与 semantic id 分配、primary、overlay、UDP 或 `IdentityAssignmentEngineAdapter` 决策。
+  - 该 CSV 是 shadow-only debug 输出，不参与 semantic id 分配、primary、overlay 或 `IdentityAssignmentEngineAdapter` 决策。
 - Phase 5 birth / hidden candidate readiness：
   - 证据基线见 `docs/phase5_birth_hidden_candidate_readiness.md`。
   - `sid_scores.csv` 中 `stage=phase5_birth_candidate` 表示 Phase 5 birth proposal / hidden / pending decision，`stage=phase5_new_semantic`、`accepted=1` 表示 Phase 5 path 已正式分配 semantic id。
@@ -575,10 +500,6 @@ overlay 的渲染画布从 source BGR8 frame clone，绝不回写或标注 clean
   - `sid_scores.csv` 的 `frame_idx` 来自 assignment engine adapter 内部 debug frame；`tracklet_hypotheses.csv` 和 `phase3_shadow_state.csv` 使用 0-based 离线视频帧号。跨文件复盘时优先按 raw id、reason、bbox/score 和相邻窗口核对，不要只靠帧号直接等值 join。
   - 当前 `orin_hik_h264_MOT/01,02` 可提供 tracker hidden / split candidate 样本，但不覆盖全部 birth hidden reason；`ambiguous_recovery_pending`、`duplicate_split_hidden`、`skinny_partial_hidden`、`wide_fragment_hidden` 仍以 `test_identity_assignment_engine_adapter` 作为主要自动化证据。
 - `LOCKED -> LOST` 转换次数
-- `bearing_base_rad` 抖动指标：
-  - `bearing_diff_abs_mean`
-  - `bearing_diff_stddev`
-
 叠字 ID 语义（runtime 可视化与 offline `eval_overlay.mp4` 一致）：
 - 画面中显示的 `id=` 为语义 ID（不是 tracker raw id）。
 - 第一位成功锁定的主目标 `person` 语义 ID 固定为 `1`（红框）。

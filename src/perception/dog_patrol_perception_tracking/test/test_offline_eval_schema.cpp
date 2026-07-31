@@ -8,7 +8,7 @@
 TEST(OfflineEvalSchemaTest, PerFrameCsvHeaderAppendsPrimaryRecoveryDebugFields) {
   const std::string expected =
       "frame_idx,det_count,track_count,track_state,primary_semantic_id,primary_raw_track_id_debug,"
-      "bearing_base_rad,sid_mode,sid_freeze,visible_semantic_ids,primary_decision_reason,"
+      "sid_mode,sid_freeze,visible_semantic_ids,primary_decision_reason,"
       "primary_reject_reason,primary_recovery_reason,primary_supporting_raw_track_id_debug";
 
   EXPECT_EQ(vision_demo_host::tools::PerFrameCsvHeader(), expected);
@@ -28,8 +28,7 @@ TEST(OfflineEvalSchemaTest, PerFrameCsvHelpDocumentsPendingRecoveryReasonTokens)
       "split_recovery",
       "pending",
       "pending_recovery_hold_missing_identity_evidence",
-      "appended",
-      "UDP",
+      "legacy transport",
   };
   for (const auto &term : required_terms) {
     EXPECT_NE(help.find(term), std::string::npos) << term;
@@ -200,8 +199,7 @@ TEST(OfflineEvalSchemaTest, Phase3ShadowStateHelpDocumentsShadowOnlyContract) {
       "shadow-only",
       "semantic id",
       "primary",
-      "overlay",
-      "UDP",
+      "mission ROS",
   };
 
   const std::string help = vision_demo_host::tools::Phase3ShadowStateCsvHelp();

@@ -15,7 +15,7 @@ camera_ingest
   -> mot_tracker
   -> identity_manager
   -> primary_target_manager
-  -> bearing_estimator / udp_json_adapter / visualizer_recorder
+  -> mission_ros_adapter / visualizer_recorder
 ```
 
 关键调用关系：
@@ -25,8 +25,7 @@ tracks = MotTracker::Update(filtered_detections, frame)
 tracklet_hypotheses = MotTracker::LastTrackletHypotheses()
 identity_result = IdentityManager::Update(TrackletObservationsFromTracks(tracks), tracklet_hypotheses, previous_primary, frame)
 primary = PrimaryTargetManager::Update(identity_result.identities)
-bearing = BearingEstimator::Estimate(primary.primary_track, ...)
-UdpJsonAdapter::Send(primary, bearing, identity_result)
+MissionRosAdapter publishes mission event / current target bbox actions.
 VisualizerRecorder::Render(frame, tracks, primary, identity_result)
 ```
 
@@ -148,18 +147,15 @@ VisualizerRecorder::Render(frame, tracks, primary, identity_result)
 - 普通缺失仍转为 `OCCLUDED`，而不是立即释放 primary；
 - identity 进入 lost / inactive 后会释放 primary。
 
-注意：`PENDING_RECOVERY` 已是公开 `PrimaryState` / UDP `track_state` 值；当前只覆盖可见 primary sanity rejection 以及 identity `MERGED` / `SPLIT_RECOVERY` 的窄范围语义，不表示完整 pending recovery 状态机已经迁移完成。
+注意：`PENDING_RECOVERY` 已是公开 `PrimaryState`，当前只覆盖可见 primary sanity rejection 以及 identity `MERGED` / `SPLIT_RECOVERY` 的窄范围语义，不表示完整 pending recovery 状态机已经迁移完成。
 
 ### 2.5 输出与可视化
 
-`UdpJsonAdapter` 当前输出包括：
+mission ROS output 当前包括：
 
-- `target_id`：业务主目标 id / semantic id 口径；
-- `track_state`：primary state；
-- `identity_state`；
-- `identity_missing_frames`；
-- `identity_supporting_raw_track_id`；
-- bbox 和 bearing 字段。
+- `/mission/event` 的 `SOURCE_PERCEPTION` READY、TARGET_CONFIRMED、TARGET_LOST、TARGET_REACQUIRED；
+- `/perception/selected_target_bbox` 的当前帧 semantic target bbox；
+- overlay 中的 semantic id、identity state、supporting raw id 和 primary 状态。
 
 `VisualizerRecorder` 当前叠加显示：
 
@@ -179,8 +175,8 @@ VisualizerRecorder::Render(frame, tracks, primary, identity_result)
 3. 将原 semantic id 逻辑收缩为内部 `IdentityAssignmentEngineAdapter`。
 4. 新增 `IdentityManager` 作为身份层接口。
 5. `PrimaryTargetManager` 改为消费 `IdentityObservation`。
-6. UDP 和可视化接入 identity 状态。
-7. 增加 identity / primary / UDP 相关单元测试。
+6. Mission ROS 和可视化接入 identity 状态。
+7. 增加 identity / primary / mission adapter 相关单元测试。
 8. 建立 `tracklet_hypotheses.csv` 和 `phase3_shadow_state.csv`，用于观察 tracker hidden / suppressed candidate、MergedGroup 和 SplitCandidate lifecycle。
 9. 已将 Phase 4 四类 handoff 行为固定为唯一运行时路径：`phase4_merged_split_handoff`、`phase4_merged_side_recovery`、`phase4_merged_single_blob_handoff` 和 `phase4_pairwise_assignment`。对应旧切换参数和 fallback 分支已移除。
 10. 已补充 Phase 5 readiness 文档，固定 birth / hidden candidate 的现有证据面与下一步建议。
@@ -207,7 +203,7 @@ VisualizerRecorder::Render(frame, tracks, primary, identity_result)
 31. 已将 Phase 6 assignment candidate/debug 构造抽取为内部 `AssignmentCandidateBuilder` helper，覆盖 active assignment candidate score/gate evidence 到 `assign_candidate` rows 与 solver matrix 的适配、inactive recovery candidate decision 到 `inactive_recover_candidate` rows 的适配，以及 solver result selected / margin / accepted / pending row 回写；`IdentityAssignmentEngineAdapter` 仍持有 pairwise debug rows、实际 assignment application、raw-to-semantic mapping、semantic-id allocation call sites、birth decisions、Phase 4/5 apply paths 和 identity record storage ownership。
 32. 已将 Phase 6 active assignment input collection 抽取为内部 `ActiveAssignmentInputCollector` helper，覆盖 unassigned-track filtering、free semantic id filtering、feature row/index adaptation、missing identity / appearance gate evidence 与 accepted/pairwise-pending row compatibility 所需输入准备；`IdentityAssignmentEngineAdapter` 仍持有 score truth helpers、solver invocation、pairwise debug rows、assignment application、raw-to-semantic mapping、birth decisions、Phase 4/5 apply paths 和 identity record storage ownership。
 33. 已将 Phase 6 assignment application mutation orchestration 抽取为内部 `AssignmentApplicationExecutor` helper，覆盖按既有顺序迭代 planned applications、accepted row 的 update-policy reason 回写、feature / reliable-geometry mutation、merged/split/overlap 遮挡保护、rejected row default reason 填充，以及 planned raw-to-semantic replacement；`IdentityAssignmentEngineAdapter` 通过 `EvaluateUpdatePolicy` / `UpsertIdentity` seams 提供现有行为，仍持有 birth decisions、Phase 4/5 direct apply call sites 与 birth apply 后的 identity storage / primary / output ownership。
-34. 已将 Phase 6 merged single-blob assignment decision 抽取为内部 `MergedSingleBlobAssignmentDecision` helper，覆盖 continuity kept、best final-cost selection、close continuity candidate margin、best-appearance handoff eligibility、Phase 4 handoff 前的 continuity preference、inactive recovery fallback 和 new semantic id fallback；`IdentityAssignmentEngineAdapter` 仍持有 identity storage、feature extraction、cost/gate 适配、inactive recovery candidate preparation、semantic id allocation、raw binding、Phase 4 apply methods、primary/output/CSV/UDP/overlay ownership。
+34. 已将 Phase 6 merged single-blob assignment decision 抽取为内部 `MergedSingleBlobAssignmentDecision` helper，覆盖 continuity kept、best final-cost selection、close continuity candidate margin、best-appearance handoff eligibility、Phase 4 handoff 前的 continuity preference、inactive recovery fallback 和 new semantic id fallback；`IdentityAssignmentEngineAdapter` 仍持有 identity storage、feature extraction、cost/gate 适配、inactive recovery candidate preparation、semantic id allocation、raw binding、Phase 4 apply methods、primary/output/CSV/overlay ownership。
 35. 已将 Phase 6 inactive recovery input collection 抽取为内部 `InactiveRecoveryInputCollector` helper，覆盖 recovery-track filtering、free inactive semantic-id filtering、`CanRecoverInactiveIdentity` 过滤、strict / relaxed recover threshold 适配、missing identity gate evidence 和 accepted / selected row compatibility 所需输入准备；`IdentityAssignmentEngineAdapter` 仍持有 score truth helpers、solver invocation、recovery application、raw-to-semantic mapping、birth decisions、Phase 4/5 apply paths 和 identity record storage ownership。
 36. 已将 Phase 6 unresolved-track final resolution 编排抽取为内部 `UnresolvedTrackFinalResolutionCoordinator` helper，覆盖 active / inactive assignment 后仍未分配 track 的 occlusion-suspect skip、ambiguous recovery pending、Phase 4 side recovery 前的 duplicate-apply suppression、duplicate split / morphology hide、小目标 pending、Phase 5 pending 和 accepted birth assignment output；adapter 仍负责 score truth callbacks、BirthManager / SemanticIdAllocator call sites、debug row frame/mode projection、runtime-state mutation 适配和 raw binding 编排。
 37. 已将 Phase 4 direct identity apply mutation mechanics 抽取为内部 `Phase4DirectApplyHelper`，覆盖 raw track lookup、target semantic id validation、feature extraction、app/geo/time/final cost、accepted Phase 4 score debug row、update policy、upsert、raw binding 和 accepted raw birth cleanup。
@@ -221,7 +217,7 @@ VisualizerRecorder::Render(frame, tracks, primary, identity_result)
 3. 合并、拆分、遮挡生命周期仍保留兼容 debug reason 口径（例如 `legacy_mode_*`），但 Phase 3/4 handoff 已是当前运行时路径。
 4. feature update policy 决策面、feature-bank read/cost helper、reliable-geometry read/cost helper、assignment cost composition helper、active assignment input/solving helper、inactive recovery input/selection helper、raw-continuity decision helper、birth / hidden candidate decision helper、birth candidate storage helper、birth facade helper、unresolved-track final resolution helper、semantic id allocation helper、assignment application planning helper、assignment apply executor helper、Phase 4/5 accepted runtime mutation helper、raw-to-semantic binding storage helper、feature bank / reliable geometry mutation helper、identity runtime record 类型边界和 record lifecycle mutation helper 已独立，runtime record 内也已有 feature bank / reliable geometry 子状态；但长期特征管理、feature bank ownership 和 reliable geometry ownership 仍未迁移成目标状态机。
 5. `IdentityAssignmentEvidence` 已输出，但 Primary 当前主要使用 track / association / bbox sanity 信息，并未完整消费 identity assignment confidence。
-6. `PENDING_RECOVERY` 已作为 public primary / UDP 状态接入，但当前只覆盖 visible primary sanity rejection 和 identity `MERGED` / `SPLIT_RECOVERY`；`pending_recovery_frames` 仍不是完整 pending recovery 状态机。
+6. `PENDING_RECOVERY` 已作为 public primary 状态接入，但当前只覆盖 visible primary sanity rejection 和 identity `MERGED` / `SPLIT_RECOVERY`；`pending_recovery_frames` 仍不是完整 pending recovery 状态机。
 7. 配置中仍存在 legacy / diagnostics 对照配置，后续需要明确保留、归档或删除。
 8. 当前测试通过不等于算法效果达标；离线评估和视频复盘仍是必要输入。
 9. Phase 5 birth / hidden candidate 已有独立 `BirthManager` facade 和 `NewBirthCandidate` lifecycle evidence。当前路径由 `IdentityManager` Phase 5 helper 表达 hidden / pending / accepted decision surface；`sid_scores.csv` 继续保留既有 stage / reason 名称作为兼容 debug 证据。

@@ -13,8 +13,7 @@ CameraIngest
   -> MotTracker
   -> IdentityManager
   -> PrimaryTargetManager
-  -> BearingEstimator
-  -> UdpJsonAdapter / VisualizerRecorder
+  -> MissionRosAdapter / VisualizerRecorder
 ```
 
 各模块职责：
@@ -25,8 +24,7 @@ CameraIngest
 - `MotTracker`：短期多目标跟踪层，维护 raw track。
 - `IdentityManager`：语义身份层，把短期 raw track 映射成更稳定的 `semantic_id`。
 - `PrimaryTargetManager`：主目标层，只允许 `person` 成为主目标。
-- `BearingEstimator`：由框中心和相机外参初值估算方位角。
-- `UdpJsonAdapter`：向下游输出 JSON。
+- `MissionRosAdapter`：通过 `dog_patrol_interfaces` 发布 mission event 和当前帧 target bbox。
 - `VisualizerRecorder`：实时显示或录制带叠字视频。
 
 ## 2. 三类 ID 不要混淆
@@ -35,9 +33,9 @@ CameraIngest
 
 - `raw_id`：MOT 内部短期轨迹 ID。它可能因为遮挡、丢检、重叠而变化，不对下游承诺稳定。
 - `semantic_id`：画面叠字、离线评估、身份层对外使用的稳定身份。现场看到的 `id=` 是这个。
-- `primary_target_id` / UDP `target_id`：业务主目标 ID。主目标短时丢失时会保持，不会因为 raw_id 变化立刻切换。
+- `primary_target_id`：业务主目标 ID。主目标短时丢失时会保持，不会因为 raw_id 变化立刻切换。
 
-现场判断 ID 稳不稳时，看 `semantic_id` 和 UDP `target_id`，不要用 `raw_id` 做业务判断。
+现场判断 ID 稳不稳时，看 `semantic_id` 和 mission bbox/event 中的 `target_id`，不要用 `raw_id` 做业务判断。
 
 ## 3. Detector 层
 
@@ -229,36 +227,19 @@ ros2 run vision_demo_host vision_demo_node --ros-args \
 - 主目标已离开但系统迟迟不换人：减小 `target.lost_threshold_frames`。
 - 主目标被旁边大框抢走：检查 Identity 层是否把旧目标恢复成功，再调 primary 的面积/中心跳变约束。
 
-## 8. Bearing 方位输出
-
-相关参数：
-
-- `bearing.camera_horizontal_fov_rad`
-- `bearing.camera_mount_x/y/z`
-- `bearing.camera_mount_roll/pitch/yaw`
-
-当前方位不是完整标定几何，而是“图像中心/FOV 近似 + 静态安装外参初值”。符号约定：
-
-- `bearing_base_rad > 0`：目标在机身左侧。
-- `bearing_base_rad < 0`：目标在机身右侧。
-- `elevation_base_rad > 0`：目标高于水平面。
-- `elevation_base_rad < 0`：目标低于水平面。
-
-如果相机安装姿态变了，必须优先更新 mount roll/pitch/yaw，否则跟踪 ID 可能稳定，但方位角语义会错。
-
-## 9. 现场调参流程
+## 8. 现场调参流程
 
 推荐顺序：
 
 1. 固定一个可复现场景，录制 20~60 秒视频。
 2. 只改一组参数，记录改动原因。
-3. 先看视频叠字 ID，再看 UDP `target_id`。
+3. 先看视频叠字 ID，再看 mission event/bbox 中的 `target_id`。
 4. 再看 FPS 和资源占用。
 5. 通过后把参数写回 `config/demo_params.yaml` 或单独保存现场配置。
 
 不要同时改 detector、tracker、identity、primary 四层，否则无法判断收益和副作用来自哪里。
 
-## 10. 常见场景对照
+## 9. 常见场景对照
 
 | 场景 | 优先看 | 可能调整 |
 | --- | --- | --- |
@@ -270,13 +251,12 @@ ros2 run vision_demo_host vision_demo_node --ros-args \
 | 主目标短时离开后 LOST | Primary | 增大 `target.lost_threshold_frames` |
 | FPS 不足 | Runtime/GMC/ReID | 关闭可视化录制，调 GMC，避免 ONNX ReID |
 
-## 11. 最小验收标准
+## 10. 最小验收标准
 
 现场跑通不能只看节点不崩溃，至少要确认：
 
 - MVS 相机能稳定读帧。
 - TensorRT engine 能加载，画面有人时能检测。
 - 视频叠字里的 `id=` 在短遮挡和交叉时不频繁跳。
-- UDP 能收到 JSON。
-- 主目标 `target_id` 在短时遮挡中保持，状态可从 `LOCKED` 到 `OCCLUDED` 再回 `LOCKED`。
-- 方位角左右符号符合现场安装方向。
+- `/mission/event` 和 `/perception/selected_target_bbox` 能被外部节点观测。
+- 主目标 `target_id` 在短时遮挡中保持，事件状态可从 `TARGET_CONFIRMED` 到 `TARGET_LOST` 再回 `TARGET_REACQUIRED`。

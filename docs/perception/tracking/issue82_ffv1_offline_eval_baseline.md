@@ -47,7 +47,7 @@ headless run `issue82_ffv1_lossless_headless_20260730_232542/s01` 成功：metad
 decoded `901`，吞吐 `11.122 FPS`。它的 `eval_overlay.mkv` 由 `ffprobe -count_frames` 验证为
 `codec_name=ffv1`、`1280x1024`、`avg_frame_rate=2997/100`、`nb_read_frames=901`，大小
 `524734159` bytes。逐帧抽取的 frame 450 显示 source 场景未被改写，而结果 overlay 有
-`frame=450 det=0 tracks=0`、`IDLE`、bearing 三行诊断文字；这也是本 take 的无检测 review window。
+`frame=450 det=0 tracks=0`、`IDLE` 和历史第三行诊断文字；这也是本 take 的无检测 review window。
 
 当前环境没有 `DISPLAY`，因此没有虚构本地 interactive preview 证据。preview-only 与
 preview+record 复用 record-only 已检视的同一 `DrawEvalOverlay` canvas，运行时只额外调用
