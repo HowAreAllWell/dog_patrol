@@ -488,7 +488,7 @@ overlay 的渲染画布从 source BGR8 frame clone，绝不回写或标注 clean
   - `sid_scores.csv` 的 `frame_idx` 来自 assignment engine adapter 内部 debug frame；`tracklet_hypotheses.csv` 和 `phase3_shadow_state.csv` 使用 0-based 离线视频帧号。跨文件复盘时优先按 raw id、reason、bbox/score 和相邻窗口核对，不要只靠帧号直接等值 join。
   - 当前 `orin_hik_h264_MOT/01,02` 可提供 tracker hidden / split candidate 样本，但不覆盖全部 birth hidden reason；`ambiguous_recovery_pending`、`duplicate_split_hidden`、`skinny_partial_hidden`、`wide_fragment_hidden` 仍以 `test_identity_assignment_engine_adapter` 作为主要自动化证据。
 - `LOCKED -> LOST` 转换次数
-叠字 ID 语义（runtime 可视化与 offline `eval_overlay.mp4` 一致）：
+叠字 ID 语义（runtime 可视化与 offline `eval_overlay.mkv` 一致）：
 - 画面中显示的 `id=` 为语义 ID（不是 tracker raw id）。
 - 第一位成功锁定的主目标 `person` 语义 ID 固定为 `1`（红框）。
 - 主目标后续切换时，沿用该目标既有语义 ID，仅变更为红框，不重写编号。
