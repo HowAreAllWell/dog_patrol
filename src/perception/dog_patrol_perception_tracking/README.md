@@ -104,7 +104,9 @@ primary 和 coordinator 的 frame chain 由 live tick mutex 串行执行。即�
 `MultiThreadedExecutor` 也不会并发进入 detector/tracker/identity；mission-state subscription
 置于独立的 mutually-exclusive callback group，使它在 camera acquisition 或 inference 较慢时
 仍能及时写入最新 snapshot。READY、event 和 bbox 都在发布前于同一 mission mutex 下复核
-完整 snapshot，因此不会把旧 sequence、旧 target 或已 blocked 的 frame action 发到 ROS。
+完整 snapshot；coordinator 的 one-shot action 也在该短临界区内计算并发布，因此不会把旧
+sequence、旧 target 或已 blocked 的 frame action 发到 ROS，亦不会因 state 交错而吞掉
+新的 loss/reacquisition action。
 
 无图形会话可运行独立进程 smoke：启动 `mission_ros_adapter_smoke`，使用另一个 ROS 2
 进程向默认 `/issue84/smoke/mission/state` 发布 `STARTUP(100)`、`PATROL(101)`、

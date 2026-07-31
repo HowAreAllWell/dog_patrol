@@ -308,6 +308,44 @@ TEST_F(MissionRosAdapterTest, DropsFrameOutputWhenMissionStateHasAdvanced) {
   (void)bbox_subscription;
 }
 
+TEST_F(MissionRosAdapterTest, EmitsLossForTheLatestStateSequenceAfterTargetStateTransition) {
+  auto adapter_node = std::make_shared<rclcpp::Node>("mission_ros_adapter_latest_loss");
+  MissionRosAdapter::Config config;
+  config.mission_state_topic = "/issue84/latest_loss/mission/state";
+  config.mission_event_topic = "/issue84/latest_loss/mission/event";
+  config.target_bbox_topic = "/issue84/latest_loss/perception/selected_target_bbox";
+  MissionRosAdapter adapter(*adapter_node, config);
+
+  auto probe = std::make_shared<rclcpp::Node>("mission_ros_adapter_latest_loss_probe");
+  std::vector<MissionEventMessage> events;
+  auto event_subscription = probe->create_subscription<MissionEventMessage>(
+      config.mission_event_topic, MissionRosAdapter::MissionEventQos(),
+      [&events](const MissionEventMessage::SharedPtr message) { events.push_back(*message); });
+  rclcpp::executors::SingleThreadedExecutor executor;
+  executor.add_node(adapter_node);
+  executor.add_node(probe);
+
+  ASSERT_TRUE(adapter.StoreMissionState(
+      State(102U, MissionStateMessage::CONFIRM_TARGET, 42U)));
+  const auto trusted = TrustedPerson(42, 7);
+  const auto source_time = MissionCoordinator::TimePoint{};
+  adapter.ProcessFrame({MissionSnapshot{}, {trusted}, LockedPrimary(42, 7), source_time},
+                       Metadata(1710000000000000000ULL));
+
+  ASSERT_TRUE(adapter.StoreMissionState(
+      State(103U, MissionStateMessage::APPROACH_TARGET, 42U)));
+  adapter.ProcessFrame({MissionSnapshot{}, {}, PrimaryTargetResult{},
+                        source_time + std::chrono::milliseconds{500}},
+                       Metadata(1710000000500000000ULL));
+  ASSERT_TRUE(SpinUntil(executor, [&events] { return events.size() == 1U; }));
+  EXPECT_EQ(events.front().event, MissionEventMessage::TARGET_LOST);
+  EXPECT_EQ(events.front().observed_state_seq, 103U);
+
+  executor.remove_node(probe);
+  executor.remove_node(adapter_node);
+  (void)event_subscription;
+}
+
 TEST_F(MissionRosAdapterTest, ExplicitAuthorizationConfigurationAllowsReady) {
   auto adapter_node = std::make_shared<rclcpp::Node>("mission_ros_adapter_explicit_authorization");
   MissionRosAdapter::Config config;

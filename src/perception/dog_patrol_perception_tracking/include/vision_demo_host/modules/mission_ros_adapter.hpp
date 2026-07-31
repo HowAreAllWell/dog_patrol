@@ -107,13 +107,8 @@ class MissionRosAdapter {
       PerceptionMissionEvent event, int target_id, std::uint32_t observed_state_seq,
       std::uint64_t source_timestamp_ns);
 
-  bool IsCurrentMissionLocked(const MissionSnapshot &mission) const;
-  bool PublishMissionEventIfCurrent(
-      const MissionSnapshot &mission,
-      const dog_patrol_interfaces::msg::MissionEvent &message);
-  bool PublishTargetBoxIfCurrent(
-      const MissionSnapshot &mission,
-      const dog_patrol_interfaces::msg::TargetBoundingBox &message);
+  // Caller must hold mission_mutex_.
+  bool MatchesLatestMissionUnderLock(const MissionSnapshot &mission) const;
 
   rclcpp::Node &node_;
   Config config_;
