@@ -6,10 +6,11 @@
 ## 验收结论
 
 #79–#94 中除本验收票 #87 外的全部依赖均已关闭，#85 标记为 required 的 #93 也已完成；父
-spec #78 保持打开直到本票验收完成。当前代码通过从 `STARTUP` 到第二个 `CONFIRM_TARGET` 的
-真实 ROS 2 跨进程集成测试，
-并保持 capture、offline replay、live preview/record、retired surface 和 shared patrol protocol 的
-既有证据成立。
+spec #78 保持打开直到本票验收完成。当前代码通过无资产默认 CTest 和显式 Orin 视觉验收两种模式，
+均从 `STARTUP` 运行到第二个 `CONFIRM_TARGET`。显式模式把受限 historical Hik 录制送入当前 HEAD
+的 TensorRT detector、filter、tracker 和 identity，再将其真实 observations 接到 production
+mission stack 与真实 ROS 2 supervisor；capture、offline replay、live preview/record、retired
+surface 和 shared patrol protocol 的既有证据也保持成立。
 
 验收结论为通过。当前实现满足以下关键行为：
 
@@ -18,10 +19,10 @@ spec #78 保持打开直到本票验收完成。当前代码通过从 `STARTUP` 
   新鲜 bbox，保留 semantic ID、源时间戳、光学 frame 和原图 half-open 坐标；
 - 缺失 0.5 秒后只发一次 `TARGET_LOST`，不复用缓存框；真实 mission supervisor 进入结构化
   `BLOCK_TARGET_LOST`；
-- 6 秒保留窗内 raw track 从 7 变为 8 时，只有同一 semantic target 42 可发一次
-  `TARGET_REACQUIRED`，真实 supervisor 保持业务 state/target 并解除 block；
-- 完成 verification 回到新 `PATROL` 后，target 42 仍留在 identity observations，但默认 30 秒
-  连续离场条件未满足，因此不具 mission eligibility；同一首帧选择下一个最大可用 target 99；
+- 6 秒保留窗内 raw track 改变时，只有同一 semantic target 可发一次 `TARGET_REACQUIRED`，
+  真实 supervisor 保持业务 state/target 并解除 block；显式视觉证据为 semantic 2、raw 2→3；
+- 完成 verification 回到新 `PATROL` 后，已处置 target 仍留在 identity observations，但默认
+  30 秒连续离场条件未满足，因此不具 mission eligibility；显式视觉证据在首帧选择 semantic 1；
 - authorization/navigation 仍由外部 event owner 提供；vision 侧 readiness 通过 required contributor
   聚合，authorization placeholder 默认 not-ready，只有显式认可或同名 provider 替换后才能 READY。
 
@@ -46,7 +47,19 @@ spec #78 保持打开直到本票验收完成。当前代码通过从 `STARTUP` 
 ROS message mapping。fixture 退出时按 process group 清理 supervisor，成功和失败路径都不会遗留
 ROS 进程。
 
-测试顺序如下：
+不带参数时，CTest 使用确定性 identity observations，保持测试无模型/视频资产依赖并精确验证时间和
+坐标边界。显式提供以下三个参数时，driver 先执行实际视觉链路，并自动寻找包含两个 person、最大目标
+离场、同 semantic/raw-change 重获和下一可用目标的片段，再复用同一 mission 断言：
+
+```bash
+bash src/vision_demo_host/test/test_mission_pipeline_integration.sh \
+  build/vision_demo_host/test_mission_pipeline_integration_driver \
+  --visual-video data/datasets/orin_hik_h264_MOT/03/video.mp4 \
+  --detector-engine assets/models/engines/orin_jp621_trt_local/yolo26n_fp16_640.engine \
+  --tracker-config src/vision_demo_host/config/bot_sort.yaml
+```
+
+默认无资产模式的精确断言顺序如下：
 
 1. real detector/tracker readiness contribution 为 READY，并用显式 integration authorization
    provider 替换 required placeholder；外部 navigation READY 使 supervisor 从 STARTUP 进入 PATROL。
@@ -67,6 +80,39 @@ ROS 进程。
 本测试曾先以不存在的 `PrimaryTargetManager::UpdateForMission` 编译失败作为 RED；production
 frame loop 中原本私有且不可独立验证的 mission-primary lifecycle 随后迁入该 public seam，测试和
 runtime 现在调用同一实现。
+
+### 真实视觉与 DDS 证据
+
+显式模式在本机 AGX Orin 上完整解码 539 帧，raw detection-positive 和 track-positive 均为
+539/539。driver 从实际 `IdentityManager` 输出中找到：frame 89 的最大可用 person 为 semantic 2 / raw 2；
+frame 335–350 中该 semantic target 不可用；frame 351 以 semantic 2 / raw 3 重获；新 patrol 首帧
+仍可见的 semantic 2 被 handled policy 排除，并选择 semantic 1。源视频、engine 和 tracker config
+SHA-256 分别为：
+
+- `939e85d6c80ac17cd1cc81fee17401c14b8efb7aa3ccdd6100426026109fe480`；
+- `92477cc6dceb1d8c737646469e07bebd2f387ae7ea050f93cd012781dcccb8a8`；
+- `2ee7339e04f00a1066c3071e630d83cdb84c67b2ae8079a2811b2474fe7b2064`。
+
+独立 `ros2 topic echo --no-daemon` 订阅记录位于
+`log/issue87_visual_mission_20260731/`：
+
+- `mission_event_evidence.log` 共 9 条，依次覆盖 perception/navigation READY、target 2 confirmed、
+  position ready、lost、reacquired、arrived、authorized 和 target 1 confirmed；
+- `mission_state_evidence.log` 的周期发布消息去重后为
+  `8700 STARTUP → 8701 PATROL → 8702 CONFIRM(2) → 8703 APPROACH(2) →`
+  `8704 APPROACH(2, BLOCK_TARGET_LOST) → 8705 APPROACH(2, unblocked) →`
+  `8706 VERIFY(2) → 8707 PATROL → 8708 CONFIRM(1)`；
+- `target_bbox_evidence.log` 共 4 条，全部是 semantic 2 的实际视觉框，分别对应 confirm、approach、
+  unblock 后恢复和 verify；PATROL 与 blocked frame 均无 bbox。
+
+三份 echo 的 SHA-256 分别为
+`9ecc8600d4591ebdf1222626f2a766dd78f4538e4bd7c2e9528e67cfd7c412ea`、
+`5c0c6c0f00f3ac573c05482309147376bc360f24e53c316e211ea9930c935de1` 和
+`ca3c2fb666829fc6947cd37243137207d28752f3932eae828098fb14d5ab7a82`。
+同目录三份 `*_info_evidence.log` 由 `ros2 topic info -v --no-daemon` 留存，确认 state 为
+reliable/transient-local、event 为 reliable/volatile、bbox 为 best-effort/volatile；独立真实
+supervisor 的 `ros2 topic hz` 记录为 20.001–20.005 Hz。driver 结果日志 SHA-256 为
+`a2570668ebeaf6ce590c2a8d459045e4e88167bbcc3f63734db1a631a3c8844d`。
 
 ## 时间配置
 
@@ -142,10 +188,10 @@ colcon test-result --verbose --all
 
 同一 run 中 supervisor 先接受 `NAVIGATION/READY(seq=8700)`，再接收 vision aggregate
 `PERCEPTION/READY(seq=8700)`，明确记录 `STARTUP -> PATROL`。这验证真实 camera processing 与
-mission state input/ROS event output 可并行工作。由于当前硬件画面没有 person，target event/bbox 的
-完整状态序列由同一台 Orin 上的 deterministic identity fixture 经真实 DDS 和真实 supervisor 验证，
-不宣称本次暗场产生了真实 target bbox；真人 detector/tracker/identity/primary 可视化继续引用 #83
-已接受的现场证据。
+mission state input/ROS event output 可并行工作。由于当前物理画面没有 person，这一 live run 只验证
+readiness 和 mission input，不宣称暗场产生了 target bbox。target event/bbox 的完整状态序列由同一台
+Orin 上的显式 visual mode 验证：它使用实际 detector/tracker/identity observations、真实 DDS 和真实
+supervisor；真人 live overlay 继续引用 #83 已接受的现场证据。
 
 ### 当前环境吞吐边界
 
@@ -175,7 +221,9 @@ inference-only；功能链路、无损 capture 和非阻塞输出本次均已通
 
 - authorization、navigation、bearing/range/calibration 和动作控制仍不属于 vision repository；
   integration driver 只以外部 owner 身份发送对应 shared event。
-- current-head hardware scene 无 person；本次没有把暗场 IDLE 当作 target-visible 验收。真人 overlay
-  使用 #83 artifact，mission target lifecycle 使用同 Orin 上的 production coordinator/adapter、
-  真实 DDS 和真实 supervisor。
-- 历史 H.264 只保留为受限 migration regression，不能成为默认 dataset 或 active media surface。
+- current-head 物理相机现场无 person；本次没有把暗场 IDLE 当作 target-visible 验收，也没有声称完成
+  当前现场真人的 live loss/reacquire。真人 live overlay 使用 #83 artifact；mission target lifecycle
+  使用同 Orin 上对 historical Hik 录制的实际 current-head detector/tracker/identity 输出、production
+  coordinator/adapter、真实 DDS 和真实 supervisor。
+- historical H.264 只保留为受限 migration regression 和本测试显式指定的视觉验收输入；默认 CTest
+  仍无资产，production/live/capture CLI 没有重新引入 H.264 active surface。

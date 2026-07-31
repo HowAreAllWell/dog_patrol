@@ -2,8 +2,13 @@
 set -euo pipefail
 
 driver=${1:?mission integration driver path is required}
+shift
 test_tmp=$(mktemp -d)
 supervisor_pid=""
+driver_timeout=35s
+if [[ $# -gt 0 ]]; then
+  driver_timeout=90s
+fi
 
 cleanup() {
   if [[ -n "${supervisor_pid}" ]]; then
@@ -32,7 +37,7 @@ setsid ros2 run dog_patrol_manager mission_supervisor --ros-args \
 supervisor_pid=$!
 
 set +e
-timeout --signal=INT 35s "${driver}"
+timeout --signal=INT "${driver_timeout}" "${driver}" "$@"
 driver_status=$?
 set -e
 

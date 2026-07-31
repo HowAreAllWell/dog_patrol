@@ -1,4 +1,7 @@
+#include <algorithm>
+#include <array>
 #include <chrono>
+#include <cmath>
 #include <cstdint>
 #include <iostream>
 #include <memory>
@@ -9,12 +12,18 @@
 #include <utility>
 #include <vector>
 
+#include <opencv2/opencv.hpp>
+
 #include <dog_patrol_interfaces/msg/mission_event.hpp>
 #include <dog_patrol_interfaces/msg/target_bounding_box.hpp>
 #include <rclcpp/executors/single_threaded_executor.hpp>
 #include <rclcpp/rclcpp.hpp>
 
+#include "vision_demo_host/modules/det_filter.hpp"
+#include "vision_demo_host/modules/identity_manager.hpp"
 #include "vision_demo_host/modules/mission_ros_adapter.hpp"
+#include "vision_demo_host/modules/mot_tracker.hpp"
+#include "vision_demo_host/modules/preprocess_infer.hpp"
 #include "vision_demo_host/modules/primary_target_manager.hpp"
 
 namespace {
@@ -45,6 +54,45 @@ constexpr int kRecoveredRawId = 8;
 constexpr int kNextRawId = 9;
 constexpr std::uint64_t kSourceEpochNs = 1710000000000000000ULL;
 
+enum class EvidenceSlot : std::size_t {
+  kSelection,
+  kConfirmation,
+  kApproach,
+  kMissingBeforeTimeout,
+  kMissingAtTimeout,
+  kReacquired,
+  kResumed,
+  kVerification,
+  kSecondPatrol,
+  kCount,
+};
+
+struct EvidenceFrame {
+  std::size_t source_frame_index{0U};
+  std::vector<IdentityObservation> identities;
+  SourceFrameMetadata metadata;
+};
+
+struct MissionEvidence {
+  std::array<EvidenceFrame, static_cast<std::size_t>(EvidenceSlot::kCount)> frames;
+  int first_semantic_id{-1};
+  int next_semantic_id{-1};
+  int first_raw_id{-1};
+  int recovered_raw_id{-1};
+  int next_raw_id{-1};
+  bool visual_pipeline{false};
+  std::size_t decoded_frames{0U};
+  std::size_t detection_positive_frames{0U};
+  std::size_t track_positive_frames{0U};
+  std::string source_description;
+};
+
+struct VisualReplayConfig {
+  std::string video_path;
+  std::string detector_engine_path;
+  std::string tracker_config_path;
+};
+
 IdentityObservation Person(const int semantic_id, const int raw_id, const cv::Rect2f &bbox) {
   IdentityObservation identity;
   identity.semantic_id = semantic_id;
@@ -59,16 +107,293 @@ IdentityObservation Person(const int semantic_id, const int raw_id, const cv::Re
   return identity;
 }
 
+constexpr std::size_t SlotIndex(const EvidenceSlot slot) {
+  return static_cast<std::size_t>(slot);
+}
+
+SourceFrameMetadata ReplayMetadata(const std::size_t frame_index, const double fps,
+                                   const int width, const int height,
+                                   const std::string &frame_id) {
+  SourceFrameMetadata metadata;
+  const double safe_fps = fps > 0.0 ? fps : 30.0;
+  metadata.source_timestamp_ns =
+      kSourceEpochNs + static_cast<std::uint64_t>(std::llround(
+                           static_cast<double>(frame_index) * 1000000000.0 / safe_fps));
+  metadata.camera_frame_number_available = false;
+  metadata.image_width = width;
+  metadata.image_height = height;
+  metadata.optical_frame_id = frame_id;
+  return metadata;
+}
+
+const IdentityObservation *VisiblePersonWithSemanticId(
+    const std::vector<IdentityObservation> &identities, const int semantic_id) {
+  for (const auto &identity : identities) {
+    if (identity.semantic_id == semantic_id && identity.class_id == ClassId::kPerson &&
+        identity.visible && identity.state == IdentityState::kActive) {
+      return &identity;
+    }
+  }
+  return nullptr;
+}
+
+std::vector<const IdentityObservation *> VisiblePeople(
+    const std::vector<IdentityObservation> &identities) {
+  std::vector<const IdentityObservation *> people;
+  for (const auto &identity : identities) {
+    if (identity.semantic_id > 0 && identity.class_id == ClassId::kPerson && identity.visible &&
+        identity.state == IdentityState::kActive && identity.supporting_raw_track_id > 0) {
+      people.push_back(&identity);
+    }
+  }
+  std::sort(people.begin(), people.end(), [](const auto *lhs, const auto *rhs) {
+    return lhs->bbox.area() > rhs->bbox.area();
+  });
+  return people;
+}
+
+MissionEvidence BuildSyntheticEvidence() {
+  MissionEvidence evidence;
+  evidence.first_semantic_id = kFirstSemanticId;
+  evidence.next_semantic_id = kNextSemanticId;
+  evidence.first_raw_id = kFirstRawId;
+  evidence.recovered_raw_id = kRecoveredRawId;
+  evidence.next_raw_id = kNextRawId;
+  evidence.source_description = "deterministic synthetic identity fixture";
+
+  const auto both_people = [](const int first_raw_id) {
+    return std::vector<IdentityObservation>{
+        Person(kFirstSemanticId, first_raw_id,
+               cv::Rect2f{100.25F, 200.5F, 300.0F, 400.0F}),
+        Person(kNextSemanticId, kNextRawId,
+               cv::Rect2f{700.0F, 250.0F, 200.0F, 300.0F}),
+    };
+  };
+  const std::vector<IdentityObservation> only_distractor{
+      Person(kNextSemanticId, kNextRawId,
+             cv::Rect2f{700.0F, 250.0F, 200.0F, 300.0F})};
+  const std::array<std::uint64_t, SlotIndex(EvidenceSlot::kCount)> offsets{
+      0U,         100000000ULL, 200000000ULL, 699000000ULL, 700000000ULL,
+      800000000ULL, 900000000ULL, 1000000000ULL, 1100000000ULL};
+
+  for (std::size_t index = 0U; index < evidence.frames.size(); ++index) {
+    auto &frame = evidence.frames[index];
+    frame.source_frame_index = index;
+    frame.metadata.source_timestamp_ns = kSourceEpochNs + offsets[index];
+    frame.metadata.camera_frame_number = static_cast<std::uint32_t>(index + 1U);
+    frame.metadata.camera_frame_number_available = true;
+    frame.metadata.image_width = 1280;
+    frame.metadata.image_height = 1024;
+    frame.metadata.optical_frame_id = "issue87_hik_camera_optical_frame";
+  }
+  evidence.frames[SlotIndex(EvidenceSlot::kSelection)].identities = both_people(kFirstRawId);
+  evidence.frames[SlotIndex(EvidenceSlot::kConfirmation)].identities = both_people(kFirstRawId);
+  evidence.frames[SlotIndex(EvidenceSlot::kApproach)].identities = both_people(kFirstRawId);
+  evidence.frames[SlotIndex(EvidenceSlot::kMissingBeforeTimeout)].identities = only_distractor;
+  evidence.frames[SlotIndex(EvidenceSlot::kMissingAtTimeout)].identities = only_distractor;
+  evidence.frames[SlotIndex(EvidenceSlot::kReacquired)].identities = both_people(kRecoveredRawId);
+  evidence.frames[SlotIndex(EvidenceSlot::kResumed)].identities = both_people(kRecoveredRawId);
+  evidence.frames[SlotIndex(EvidenceSlot::kVerification)].identities = both_people(kRecoveredRawId);
+  evidence.frames[SlotIndex(EvidenceSlot::kSecondPatrol)].identities = both_people(kRecoveredRawId);
+  return evidence;
+}
+
+std::optional<MissionEvidence> FindVisualMissionEvidence(
+    const std::vector<EvidenceFrame> &frames, std::string *error) {
+  for (std::size_t selection = 0U; selection + 1U < frames.size(); ++selection) {
+    const auto selection_people = VisiblePeople(frames[selection].identities);
+    if (selection_people.size() < 2U) {
+      continue;
+    }
+    const int target_id = selection_people[0]->semantic_id;
+    const int initial_raw_id = selection_people[0]->supporting_raw_track_id.value();
+    if (VisiblePersonWithSemanticId(frames[selection + 1U].identities, target_id) == nullptr) {
+      continue;
+    }
+
+    for (std::size_t missing = selection + 3U; missing + 4U < frames.size(); ++missing) {
+      const auto *before_missing =
+          VisiblePersonWithSemanticId(frames[missing - 2U].identities, target_id);
+      if (before_missing == nullptr ||
+          VisiblePersonWithSemanticId(frames[missing].identities, target_id) != nullptr) {
+        continue;
+      }
+      if (before_missing->supporting_raw_track_id != initial_raw_id) {
+        break;
+      }
+
+      std::size_t reacquired = missing + 1U;
+      while (reacquired < frames.size() &&
+             VisiblePersonWithSemanticId(frames[reacquired].identities, target_id) == nullptr) {
+        ++reacquired;
+      }
+      if (reacquired < missing + 2U || reacquired + 3U >= frames.size()) {
+        continue;
+      }
+      const auto *recovered =
+          VisiblePersonWithSemanticId(frames[reacquired].identities, target_id);
+      if (recovered == nullptr || recovered->supporting_raw_track_id == initial_raw_id ||
+          VisiblePersonWithSemanticId(frames[reacquired + 1U].identities, target_id) == nullptr ||
+          VisiblePersonWithSemanticId(frames[reacquired + 2U].identities, target_id) == nullptr) {
+        continue;
+      }
+
+      const auto second_patrol_people = VisiblePeople(frames[reacquired + 3U].identities);
+      const IdentityObservation *next = nullptr;
+      for (const auto *person : second_patrol_people) {
+        if (person->semantic_id != target_id) {
+          next = person;
+          break;
+        }
+      }
+      if (next == nullptr) {
+        continue;
+      }
+
+      MissionEvidence evidence;
+      evidence.first_semantic_id = target_id;
+      evidence.next_semantic_id = next->semantic_id;
+      evidence.first_raw_id = initial_raw_id;
+      evidence.recovered_raw_id = recovered->supporting_raw_track_id.value();
+      evidence.next_raw_id = next->supporting_raw_track_id.value();
+      evidence.visual_pipeline = true;
+      evidence.frames[SlotIndex(EvidenceSlot::kSelection)] = frames[selection];
+      evidence.frames[SlotIndex(EvidenceSlot::kConfirmation)] = frames[selection + 1U];
+      evidence.frames[SlotIndex(EvidenceSlot::kApproach)] = frames[missing - 2U];
+      evidence.frames[SlotIndex(EvidenceSlot::kMissingBeforeTimeout)] = frames[missing];
+      evidence.frames[SlotIndex(EvidenceSlot::kMissingAtTimeout)] = frames[reacquired - 1U];
+      evidence.frames[SlotIndex(EvidenceSlot::kReacquired)] = frames[reacquired];
+      evidence.frames[SlotIndex(EvidenceSlot::kResumed)] = frames[reacquired + 1U];
+      evidence.frames[SlotIndex(EvidenceSlot::kVerification)] = frames[reacquired + 2U];
+      evidence.frames[SlotIndex(EvidenceSlot::kSecondPatrol)] = frames[reacquired + 3U];
+      return evidence;
+    }
+  }
+  if (error != nullptr) {
+    *error = "no two-person visual sequence contained largest-target loss, same-semantic "
+             "raw-track recovery, and a next eligible target";
+  }
+  return std::nullopt;
+}
+
+std::optional<MissionEvidence> BuildVisualEvidence(const VisualReplayConfig &config,
+                                                   std::string *error) {
+  vision_demo_host::PreprocessInfer::Config infer_config;
+  infer_config.detector_runtime_path = config.detector_engine_path;
+  infer_config.raw_conf_threshold = 0.10F;
+  vision_demo_host::PreprocessInfer infer(infer_config);
+  if (!infer.Initialize(error)) {
+    return std::nullopt;
+  }
+
+  vision_demo_host::DetFilter det_filter({0.10F, 0.10F});
+  vision_demo_host::MotTracker::Config tracker_config;
+  tracker_config.tracker_yaml_path = config.tracker_config_path;
+  vision_demo_host::MotTracker tracker(tracker_config);
+  if (!tracker.Initialize(error)) {
+    return std::nullopt;
+  }
+
+  vision_demo_host::IdentityManager identity_manager;
+  if (!identity_manager.Initialize(error)) {
+    return std::nullopt;
+  }
+  PrimaryTargetManager::Config visual_primary_config;
+  visual_primary_config.min_person_area_px = 100.0F;
+  PrimaryTargetManager visual_primary(visual_primary_config);
+
+  cv::VideoCapture capture(config.video_path);
+  if (!capture.isOpened()) {
+    if (error != nullptr) {
+      *error = "failed to open visual evidence video: " + config.video_path;
+    }
+    return std::nullopt;
+  }
+  const double fps = capture.get(cv::CAP_PROP_FPS);
+  std::vector<EvidenceFrame> frames;
+  std::size_t detection_positive_frames = 0U;
+  std::size_t track_positive_frames = 0U;
+  cv::Mat image;
+  while (capture.read(image)) {
+    if (image.empty()) {
+      break;
+    }
+    const auto detections = infer.Infer(image);
+    const auto tracks = tracker.Update(det_filter.Filter(detections), image);
+    const auto previous_primary = visual_primary.GetState();
+    const auto identities = identity_manager.Update(
+        vision_demo_host::TrackletObservationsFromTracks(tracks),
+        tracker.LastTrackletHypotheses(), previous_primary, &image);
+    (void)visual_primary.Update(identities.identities);
+
+    EvidenceFrame frame;
+    frame.source_frame_index = frames.size();
+    frame.identities = identities.identities;
+    frame.metadata = ReplayMetadata(frame.source_frame_index, fps, image.cols, image.rows,
+                                    "issue87_visual_replay_optical_frame");
+    frames.push_back(std::move(frame));
+    detection_positive_frames += detections.empty() ? 0U : 1U;
+    track_positive_frames += tracks.empty() ? 0U : 1U;
+  }
+
+  auto evidence = FindVisualMissionEvidence(frames, error);
+  if (!evidence.has_value()) {
+    return std::nullopt;
+  }
+  evidence->decoded_frames = frames.size();
+  evidence->detection_positive_frames = detection_positive_frames;
+  evidence->track_positive_frames = track_positive_frames;
+  evidence->source_description = config.video_path;
+  return evidence;
+}
+
 PrimaryTargetManager::Config PrimaryConfig() {
   PrimaryTargetManager::Config config;
   config.min_person_area_px = 100.0F;
   return config;
 }
 
+bool ParseVisualReplayConfig(const int argc, char *argv[],
+                             std::optional<VisualReplayConfig> *config,
+                             std::string *error) {
+  if (argc == 1) {
+    config->reset();
+    return true;
+  }
+  VisualReplayConfig parsed;
+  for (int index = 1; index < argc; ++index) {
+    const std::string argument = argv[index];
+    if (index + 1 >= argc) {
+      *error = "missing value for " + argument;
+      return false;
+    }
+    const std::string value = argv[++index];
+    if (argument == "--visual-video") {
+      parsed.video_path = value;
+    } else if (argument == "--detector-engine") {
+      parsed.detector_engine_path = value;
+    } else if (argument == "--tracker-config") {
+      parsed.tracker_config_path = value;
+    } else {
+      *error = "unknown argument: " + argument;
+      return false;
+    }
+  }
+  if (parsed.video_path.empty() || parsed.detector_engine_path.empty() ||
+      parsed.tracker_config_path.empty()) {
+    *error = "visual replay requires --visual-video, --detector-engine, and --tracker-config";
+    return false;
+  }
+  *config = std::move(parsed);
+  return true;
+}
+
 class MissionPipelineIntegrationDriver final : public rclcpp::Node {
  public:
-  MissionPipelineIntegrationDriver()
-      : Node("issue87_mission_pipeline_integration"), primary_manager_(PrimaryConfig()) {
+  explicit MissionPipelineIntegrationDriver(MissionEvidence evidence)
+      : Node("issue87_mission_pipeline_integration"),
+        primary_manager_(PrimaryConfig()),
+        evidence_(std::move(evidence)) {
     MissionRosAdapter::Config config;
     config.mission_state_topic = "/issue87/integration/mission/state";
     config.mission_event_topic = "/issue87/integration/mission/event";
@@ -91,6 +416,10 @@ class MissionPipelineIntegrationDriver final : public rclcpp::Node {
         config.target_bbox_topic, MissionRosAdapter::TargetBoundingBoxQos(),
         [this](const TargetBoundingBoxMessage::SharedPtr message) { boxes_.push_back(*message); });
     stage_entered_at_ = std::chrono::steady_clock::now();
+    std::cout << "issue #87 evidence source=" << evidence_.source_description
+              << " target=" << evidence_.first_semantic_id << " raw=" << evidence_.first_raw_id
+              << "->" << evidence_.recovered_raw_id
+              << " next_target=" << evidence_.next_semantic_id << std::endl;
   }
 
   void Step() {
@@ -230,22 +559,41 @@ class MissionPipelineIntegrationDriver final : public rclcpp::Node {
     return true;
   }
 
-  SourceFrameMetadata Metadata(const std::uint64_t offset_ns) const {
-    SourceFrameMetadata metadata;
-    metadata.source_timestamp_ns = kSourceEpochNs + offset_ns;
-    metadata.camera_frame_number = static_cast<std::uint32_t>(offset_ns / 100000000ULL + 1U);
-    metadata.camera_frame_number_available = true;
-    metadata.image_width = 1280;
-    metadata.image_height = 1024;
-    metadata.optical_frame_id = "issue87_hik_camera_optical_frame";
-    return metadata;
+  const EvidenceFrame &Frame(const EvidenceSlot slot) const {
+    return evidence_.frames[SlotIndex(slot)];
   }
 
-  std::vector<IdentityObservation> BothPeople(const int first_raw_id) const {
-    return {
-        Person(kFirstSemanticId, first_raw_id, cv::Rect2f{100.25F, 200.5F, 300.0F, 400.0F}),
-        Person(kNextSemanticId, kNextRawId, cv::Rect2f{700.0F, 250.0F, 200.0F, 300.0F}),
+  const IdentityObservation *TargetObservation(const EvidenceSlot slot) const {
+    return VisiblePersonWithSemanticId(Frame(slot).identities, evidence_.first_semantic_id);
+  }
+
+  bool BoxMatchesEvidence(const TargetBoundingBoxMessage &box, const EvidenceSlot slot) const {
+    const auto *identity = TargetObservation(slot);
+    if (identity == nullptr) {
+      return false;
+    }
+    const auto &metadata = Frame(slot).metadata;
+    const auto clamp_x = [&metadata](const double value) {
+      return std::clamp(value, 0.0, static_cast<double>(metadata.image_width));
     };
+    const auto clamp_y = [&metadata](const double value) {
+      return std::clamp(value, 0.0, static_cast<double>(metadata.image_height));
+    };
+    const auto x_min = static_cast<std::uint32_t>(clamp_x(std::floor(identity->bbox.x)));
+    const auto y_min = static_cast<std::uint32_t>(clamp_y(std::floor(identity->bbox.y)));
+    const auto x_max = static_cast<std::uint32_t>(
+        clamp_x(std::ceil(static_cast<double>(identity->bbox.x + identity->bbox.width))));
+    const auto y_max = static_cast<std::uint32_t>(
+        clamp_y(std::ceil(static_cast<double>(identity->bbox.y + identity->bbox.height))));
+    const auto expected_seconds =
+        static_cast<std::int32_t>(metadata.source_timestamp_ns / 1000000000ULL);
+    const auto expected_nanoseconds =
+        static_cast<std::uint32_t>(metadata.source_timestamp_ns % 1000000000ULL);
+    return box.target_id == static_cast<std::uint32_t>(evidence_.first_semantic_id) &&
+           box.header.frame_id == metadata.optical_frame_id &&
+           box.header.stamp.sec == expected_seconds &&
+           box.header.stamp.nanosec == expected_nanoseconds && box.x_min == x_min &&
+           box.y_min == y_min && box.x_max == x_max && box.y_max == y_max;
   }
 
   PrimaryTargetResult UpdatePrimary(const MissionSnapshot &mission,
@@ -255,11 +603,11 @@ class MissionPipelineIntegrationDriver final : public rclcpp::Node {
   }
 
   void ProcessFrame(const MissionSnapshot &mission,
-                    const std::vector<IdentityObservation> &identities,
                     const MissionCoordinator::TimePoint source_time,
-                    const std::uint64_t source_offset_ns) {
-    const auto primary = UpdatePrimary(mission, identities, source_time);
-    adapter_->ProcessFrame({mission, identities, primary, source_time}, Metadata(source_offset_ns));
+                    const EvidenceSlot slot) {
+    const auto &frame = Frame(slot);
+    const auto primary = UpdatePrimary(mission, frame.identities, source_time);
+    adapter_->ProcessFrame({mission, frame.identities, primary, source_time}, frame.metadata);
   }
 
   void PublishExternalEvent(const MissionSnapshot &mission, const std::uint8_t source,
@@ -294,7 +642,8 @@ class MissionPipelineIntegrationDriver final : public rclcpp::Node {
       startup_observed_at_ = std::chrono::steady_clock::now();
       return;
     }
-    if (std::chrono::steady_clock::now() - startup_observed_at_.value() < 500ms ||
+    const auto observer_grace = evidence_.visual_pipeline ? 3s : 500ms;
+    if (std::chrono::steady_clock::now() - startup_observed_at_.value() < observer_grace ||
         external_event_publisher_->get_subscription_count() < 1U) {
       return;
     }
@@ -317,27 +666,29 @@ class MissionPipelineIntegrationDriver final : public rclcpp::Node {
       return;
     }
 
-    const auto identities = BothPeople(kFirstRawId);
-    const auto primary = UpdatePrimary(mission, identities, source_origin_);
+    const auto &frame = Frame(EvidenceSlot::kSelection);
+    const auto primary = UpdatePrimary(mission, frame.identities, source_origin_);
     if (!Require(primary.state == PrimaryState::kLocked &&
-                     primary.primary_target_id == kFirstSemanticId,
+                     primary.primary_target_id == evidence_.first_semantic_id &&
+                     primary.raw_track_id == evidence_.first_raw_id,
                  "first patrol frame did not select the largest eligible semantic target")) {
       return;
     }
-    if (!Require(adapter_->PublishTargetConfirmed(mission, primary, Metadata(0U)),
+    if (!Require(adapter_->PublishTargetConfirmed(mission, primary, frame.metadata),
                  "first-frame TARGET_CONFIRMED was not published")) {
       return;
     }
-    adapter_->ProcessFrame({mission, identities, primary, source_origin_}, Metadata(0U));
+    adapter_->ProcessFrame({mission, frame.identities, primary, source_origin_}, frame.metadata);
     Advance(Stage::kWaitFirstConfirm);
   }
 
   void PublishFirstConfirmBox(const MissionSnapshot &mission) {
-    if (mission.phase != MissionPhase::kConfirmTarget || mission.target_id != kFirstSemanticId) {
+    if (mission.phase != MissionPhase::kConfirmTarget ||
+        mission.target_id != evidence_.first_semantic_id) {
       return;
     }
     const std::size_t confirmation_count = EventCount(
-        MissionEventMessage::TARGET_CONFIRMED, kFirstSemanticId,
+        MissionEventMessage::TARGET_CONFIRMED, evidence_.first_semantic_id,
         MissionEventMessage::SOURCE_PERCEPTION);
     if (confirmation_count == 0U) {
       return;
@@ -347,7 +698,7 @@ class MissionPipelineIntegrationDriver final : public rclcpp::Node {
         !Require(boxes_.empty(), "PATROL published a target bounding box")) {
       return;
     }
-    ProcessFrame(mission, BothPeople(kFirstRawId), source_origin_ + 100ms, 100000000ULL);
+    ProcessFrame(mission, source_origin_ + 100ms, EvidenceSlot::kConfirmation);
     Advance(Stage::kWaitConfirmBox);
   }
 
@@ -356,26 +707,23 @@ class MissionPipelineIntegrationDriver final : public rclcpp::Node {
       return;
     }
     if (!Require(boxes_.size() == 1U, "CONFIRM_TARGET published an unexpected bbox count") ||
-        !Require(boxes_.front().target_id == static_cast<std::uint32_t>(kFirstSemanticId) &&
-                     boxes_.front().header.frame_id == "issue87_hik_camera_optical_frame" &&
-                     boxes_.front().header.stamp.sec == 1710000000 &&
-                     boxes_.front().header.stamp.nanosec == 100000000U &&
-                     boxes_.front().x_min == 100U && boxes_.front().y_min == 200U &&
-                     boxes_.front().x_max == 401U && boxes_.front().y_max == 601U,
+        !Require(BoxMatchesEvidence(boxes_.front(), EvidenceSlot::kConfirmation),
                  "fresh bbox lost semantic ID, source timestamp/frame, or half-open coordinates")) {
       return;
     }
     PublishExternalEvent(mission, MissionEventMessage::SOURCE_NAVIGATION,
-                         MissionEventMessage::TARGET_POSITION_READY, kFirstSemanticId);
+                         MissionEventMessage::TARGET_POSITION_READY,
+                         evidence_.first_semantic_id);
     Advance(Stage::kWaitApproach);
   }
 
   void PublishApproachBox(const MissionSnapshot &mission) {
-    if (mission.phase != MissionPhase::kApproachTarget || mission.target_id != kFirstSemanticId ||
+    if (mission.phase != MissionPhase::kApproachTarget ||
+        mission.target_id != evidence_.first_semantic_id ||
         mission.blocked) {
       return;
     }
-    ProcessFrame(mission, BothPeople(kFirstRawId), source_origin_ + 200ms, 200000000ULL);
+    ProcessFrame(mission, source_origin_ + 200ms, EvidenceSlot::kApproach);
     Advance(Stage::kWaitApproachBox);
   }
 
@@ -386,31 +734,28 @@ class MissionPipelineIntegrationDriver final : public rclcpp::Node {
     if (!Require(boxes_.size() == 2U, "APPROACH_TARGET did not publish one fresh bbox")) {
       return;
     }
-    const std::vector<IdentityObservation> only_distractor{
-        Person(kNextSemanticId, kNextRawId, cv::Rect2f{700.0F, 250.0F, 200.0F, 300.0F})};
-    ProcessFrame(mission, only_distractor, source_origin_ + 699ms, 699000000ULL);
+    ProcessFrame(mission, source_origin_ + 699ms, EvidenceSlot::kMissingBeforeTimeout);
     Advance(Stage::kWaitPreThreshold);
   }
 
   void PublishLossThreshold(const MissionSnapshot &mission) {
-    if (!Require(EventCount(MissionEventMessage::TARGET_LOST, kFirstSemanticId) == 0U,
+    if (!Require(EventCount(MissionEventMessage::TARGET_LOST,
+                            evidence_.first_semantic_id) == 0U,
                  "TARGET_LOST was emitted before the default 0.5 second threshold") ||
         !Require(boxes_.size() == 2U, "missing target reused a cached or fabricated bbox")) {
       return;
     }
-    const std::vector<IdentityObservation> only_distractor{
-        Person(kNextSemanticId, kNextRawId, cv::Rect2f{700.0F, 250.0F, 200.0F, 300.0F})};
-    ProcessFrame(mission, only_distractor, source_origin_ + 700ms, 700000000ULL);
+    ProcessFrame(mission, source_origin_ + 700ms, EvidenceSlot::kMissingAtTimeout);
     Advance(Stage::kWaitLostBlock);
   }
 
   void ReacquireWithNewRawTrack(const MissionSnapshot &mission) {
     if (!mission.blocked || mission.block_cause != MissionBlockCause::kTargetLost ||
-        mission.target_id != kFirstSemanticId) {
+        mission.target_id != evidence_.first_semantic_id) {
       return;
     }
     const std::size_t loss_count = EventCount(
-        MissionEventMessage::TARGET_LOST, kFirstSemanticId,
+        MissionEventMessage::TARGET_LOST, evidence_.first_semantic_id,
         MissionEventMessage::SOURCE_PERCEPTION);
     if (loss_count == 0U) {
       return;
@@ -420,24 +765,33 @@ class MissionPipelineIntegrationDriver final : public rclcpp::Node {
         !Require(boxes_.size() == 2U, "blocked loss state published a target bbox")) {
       return;
     }
-    ProcessFrame(mission, BothPeople(kRecoveredRawId), source_origin_ + 800ms, 800000000ULL);
+    const auto *recovered = TargetObservation(EvidenceSlot::kReacquired);
+    if (!Require(recovered != nullptr &&
+                     recovered->supporting_raw_track_id == evidence_.recovered_raw_id &&
+                     evidence_.recovered_raw_id != evidence_.first_raw_id,
+                 "visual target did not recover under the same semantic ID with a new raw track")) {
+      return;
+    }
+    ProcessFrame(mission, source_origin_ + 800ms, EvidenceSlot::kReacquired);
     Advance(Stage::kWaitUnblocked);
   }
 
   void PublishResumedBox(const MissionSnapshot &mission) {
     if (mission.blocked || mission.block_cause != MissionBlockCause::kNone ||
-        mission.phase != MissionPhase::kApproachTarget || mission.target_id != kFirstSemanticId ||
-        EventCount(MissionEventMessage::TARGET_REACQUIRED, kFirstSemanticId,
+        mission.phase != MissionPhase::kApproachTarget ||
+        mission.target_id != evidence_.first_semantic_id ||
+        EventCount(MissionEventMessage::TARGET_REACQUIRED, evidence_.first_semantic_id,
                    MissionEventMessage::SOURCE_PERCEPTION) < 1U) {
       return;
     }
-    if (!Require(EventCount(MissionEventMessage::TARGET_REACQUIRED, kFirstSemanticId,
+    if (!Require(EventCount(MissionEventMessage::TARGET_REACQUIRED,
+                            evidence_.first_semantic_id,
                             MissionEventMessage::SOURCE_PERCEPTION) == 1U,
                  "same semantic target did not unblock through one TARGET_REACQUIRED") ||
         !Require(boxes_.size() == 2U, "blocked reacquisition frame published before supervisor unblock")) {
       return;
     }
-    ProcessFrame(mission, BothPeople(kRecoveredRawId), source_origin_ + 900ms, 900000000ULL);
+    ProcessFrame(mission, source_origin_ + 900ms, EvidenceSlot::kResumed);
     Advance(Stage::kWaitResumedBox);
   }
 
@@ -446,21 +800,24 @@ class MissionPipelineIntegrationDriver final : public rclcpp::Node {
       return;
     }
     if (!Require(boxes_.size() == 3U &&
-                     boxes_.back().target_id == static_cast<std::uint32_t>(kFirstSemanticId),
+                     boxes_.back().target_id ==
+                         static_cast<std::uint32_t>(evidence_.first_semantic_id),
                  "fresh bbox did not resume for the same semantic target after unblock")) {
       return;
     }
     PublishExternalEvent(mission, MissionEventMessage::SOURCE_NAVIGATION,
-                         MissionEventMessage::ARRIVED_AND_STOPPED, kFirstSemanticId);
+                         MissionEventMessage::ARRIVED_AND_STOPPED,
+                         evidence_.first_semantic_id);
     Advance(Stage::kWaitVerification);
   }
 
   void PublishVerificationBox(const MissionSnapshot &mission) {
-    if (mission.phase != MissionPhase::kVerifyIdentity || mission.target_id != kFirstSemanticId ||
+    if (mission.phase != MissionPhase::kVerifyIdentity ||
+        mission.target_id != evidence_.first_semantic_id ||
         mission.blocked) {
       return;
     }
-    ProcessFrame(mission, BothPeople(kRecoveredRawId), source_origin_ + 1000ms, 1000000000ULL);
+    ProcessFrame(mission, source_origin_ + 1000ms, EvidenceSlot::kVerification);
     Advance(Stage::kWaitVerificationBox);
   }
 
@@ -469,12 +826,13 @@ class MissionPipelineIntegrationDriver final : public rclcpp::Node {
       return;
     }
     if (!Require(boxes_.size() == 4U &&
-                     boxes_.back().target_id == static_cast<std::uint32_t>(kFirstSemanticId),
+                     boxes_.back().target_id ==
+                         static_cast<std::uint32_t>(evidence_.first_semantic_id),
                  "VERIFY_IDENTITY did not retain the current fresh target bbox")) {
       return;
     }
     PublishExternalEvent(mission, MissionEventMessage::SOURCE_PERCEPTION,
-                         MissionEventMessage::AUTHORIZED, kFirstSemanticId);
+                         MissionEventMessage::AUTHORIZED, evidence_.first_semantic_id);
     Advance(Stage::kWaitSecondPatrol);
   }
 
@@ -482,33 +840,36 @@ class MissionPipelineIntegrationDriver final : public rclcpp::Node {
     if (mission.phase != MissionPhase::kPatrol || mission.target_id != 0) {
       return;
     }
-    const auto identities = BothPeople(kRecoveredRawId);
-    const auto primary = UpdatePrimary(mission, identities, source_origin_ + 1100ms);
-    if (!Require(!primary_manager_.IsMissionEligible(identities.front()),
+    const auto &frame = Frame(EvidenceSlot::kSecondPatrol);
+    const auto *handled = TargetObservation(EvidenceSlot::kSecondPatrol);
+    const auto primary = UpdatePrimary(mission, frame.identities, source_origin_ + 1100ms);
+    if (!Require(handled != nullptr && !primary_manager_.IsMissionEligible(*handled),
                  "handled semantic target remained mission-eligible after returning to patrol") ||
-        !Require(identities.front().visible && identities.front().semantic_id == kFirstSemanticId,
+        !Require(handled != nullptr && handled->visible &&
+                     handled->semantic_id == evidence_.first_semantic_id,
                  "handled target was removed from perception observations") ||
         !Require(primary.state == PrimaryState::kLocked &&
-                     primary.primary_target_id == kNextSemanticId &&
-                     primary.raw_track_id == kNextRawId,
+                     primary.primary_target_id == evidence_.next_semantic_id &&
+                     primary.raw_track_id == evidence_.next_raw_id,
                  "first new patrol frame did not select the next-largest eligible target")) {
       return;
     }
-    if (!Require(adapter_->PublishTargetConfirmed(mission, primary, Metadata(1100000000ULL)),
+    if (!Require(adapter_->PublishTargetConfirmed(mission, primary, frame.metadata),
                  "next eligible target was not confirmed")) {
       return;
     }
-    adapter_->ProcessFrame({mission, identities, primary, source_origin_ + 1100ms},
-                           Metadata(1100000000ULL));
+    adapter_->ProcessFrame({mission, frame.identities, primary, source_origin_ + 1100ms},
+                           frame.metadata);
     Advance(Stage::kWaitSecondConfirm);
   }
 
   void FinishIfIntegratedRoutePassed(const MissionSnapshot &mission) {
-    if (mission.phase != MissionPhase::kConfirmTarget || mission.target_id != kNextSemanticId) {
+    if (mission.phase != MissionPhase::kConfirmTarget ||
+        mission.target_id != evidence_.next_semantic_id) {
       return;
     }
     const std::size_t confirmation_count = EventCount(
-        MissionEventMessage::TARGET_CONFIRMED, kNextSemanticId,
+        MissionEventMessage::TARGET_CONFIRMED, evidence_.next_semantic_id,
         MissionEventMessage::SOURCE_PERCEPTION);
     if (confirmation_count == 0U) {
       return;
@@ -523,6 +884,7 @@ class MissionPipelineIntegrationDriver final : public rclcpp::Node {
   }
 
   PrimaryTargetManager primary_manager_;
+  MissionEvidence evidence_;
   std::unique_ptr<MissionRosAdapter> adapter_;
   rclcpp::Publisher<MissionEventMessage>::SharedPtr external_event_publisher_;
   rclcpp::Subscription<MissionEventMessage>::SharedPtr event_subscription_;
@@ -541,10 +903,41 @@ class MissionPipelineIntegrationDriver final : public rclcpp::Node {
 }  // namespace
 
 int main(int argc, char *argv[]) {
-  rclcpp::init(argc, argv);
+  std::optional<VisualReplayConfig> visual_config;
+  std::string error;
+  if (!ParseVisualReplayConfig(argc, argv, &visual_config, &error)) {
+    std::cerr << "issue #87 integration argument error: " << error << std::endl;
+    return 2;
+  }
+
+  MissionEvidence evidence = BuildSyntheticEvidence();
+  if (visual_config.has_value()) {
+    auto visual_evidence = BuildVisualEvidence(visual_config.value(), &error);
+    if (!visual_evidence.has_value()) {
+      std::cerr << "issue #87 visual evidence failed: " << error << std::endl;
+      return 1;
+    }
+    evidence = std::move(visual_evidence.value());
+    std::cout << "issue #87 visual pipeline decoded=" << evidence.decoded_frames
+              << " detection_positive=" << evidence.detection_positive_frames
+              << " track_positive=" << evidence.track_positive_frames
+              << " selection_frame="
+              << evidence.frames[SlotIndex(EvidenceSlot::kSelection)].source_frame_index
+              << " missing_frames="
+              << evidence.frames[SlotIndex(EvidenceSlot::kMissingBeforeTimeout)].source_frame_index
+              << ".."
+              << evidence.frames[SlotIndex(EvidenceSlot::kMissingAtTimeout)].source_frame_index
+              << " reacquired_frame="
+              << evidence.frames[SlotIndex(EvidenceSlot::kReacquired)].source_frame_index
+              << std::endl;
+  }
+
+  int ros_argc = 1;
+  char *ros_argv[] = {argv[0], nullptr};
+  rclcpp::init(ros_argc, ros_argv);
   int exit_code = 1;
   try {
-    auto driver = std::make_shared<MissionPipelineIntegrationDriver>();
+    auto driver = std::make_shared<MissionPipelineIntegrationDriver>(std::move(evidence));
     rclcpp::executors::SingleThreadedExecutor executor;
     executor.add_node(driver);
     const auto deadline = std::chrono::steady_clock::now() + 30s;

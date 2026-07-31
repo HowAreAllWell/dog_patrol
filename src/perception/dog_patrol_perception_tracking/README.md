@@ -121,7 +121,11 @@ TARGET_CONFIRMED、当前帧 bbox、TARGET_LOST 与 TARGET_REACQUIRED。该 fixt
 `MissionCoordinator` 和 `MissionRosAdapter` 验证 STARTUP readiness、PATROL 首帧确认、fresh bbox、
 loss/block/reacquire/unblock、VERIFY、handled suppression 和 next-target selection。运行测试前必须
 source `/path/to/workspace/dog_patrol/install/setup.bash`；fixture 使用独立 ROS domain，并在退出时清理
-整个 supervisor process group。验收细节见 `docs/issue87_integrated_acceptance.md`。
+整个 supervisor process group。默认 CTest 使用无资产确定性 observations；在 Orin 上可显式追加
+`--visual-video`、`--detector-engine`、`--tracker-config`，使 historical Hik migration 录制先经过实际
+`PreprocessInfer → DetFilter → MotTracker → IdentityManager`，再用其 observations 执行同一 mission
+lifecycle。该模式不是 active H.264 runtime 入口。命令、资产哈希、帧号和 DDS echo/info/hz 证据见
+`docs/issue87_integrated_acceptance.md`。
 
 建议 engine 路径：
 - `/path/to/my_workplace/vision_demo_ws/assets/models/engines/orin_jp621_trt_local/yolo26n_fp16_640.engine`
