@@ -2,9 +2,8 @@ from pathlib import Path
 import re
 
 
-PROTOCOL_PATH = (
-    Path(__file__).resolve().parents[2] / "perception_navigation_interface.md"
-)
+REPO_ROOT = Path(__file__).resolve().parents[4]
+PROTOCOL_PATH = REPO_ROOT / "docs" / "contracts" / "perception_navigation_interface.md"
 
 
 def _fresh_bbox_rows():
@@ -39,3 +38,13 @@ def test_verify_identity_bbox_supports_authorization_while_navigation_holds():
     assert "授权" in purpose
     assert "停车" in purpose
     assert "不因 bbox" in purpose
+
+
+def test_target_lost_is_owned_by_perception():
+    protocol = PROTOCOL_PATH.read_text(encoding="utf-8")
+    target_lost_section = protocol.split("### 8.7 TARGET_LOST", 1)[1].split(
+        "### 8.8 EXECUTION_ERROR", 1
+    )[0]
+
+    assert "只能由感知发布" in target_lost_section
+    assert "导航不得发布 `TARGET_LOST`" in target_lost_section

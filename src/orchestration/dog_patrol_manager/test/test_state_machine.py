@@ -153,10 +153,10 @@ def test_target_lost_blocks_without_changing_business_state():
     result = machine.handle_event(
         event(
             machine,
-            EventSource.NAVIGATION,
+            EventSource.PERCEPTION,
             EventType.TARGET_LOST,
             42,
-            "bbox timeout",
+            "tracking timeout",
         )
     )
     assert result.changed
@@ -171,6 +171,34 @@ def test_target_lost_blocks_without_changing_business_state():
         event=int(EventType.TARGET_POSITION_READY),
     )
     assert not machine.handle_event(follow_up).accepted
+
+
+def test_navigation_cannot_publish_target_lost():
+    machine = MissionStateMachine()
+    start_patrol(machine)
+    machine.handle_event(
+        event(
+            machine,
+            EventSource.PERCEPTION,
+            EventType.TARGET_CONFIRMED,
+            42,
+        )
+    )
+    state_before = machine.snapshot
+
+    result = machine.handle_event(
+        event(
+            machine,
+            EventSource.NAVIGATION,
+            EventType.TARGET_LOST,
+            42,
+            "bbox timeout",
+        )
+    )
+
+    assert not result.accepted
+    assert result.reason == "NAVIGATION is not allowed to publish TARGET_LOST"
+    assert machine.snapshot == state_before
 
 
 def test_same_target_reacquired_clears_only_target_lost_block():

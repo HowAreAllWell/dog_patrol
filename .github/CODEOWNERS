@@ -1,0 +1,3 @@
+# CODEOWNERS 使用 GitHub 用户名，不使用邮箱地址。
+# 导航负责人接受邀请并确认用户名后，再新增 /src/navigation/ 的对应 owner。
+* @HowAreAllWell

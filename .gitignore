@@ -4,3 +4,23 @@ __pycache__/
 build/
 install/
 log/
+
+# Local models, recordings, and runtime artifacts
+data/
+assets/models/
+*.engine
+*.onnx
+*.pt
+*.pth
+*.mp4
+*.mkv
+*.avi
+*.mov
+MvSdkLog/
+
+# Local credentials and private configuration
+.env
+.env.*
+*.pem
+*.key
+*.p12

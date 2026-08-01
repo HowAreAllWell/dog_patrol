@@ -80,9 +80,7 @@ class MissionStateMachine:
         EventType.ARRIVED_AND_STOPPED: frozenset({EventSource.NAVIGATION}),
         EventType.AUTHORIZED: frozenset({EventSource.PERCEPTION}),
         EventType.UNAUTHORIZED: frozenset({EventSource.PERCEPTION}),
-        EventType.TARGET_LOST: frozenset(
-            {EventSource.PERCEPTION, EventSource.NAVIGATION}
-        ),
+        EventType.TARGET_LOST: frozenset({EventSource.PERCEPTION}),
         EventType.EXECUTION_ERROR: frozenset(
             {EventSource.PERCEPTION, EventSource.NAVIGATION}
         ),

@@ -101,12 +101,13 @@ ARRIVED_AND_STOPPED
 
 目标丢失或模块技术故障时：
 
-- 导航立即停止继续使用旧目标运动；
-- 模块发布 `TARGET_LOST` 或 `EXECUTION_ERROR`；
-- 状态机保持当前业务状态；
-- 状态机设置 `blocked=true`；
-- 状态机发布可区分的 `block_cause`；
-- 等待人工处理或后续版本增加复位策略。
+- 导航发现 bbox 过期或目标数据不可用时，立即停止继续使用旧目标运动，并发布
+  `TargetNavigationStatus.BLOCKED`；
+- 感知确认当前语义目标跟踪丢失时发布 `TARGET_LOST`；
+- 感知或导航遇到自身技术故障时发布 `EXECUTION_ERROR`；
+- 状态机收到 `TARGET_LOST` 或 `EXECUTION_ERROR` 后保持当前业务状态，设置
+  `blocked=true` 并发布可区分的 `block_cause`；
+- 全局阻塞等待人工处理，或由后续版本增加复位策略。
 
 首版不自动换目标、不自动恢复巡逻，也不增加搜索或重试状态。
 
@@ -151,7 +152,7 @@ ARRIVED_AND_STOPPED
 - 在认证状态向授权模块提供当前目标上下文；
 - 经感知接入适配器上报独立授权模块产生的 `AUTHORIZED` 或 `UNAUTHORIZED`；
 - 在入侵者跟踪状态继续发布同一目标 bbox；
-- 目标丢失或算法故障时报告错误事件。
+- 当前语义目标跟踪丢失时报告 `TARGET_LOST`，算法故障时报告 `EXECUTION_ERROR`。
 
 感知内部的首次人脸、语音提示、再次人脸和口令确认不进入全局状态机。
 
@@ -168,7 +169,8 @@ ARRIVED_AND_STOPPED
 - 到达约 3 米并确认停车后报告 `ARRIVED_AND_STOPPED`；
 - 在认证状态保持停车；
 - 在入侵者状态持续跟踪目标；
-- 目标数据失效或导航故障时停车并报告错误。
+- bbox 过期或目标数据不可用时立即停车并发布 `BLOCKED` 执行状态；
+- 雷达、TF、规划或控制等导航技术故障持续存在时报告 `EXECUTION_ERROR`。
 
 ### 3.4 上位机或人工处置端
 
@@ -234,6 +236,7 @@ PATROL          TRACK_INTRUDER
 | `VERIFY_IDENTITY` | 感知 | `AUTHORIZED` | `PATROL` |
 | `VERIFY_IDENTITY` | 感知 | `UNAUTHORIZED` | `TRACK_INTRUDER` |
 | `TRACK_INTRUDER` | 上位机 | `HANDLING_COMPLETE` | `PATROL` |
+| 任一有活动目标的业务状态 | 感知 | `TARGET_LOST` | 保持原状态，设置 `BLOCK_TARGET_LOST` |
 | 任一有活动目标的业务状态 | 感知 | `TARGET_REACQUIRED` | 保持原状态，仅解除 `TARGET_LOST` 阻塞 |
 
 `TARGET_LOST` 和 `EXECUTION_ERROR` 不切换业务状态，只将当前状态标记为阻塞，并分别
@@ -356,9 +359,9 @@ string detail
 - `event`：事件类型；
 - `detail`：诊断信息。
 
-`TARGET_REACQUIRED` 必须由感知发布，并携带产生该事件时观察到的
-`observed_state_seq` 和当前语义 `target_id`。它只在该目标已因 `TARGET_LOST` 被阻塞时
-有效。
+`TARGET_LOST` 和 `TARGET_REACQUIRED` 都必须由感知发布。`TARGET_REACQUIRED` 必须携带
+产生该事件时观察到的 `observed_state_seq` 和当前语义 `target_id`，且只在该目标已因
+`TARGET_LOST` 被阻塞时有效。
 
 推荐 QoS：
 
@@ -629,20 +632,18 @@ abs(angular_speed) < 0.10 rad/s
 
 ### 8.7 TARGET_LOST
 
-感知或导航都可以发送该事件。
+该事件只能由感知发布，表示感知已确认当前语义目标的跟踪已丢失，无法继续产生可信
+bbox。具体丢失判定和可恢复时间属于感知内部实现，不进入本协议合同。
 
-感知侧含义：
+触发含义：
 
 - 当前目标跟踪超时；
 - 无法继续产生可信 bbox。
 
-导航侧含义：
-
-- bbox 持续过期；
-- 目标位置持续失效；
-- 无法确认当前跟踪目标的位置。
-
-模块发送事件前，导航必须停止继续使用旧目标运动。
+导航不得发布 `TARGET_LOST`。导航无须等待该事件：一旦 bbox 超过最大允许年龄或目标
+数据不可用，就必须立即停止继续使用旧目标运动，并发布
+`TargetNavigationStatus.BLOCKED`。雷达、TF、目标融合、规划或控制等技术故障持续存在时，
+导航发布 `EXECUTION_ERROR`。
 
 状态机保持当前业务状态并设置：
 
@@ -779,7 +780,8 @@ detail="target lost: ..."
 - 根据 bbox 和雷达更新目标位置；
 - 持续跟随同一目标；
 - 保持安全跟随距离；
-- 目标数据失效时立即停车并报告 `TARGET_LOST`。
+- bbox 过期或目标数据不可用时立即停车并发布 `BLOCKED` 执行状态；
+- 导航自身技术故障持续存在时报告 `EXECUTION_ERROR`，不报告 `TARGET_LOST`。
 
 状态机：
 
@@ -902,7 +904,8 @@ source + event + observed_state_seq + target_id
 - 不用于更新目标位置；
 - 不用于继续目标跟随；
 - 不触发 `TARGET_POSITION_READY`；
-- 不触发 `ARRIVED_AND_STOPPED`。
+- 不触发 `ARRIVED_AND_STOPPED`；
+- 使导航立即停车并发布 `TargetNavigationStatus.BLOCKED`，但不触发 `TARGET_LOST`。
 
 初始最大允许年龄：
 
@@ -1033,7 +1036,6 @@ TARGET_LOST 或 EXECUTION_ERROR
 | 停车线速度阈值 | 导航 | 0.05 m/s |
 | 停车角速度阈值 | 导航 | 0.10 rad/s |
 | 停车确认时间 | 导航 | 0.5 s |
-| bbox/目标丢失超时 | 双方 | 0.5～1.0 s |
 | 巡逻恢复策略 | 导航 | 恢复暂停前 waypoint |
 
 这些参数必须在实车联调后确定，不能只根据仿真结果固定。
