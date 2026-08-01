@@ -1,11 +1,13 @@
 #!/usr/bin/env python3
 
 import threading
+from typing import Optional, Sequence
 
 import rclpy
 from dog_patrol_interfaces.msg import MissionEvent, MissionState
 from rclpy.executors import ExternalShutdownException
 from rclpy.node import Node
+from rclpy.parameter import Parameter
 from rclpy.qos import (
     DurabilityPolicy,
     HistoryPolicy,
@@ -22,8 +24,15 @@ from dog_patrol_manager.state_machine import (
 
 
 class MissionSupervisor(Node):
-    def __init__(self) -> None:
-        super().__init__("mission_supervisor")
+    def __init__(
+        self,
+        *,
+        parameter_overrides: Optional[Sequence[Parameter]] = None,
+    ) -> None:
+        super().__init__(
+            "mission_supervisor",
+            parameter_overrides=parameter_overrides,
+        )
 
         self.declare_parameter("state_topic", "/mission/state")
         self.declare_parameter("event_topic", "/mission/event")
@@ -42,7 +51,9 @@ class MissionSupervisor(Node):
         )
         self._lock = threading.RLock()
         self._machine = MissionStateMachine(
-            initial_state_seq=int(self.get_parameter("initial_state_seq").value),
+            initial_state_seq=int(
+                self.get_parameter("initial_state_seq").value
+            ),
             processed_event_limit=int(
                 self.get_parameter("processed_event_limit").value
             ),
@@ -77,7 +88,8 @@ class MissionSupervisor(Node):
         self._publish_state()
         self.get_logger().info(
             "mission supervisor ready: "
-            f"state_topic={self._state_topic}, event_topic={self._event_topic}, "
+            f"state_topic={self._state_topic}, "
+            f"event_topic={self._event_topic}, "
             f"state_publish_rate={self._state_publish_rate:.2f}Hz"
         )
 
@@ -98,7 +110,8 @@ class MissionSupervisor(Node):
         event_name = self._enum_name(EventType, event_data.event)
         prefix = (
             f"event {source_name}/{event_name}, "
-            f"seq={event_data.observed_state_seq}, target={event_data.target_id}"
+            f"seq={event_data.observed_state_seq}, "
+            f"target={event_data.target_id}"
         )
         if result.changed:
             self.get_logger().info(f"accepted {prefix}: {result.reason}")

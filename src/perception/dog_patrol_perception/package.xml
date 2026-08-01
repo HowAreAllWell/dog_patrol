@@ -1,0 +1,23 @@
+<?xml version="1.0"?>
+<package format="3">
+  <name>dog_patrol_perception</name>
+  <version>0.1.0</version>
+  <description>Perception orchestration and fake integration node for dog_patrol.</description>
+  <maintainer email="77225398+HowAreAllWell@users.noreply.github.com">HowAreAllWell</maintainer>
+  <license>BSD-3-Clause</license>
+
+  <buildtool_depend>ament_python</buildtool_depend>
+
+  <depend>dog_patrol_interfaces</depend>
+  <depend>rclpy</depend>
+  <depend>std_srvs</depend>
+  <exec_depend>launch</exec_depend>
+  <exec_depend>launch_ros</exec_depend>
+
+  <test_depend>python3-pytest</test_depend>
+  <test_depend>dog_patrol_manager</test_depend>
+
+  <export>
+    <build_type>ament_python</build_type>
+  </export>
+</package>
