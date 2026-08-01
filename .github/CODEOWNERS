@@ -1,3 +1,9 @@
-# CODEOWNERS 使用 GitHub 用户名，不使用邮箱地址。
-# 导航负责人接受邀请并确认用户名后，再新增 /src/navigation/ 的对应 owner。
+# 默认由主仓 owner 审查。
 * @HowAreAllWell
+
+# 导航负责人是导航 owner；主仓 owner 保留交叉审查和维护能力。
+/src/navigation/ @HowAreAllWell @AugetyVolta
+
+# 双方均为跨团队 ROS 2 合同及协议的 owner。
+/src/contracts/ @HowAreAllWell @AugetyVolta
+/docs/contracts/ @HowAreAllWell @AugetyVolta
