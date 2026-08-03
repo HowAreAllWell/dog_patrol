@@ -42,6 +42,7 @@ set(MODULE_SOURCES
   src/modules/appearance_feature_service.cpp
   src/modules/reid_embedder.cpp
   src/modules/association_utils.cpp
+  src/modules/mot_tracker_observability.cpp
   src/modules/mot_tracker.cpp
   src/modules/primary_target_manager.cpp
   src/modules/mission_coordinator.cpp
@@ -515,6 +516,14 @@ if(BUILD_TESTING)
     target_include_directories(test_mot_tracker_config PRIVATE include)
     target_link_libraries(test_mot_tracker_config ${PROJECT_NAME}_modules)
     ament_target_dependencies(test_mot_tracker_config rclcpp)
+  endif()
+
+  ament_add_gtest(test_mot_tracker_observability test/test_mot_tracker_observability.cpp)
+  if(TARGET test_mot_tracker_observability)
+    target_compile_features(test_mot_tracker_observability PUBLIC cxx_std_17)
+    target_include_directories(test_mot_tracker_observability PRIVATE include src/modules)
+    target_link_libraries(test_mot_tracker_observability ${PROJECT_NAME}_modules)
+    ament_target_dependencies(test_mot_tracker_observability rclcpp)
   endif()
 
   ament_add_gtest(test_appearance_feature_service test/test_appearance_feature_service.cpp)

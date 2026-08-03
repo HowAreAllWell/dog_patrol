@@ -18,6 +18,8 @@
 
 #include "vision_demo_host/modules/association_utils.hpp"
 
+#include "mot_tracker_observability.hpp"
+
 namespace vision_demo_host {
 namespace {
 
@@ -195,6 +197,12 @@ std::vector<int> HungarianAssign(const std::vector<std::vector<float>> &cost) {
 }  // namespace
 
 MotTracker::MotTracker(Config config) : config_(std::move(config)), appearance_features_() {}
+
+MotTracker::~MotTracker() = default;
+
+MotTracker::MotTracker(MotTracker &&other) noexcept = default;
+
+MotTracker &MotTracker::operator=(MotTracker &&other) noexcept = default;
 
 bool MotTracker::ParseTrackerConfig(std::string *error) {
   std::ifstream ifs(config_.tracker_yaml_path);
@@ -387,6 +395,9 @@ bool MotTracker::Initialize(std::string *error) {
   if (!ParseTrackerConfig(error)) {
     return false;
   }
+  observability_ = MotTrackerObservability::CreateCsv(
+      MotTrackerObservabilityConfig{config_.diag_assoc_enable, config_.diag_assoc_dir, config_.diag_frame_start,
+                                    config_.diag_frame_end});
 
   if (!config_.with_reid || !config_.reid_enabled) {
     std::cerr << "[mot_tracker] reid is mandatory; override with_reid/reid_enabled to true" << std::endl;
@@ -944,87 +955,21 @@ void MotTracker::AppendDuplicateOutputHypothesis(const TrackState &track,
   pending_duplicate_output_hypotheses_.push_back(hypothesis);
 }
 
-void MotTracker::MaybeOpenDiagFiles() {
-  if (!config_.diag_assoc_enable || diag_files_opened_) {
-    return;
-  }
-  if (config_.diag_assoc_dir.empty()) {
-    return;
-  }
-  std::filesystem::create_directories(config_.diag_assoc_dir);
-  diag_tracks_csv_.open(config_.diag_assoc_dir + "/tracks.csv");
-  diag_dets_csv_.open(config_.diag_assoc_dir + "/detections.csv");
-  diag_gmc_csv_.open(config_.diag_assoc_dir + "/gmc.csv");
-  diag_pairs_csv_.open(config_.diag_assoc_dir + "/pairs.csv");
-  if (diag_tracks_csv_.is_open()) {
-    diag_tracks_csv_
-        << "frame,track_idx,track_id,class_id,state_code,is_confirmed,hits,age,time_since_update,has_appearance,"
-           "pred_x,pred_y,pred_w,pred_h,last_x,last_y,last_w,last_h,"
-           "pre_gmc_pred_x,pre_gmc_pred_y,pre_gmc_pred_w,pre_gmc_pred_h,"
-           "pre_gmc_last_x,pre_gmc_last_y,pre_gmc_last_w,pre_gmc_last_h,"
-           "post_gmc_pred_x,post_gmc_pred_y,post_gmc_pred_w,post_gmc_pred_h,"
-           "post_gmc_last_x,post_gmc_last_y,post_gmc_last_w,post_gmc_last_h,"
-           "pre_state_post_0,pre_state_post_1,pre_state_post_2,pre_state_post_3,pre_state_post_4,pre_state_post_5,pre_state_post_6,pre_state_post_7,"
-           "post_predict_state_pre_0,post_predict_state_pre_1,post_predict_state_pre_2,post_predict_state_pre_3,post_predict_state_pre_4,post_predict_state_pre_5,post_predict_state_pre_6,post_predict_state_pre_7,"
-           "post_predict_state_post_0,post_predict_state_post_1,post_predict_state_post_2,post_predict_state_post_3,post_predict_state_post_4,post_predict_state_post_5,post_predict_state_post_6,post_predict_state_post_7,"
-           "post_gmc_state_pre_0,post_gmc_state_pre_1,post_gmc_state_pre_2,post_gmc_state_pre_3,post_gmc_state_pre_4,post_gmc_state_pre_5,post_gmc_state_pre_6,post_gmc_state_pre_7,"
-           "post_gmc_state_post_0,post_gmc_state_post_1,post_gmc_state_post_2,post_gmc_state_post_3,post_gmc_state_post_4,post_gmc_state_post_5,post_gmc_state_post_6,post_gmc_state_post_7,"
-           "pre_error_cov_post_d0,pre_error_cov_post_d1,pre_error_cov_post_d2,pre_error_cov_post_d3,pre_error_cov_post_d4,pre_error_cov_post_d5,pre_error_cov_post_d6,pre_error_cov_post_d7,"
-           "post_predict_error_cov_pre_d0,post_predict_error_cov_pre_d1,post_predict_error_cov_pre_d2,post_predict_error_cov_pre_d3,post_predict_error_cov_pre_d4,post_predict_error_cov_pre_d5,post_predict_error_cov_pre_d6,post_predict_error_cov_pre_d7,"
-           "post_predict_error_cov_post_d0,post_predict_error_cov_post_d1,post_predict_error_cov_post_d2,post_predict_error_cov_post_d3,post_predict_error_cov_post_d4,post_predict_error_cov_post_d5,post_predict_error_cov_post_d6,post_predict_error_cov_post_d7,"
-           "post_gmc_error_cov_pre_d0,post_gmc_error_cov_pre_d1,post_gmc_error_cov_pre_d2,post_gmc_error_cov_pre_d3,post_gmc_error_cov_pre_d4,post_gmc_error_cov_pre_d5,post_gmc_error_cov_pre_d6,post_gmc_error_cov_pre_d7,"
-           "post_gmc_error_cov_post_d0,post_gmc_error_cov_post_d1,post_gmc_error_cov_post_d2,post_gmc_error_cov_post_d3,post_gmc_error_cov_post_d4,post_gmc_error_cov_post_d5,post_gmc_error_cov_post_d6,post_gmc_error_cov_post_d7\n";
-  }
-  if (diag_gmc_csv_.is_open()) {
-    diag_gmc_csv_ << "frame,gmc_ok,warp00,warp01,warp02,warp10,warp11,warp12\n";
-  }
-  if (diag_dets_csv_.is_open()) {
-    diag_dets_csv_ << "frame,level,det_local_idx,det_src_idx,class,score,x,y,w,h\n";
-  }
-  if (diag_pairs_csv_.is_open()) {
-    diag_pairs_csv_
-        << "frame,stage,track_idx,track_id,track_state_code,det_local_idx,det_src_idx,"
-           "iou,motion_dist,gate_dist,assoc_motion_dist,motion_term_norm,motion_ok,motion_gate_thresh_effective,motion_iou_guard_pass,motion_gate_pass,"
-           "app_enabled,app_available,app_dist,app_gate_pass,"
-           "measurement_cx,measurement_cy,measurement_a,measurement_h,"
-           "residual_cx,residual_cy,residual_a,residual_h,"
-           "innovation_cov_s_00,innovation_cov_s_01,innovation_cov_s_02,innovation_cov_s_03,innovation_cov_s_10,innovation_cov_s_11,innovation_cov_s_12,innovation_cov_s_13,innovation_cov_s_20,innovation_cov_s_21,innovation_cov_s_22,innovation_cov_s_23,innovation_cov_s_30,innovation_cov_s_31,innovation_cov_s_32,innovation_cov_s_33,"
-           "kalman_gain_k_00,kalman_gain_k_01,kalman_gain_k_02,kalman_gain_k_03,kalman_gain_k_10,kalman_gain_k_11,kalman_gain_k_12,kalman_gain_k_13,kalman_gain_k_20,kalman_gain_k_21,kalman_gain_k_22,kalman_gain_k_23,kalman_gain_k_30,kalman_gain_k_31,kalman_gain_k_32,kalman_gain_k_33,kalman_gain_k_40,kalman_gain_k_41,kalman_gain_k_42,kalman_gain_k_43,kalman_gain_k_50,kalman_gain_k_51,kalman_gain_k_52,kalman_gain_k_53,kalman_gain_k_60,kalman_gain_k_61,kalman_gain_k_62,kalman_gain_k_63,kalman_gain_k_70,kalman_gain_k_71,kalman_gain_k_72,kalman_gain_k_73,"
-           "error_cov_pre_d0,error_cov_pre_d1,error_cov_pre_d2,error_cov_pre_d3,error_cov_pre_d4,error_cov_pre_d5,error_cov_pre_d6,error_cov_pre_d7,"
-           "error_cov_post_d0,error_cov_post_d1,error_cov_post_d2,error_cov_post_d3,error_cov_post_d4,error_cov_post_d5,error_cov_post_d6,error_cov_post_d7,"
-           "process_noise_q_d0,process_noise_q_d1,process_noise_q_d2,process_noise_q_d3,process_noise_q_d4,process_noise_q_d5,process_noise_q_d6,process_noise_q_d7,"
-           "measurement_noise_r_d0,measurement_noise_r_d1,measurement_noise_r_d2,measurement_noise_r_d3,"
-           "fused_cost,eligible,selected,reject_reason,"
-           "pre_gmc_pred_x,pre_gmc_pred_y,pre_gmc_pred_w,pre_gmc_pred_h,"
-           "post_gmc_pred_x,post_gmc_pred_y,post_gmc_pred_w,post_gmc_pred_h,"
-           "pre_state_post_0,pre_state_post_1,pre_state_post_2,pre_state_post_3,pre_state_post_4,pre_state_post_5,pre_state_post_6,pre_state_post_7,"
-           "post_predict_state_pre_0,post_predict_state_pre_1,post_predict_state_pre_2,post_predict_state_pre_3,post_predict_state_pre_4,post_predict_state_pre_5,post_predict_state_pre_6,post_predict_state_pre_7,"
-           "post_gmc_state_pre_0,post_gmc_state_pre_1,post_gmc_state_pre_2,post_gmc_state_pre_3,post_gmc_state_pre_4,post_gmc_state_pre_5,post_gmc_state_pre_6,post_gmc_state_pre_7\n";
-  }
-  diag_files_opened_ = true;
-}
-
 bool MotTracker::DiagFrameEnabled() const {
-  if (!config_.diag_assoc_enable) {
-    return false;
-  }
-  if (frame_id_ < config_.diag_frame_start) {
-    return false;
-  }
-  if (config_.diag_frame_end >= 0 && frame_id_ > config_.diag_frame_end) {
-    return false;
-  }
-  return true;
+  return observability_ != nullptr && observability_->EnabledForFrame(frame_id_);
 }
 
 void MotTracker::DiagWriteTracks(const std::vector<Detection> &, const std::vector<Detection> &) {
-  if (!diag_tracks_csv_.is_open() || !DiagFrameEnabled()) {
+  if (!DiagFrameEnabled()) {
     return;
   }
+  std::vector<MotTrackerTrackObservation> observations;
+  observations.reserve(tracks_.size());
   for (std::size_t i = 0; i < tracks_.size(); ++i) {
     const auto &t = tracks_[i];
     const bool has_snapshot = (i < diag_snapshots_.size() && diag_snapshots_[i].valid);
-    const auto &s = has_snapshot ? diag_snapshots_[i] : TrackDiagSnapshot{};
+    const TrackDiagSnapshot empty_snapshot;
+    const auto &s = has_snapshot ? diag_snapshots_[i] : empty_snapshot;
     const cv::Rect2f pre_pred = has_snapshot ? s.pre_gmc_pred_bbox : t.predicted_bbox;
     const cv::Rect2f pre_last = has_snapshot ? s.pre_gmc_bbox : t.bbox;
     const cv::Rect2f post_pred = has_snapshot ? s.post_gmc_pred_bbox : t.predicted_bbox;
@@ -1042,94 +987,66 @@ void MotTracker::DiagWriteTracks(const std::vector<Detection> &, const std::vect
     const cv::Mat post_gmc_error_cov_pre = has_snapshot ? s.post_gmc_error_cov_pre : t.kf.errorCovPre;
     const cv::Mat post_gmc_error_cov_post = has_snapshot ? s.post_gmc_error_cov_post : t.kf.errorCovPost;
 
-    diag_tracks_csv_ << frame_id_ << "," << i << "," << t.id << "," << static_cast<int>(t.class_id) << ","
-                     << static_cast<int>(t.life_state) << "," << (t.is_confirmed ? 1 : 0) << "," << t.hits << ","
-                     << t.age << "," << t.time_since_update << "," << (t.has_appearance ? 1 : 0) << ","
-                     << t.predicted_bbox.x << "," << t.predicted_bbox.y << "," << t.predicted_bbox.width << ","
-                     << t.predicted_bbox.height << "," << t.bbox.x << "," << t.bbox.y << "," << t.bbox.width << ","
-                     << t.bbox.height << ","
-                     << pre_pred.x << "," << pre_pred.y << "," << pre_pred.width << "," << pre_pred.height << ","
-                     << pre_last.x << "," << pre_last.y << "," << pre_last.width << "," << pre_last.height << ","
-                     << post_pred.x << "," << post_pred.y << "," << post_pred.width << "," << post_pred.height << ","
-                     << post_last.x << "," << post_last.y << "," << post_last.width << "," << post_last.height;
-    for (int k = 0; k < 8; ++k) {
-      diag_tracks_csv_ << "," << StateVal(pre_state_post, k);
-    }
-    for (int k = 0; k < 8; ++k) {
-      diag_tracks_csv_ << "," << StateVal(post_predict_state_pre, k);
-    }
-    for (int k = 0; k < 8; ++k) {
-      diag_tracks_csv_ << "," << StateVal(post_predict_state_post, k);
-    }
-    for (int k = 0; k < 8; ++k) {
-      diag_tracks_csv_ << "," << StateVal(post_gmc_state_pre, k);
-    }
-    for (int k = 0; k < 8; ++k) {
-      diag_tracks_csv_ << "," << StateVal(post_gmc_state_post, k);
-    }
-    for (int k = 0; k < 8; ++k) {
-      diag_tracks_csv_ << "," << MatVal(pre_error_cov_post, k, k);
-    }
-    for (int k = 0; k < 8; ++k) {
-      diag_tracks_csv_ << "," << MatVal(post_predict_error_cov_pre, k, k);
-    }
-    for (int k = 0; k < 8; ++k) {
-      diag_tracks_csv_ << "," << MatVal(post_predict_error_cov_post, k, k);
-    }
-    for (int k = 0; k < 8; ++k) {
-      diag_tracks_csv_ << "," << MatVal(post_gmc_error_cov_pre, k, k);
-    }
-    for (int k = 0; k < 8; ++k) {
-      diag_tracks_csv_ << "," << MatVal(post_gmc_error_cov_post, k, k);
-    }
-    diag_tracks_csv_ << "\n";
+    MotTrackerTrackObservation observation;
+    observation.track_idx = static_cast<int>(i);
+    observation.track_id = t.id;
+    observation.class_id = t.class_id;
+    observation.state_code = static_cast<int>(t.life_state);
+    observation.is_confirmed = t.is_confirmed;
+    observation.hits = t.hits;
+    observation.age = t.age;
+    observation.time_since_update = t.time_since_update;
+    observation.has_appearance = t.has_appearance;
+    observation.predicted_bbox = t.predicted_bbox;
+    observation.bbox = t.bbox;
+    observation.pre_gmc_pred_bbox = pre_pred;
+    observation.pre_gmc_bbox = pre_last;
+    observation.post_gmc_pred_bbox = post_pred;
+    observation.post_gmc_bbox = post_last;
+    observation.pre_state_post = pre_state_post;
+    observation.post_predict_state_pre = post_predict_state_pre;
+    observation.post_predict_state_post = post_predict_state_post;
+    observation.post_gmc_state_pre = post_gmc_state_pre;
+    observation.post_gmc_state_post = post_gmc_state_post;
+    observation.pre_error_cov_post = pre_error_cov_post;
+    observation.post_predict_error_cov_pre = post_predict_error_cov_pre;
+    observation.post_predict_error_cov_post = post_predict_error_cov_post;
+    observation.post_gmc_error_cov_pre = post_gmc_error_cov_pre;
+    observation.post_gmc_error_cov_post = post_gmc_error_cov_post;
+    observations.push_back(std::move(observation));
   }
+  observability_->WriteTracks(frame_id_, observations);
 }
 
 void MotTracker::DiagWriteDetections(const std::vector<Detection> &det_high, const std::vector<Detection> &det_low) const {
-  if (!diag_dets_csv_.is_open() || !DiagFrameEnabled()) {
+  if (!DiagFrameEnabled()) {
     return;
   }
+  std::vector<MotTrackerDetectionObservation> observations;
+  observations.reserve(det_high.size() + det_low.size());
   for (std::size_t i = 0; i < det_high.size(); ++i) {
     const auto &d = det_high[i];
-    diag_dets_csv_ << frame_id_ << ",high," << i << "," << i << "," << static_cast<int>(d.class_id) << ","
-                   << d.confidence << "," << d.bbox.x << "," << d.bbox.y << "," << d.bbox.width << ","
-                   << d.bbox.height << "\n";
+    observations.push_back(MotTrackerDetectionObservation{"high", static_cast<int>(i), static_cast<int>(i),
+                                                          d.class_id, d.confidence, d.bbox});
   }
   for (std::size_t i = 0; i < det_low.size(); ++i) {
     const auto &d = det_low[i];
-    diag_dets_csv_ << frame_id_ << ",low," << i << "," << i << "," << static_cast<int>(d.class_id) << ","
-                   << d.confidence << "," << d.bbox.x << "," << d.bbox.y << "," << d.bbox.width << ","
-                   << d.bbox.height << "\n";
+    observations.push_back(MotTrackerDetectionObservation{"low", static_cast<int>(i), static_cast<int>(i),
+                                                          d.class_id, d.confidence, d.bbox});
   }
+  observability_->WriteDetections(frame_id_, observations);
 }
 
-void MotTracker::DiagWriteGmc() const {
-  if (!diag_gmc_csv_.is_open() || !DiagFrameEnabled()) {
+void MotTracker::DiagWriteGmc(const bool gmc_ok, const cv::Mat &gmc_warp) const {
+  if (!DiagFrameEnabled()) {
     return;
   }
-  float w00 = 1.0F;
-  float w01 = 0.0F;
-  float w02 = 0.0F;
-  float w10 = 0.0F;
-  float w11 = 1.0F;
-  float w12 = 0.0F;
-  if (!diag_gmc_warp_.empty() && diag_gmc_warp_.rows == 2 && diag_gmc_warp_.cols == 3) {
-    w00 = diag_gmc_warp_.at<float>(0, 0);
-    w01 = diag_gmc_warp_.at<float>(0, 1);
-    w02 = diag_gmc_warp_.at<float>(0, 2);
-    w10 = diag_gmc_warp_.at<float>(1, 0);
-    w11 = diag_gmc_warp_.at<float>(1, 1);
-    w12 = diag_gmc_warp_.at<float>(1, 2);
-  }
-  diag_gmc_csv_ << frame_id_ << "," << (diag_gmc_ok_ ? 1 : 0) << ","
-                << w00 << "," << w01 << "," << w02 << ","
-                << w10 << "," << w11 << "," << w12 << "\n";
+  observability_->WriteGmc(frame_id_, MotTrackerGmcObservation{gmc_ok, gmc_warp});
 }
 
 void MotTracker::DiagWritePairs(const std::string &stage_name, const int track_idx, const int det_local_idx,
                                 const int det_src_idx, const AssocTerms &terms, const bool selected) const {
-  if (!diag_pairs_csv_.is_open() || !DiagFrameEnabled()) {
+  if (!DiagFrameEnabled()) {
     return;
   }
   if (track_idx < 0 || track_idx >= static_cast<int>(tracks_.size())) {
@@ -1137,58 +1054,58 @@ void MotTracker::DiagWritePairs(const std::string &stage_name, const int track_i
   }
   const auto &t = tracks_[track_idx];
   const bool has_snapshot = (track_idx < static_cast<int>(diag_snapshots_.size()) && diag_snapshots_[track_idx].valid);
-  const auto &s = has_snapshot ? diag_snapshots_[track_idx] : TrackDiagSnapshot{};
+  const TrackDiagSnapshot empty_snapshot;
+  const auto &s = has_snapshot ? diag_snapshots_[track_idx] : empty_snapshot;
   const cv::Rect2f pre_pred = has_snapshot ? s.pre_gmc_pred_bbox : t.predicted_bbox;
   const cv::Rect2f post_pred = has_snapshot ? s.post_gmc_pred_bbox : t.predicted_bbox;
   const cv::Mat pre_state_post = has_snapshot ? s.pre_state_post : t.kf.statePost;
   const cv::Mat post_predict_state_pre = has_snapshot ? s.post_predict_state_pre : t.kf.statePre;
   const cv::Mat post_gmc_state_pre = has_snapshot ? s.post_gmc_state_pre : t.kf.statePre;
 
-  diag_pairs_csv_ << frame_id_ << "," << stage_name << "," << track_idx << "," << t.id << ","
-                  << static_cast<int>(t.life_state) << "," << det_local_idx << "," << det_src_idx << ","
-                  << terms.iou << "," << terms.motion_dist << "," << terms.gate_dist << ","
-                  << terms.assoc_motion_dist << "," << terms.motion_term_norm << ","
-                  << (terms.motion_ok ? 1 : 0) << "," << terms.motion_gate_effective_thresh << ","
-                  << (terms.iou_guard_pass ? 1 : 0) << "," << (terms.motion_gate_pass ? 1 : 0) << ","
-                  << (terms.app_enabled ? 1 : 0) << "," << (terms.app_available ? 1 : 0) << ","
-                  << terms.app_dist << "," << (terms.app_gate_pass ? 1 : 0) << ","
-                  << terms.measurement_cx << "," << terms.measurement_cy << ","
-                  << terms.measurement_a << "," << terms.measurement_h << ","
-                  << terms.residual_cx << "," << terms.residual_cy << ","
-                  << terms.residual_a << "," << terms.residual_h;
-  for (int i = 0; i < 16; ++i) {
-    diag_pairs_csv_ << "," << terms.innovation_cov_s[static_cast<std::size_t>(i)];
-  }
-  for (int i = 0; i < 32; ++i) {
-    diag_pairs_csv_ << "," << terms.kalman_gain_k[static_cast<std::size_t>(i)];
-  }
-  for (int i = 0; i < 8; ++i) {
-    diag_pairs_csv_ << "," << terms.error_cov_pre_diag[static_cast<std::size_t>(i)];
-  }
-  for (int i = 0; i < 8; ++i) {
-    diag_pairs_csv_ << "," << terms.error_cov_post_diag[static_cast<std::size_t>(i)];
-  }
-  for (int i = 0; i < 8; ++i) {
-    diag_pairs_csv_ << "," << terms.process_noise_q_diag[static_cast<std::size_t>(i)];
-  }
-  for (int i = 0; i < 4; ++i) {
-    diag_pairs_csv_ << "," << terms.measurement_noise_r_diag[static_cast<std::size_t>(i)];
-  }
-  diag_pairs_csv_ << ","
-                  << terms.fused_cost << "," << (terms.eligible ? 1 : 0) << "," << (selected ? 1 : 0) << ","
-                  << terms.reject_reason << ","
-                  << pre_pred.x << "," << pre_pred.y << "," << pre_pred.width << "," << pre_pred.height << ","
-                  << post_pred.x << "," << post_pred.y << "," << post_pred.width << "," << post_pred.height;
-  for (int k = 0; k < 8; ++k) {
-    diag_pairs_csv_ << "," << StateVal(pre_state_post, k);
-  }
-  for (int k = 0; k < 8; ++k) {
-    diag_pairs_csv_ << "," << StateVal(post_predict_state_pre, k);
-  }
-  for (int k = 0; k < 8; ++k) {
-    diag_pairs_csv_ << "," << StateVal(post_gmc_state_pre, k);
-  }
-  diag_pairs_csv_ << "\n";
+  MotTrackerPairObservation observation;
+  observation.stage_name = stage_name;
+  observation.track_idx = track_idx;
+  observation.track_id = t.id;
+  observation.track_state_code = static_cast<int>(t.life_state);
+  observation.det_local_idx = det_local_idx;
+  observation.det_src_idx = det_src_idx;
+  observation.selected = selected;
+  observation.pre_gmc_pred_bbox = pre_pred;
+  observation.post_gmc_pred_bbox = post_pred;
+  observation.pre_state_post = pre_state_post;
+  observation.post_predict_state_pre = post_predict_state_pre;
+  observation.post_gmc_state_pre = post_gmc_state_pre;
+  observation.terms.iou = terms.iou;
+  observation.terms.motion_dist = terms.motion_dist;
+  observation.terms.gate_dist = terms.gate_dist;
+  observation.terms.assoc_motion_dist = terms.assoc_motion_dist;
+  observation.terms.motion_term_norm = terms.motion_term_norm;
+  observation.terms.motion_ok = terms.motion_ok;
+  observation.terms.motion_gate_pass = terms.motion_gate_pass;
+  observation.terms.app_enabled = terms.app_enabled;
+  observation.terms.app_available = terms.app_available;
+  observation.terms.app_dist = terms.app_dist;
+  observation.terms.app_gate_pass = terms.app_gate_pass;
+  observation.terms.motion_gate_effective_thresh = terms.motion_gate_effective_thresh;
+  observation.terms.iou_guard_pass = terms.iou_guard_pass;
+  observation.terms.measurement_cx = terms.measurement_cx;
+  observation.terms.measurement_cy = terms.measurement_cy;
+  observation.terms.measurement_a = terms.measurement_a;
+  observation.terms.measurement_h = terms.measurement_h;
+  observation.terms.residual_cx = terms.residual_cx;
+  observation.terms.residual_cy = terms.residual_cy;
+  observation.terms.residual_a = terms.residual_a;
+  observation.terms.residual_h = terms.residual_h;
+  observation.terms.innovation_cov_s = terms.innovation_cov_s;
+  observation.terms.kalman_gain_k = terms.kalman_gain_k;
+  observation.terms.error_cov_pre_diag = terms.error_cov_pre_diag;
+  observation.terms.error_cov_post_diag = terms.error_cov_post_diag;
+  observation.terms.process_noise_q_diag = terms.process_noise_q_diag;
+  observation.terms.measurement_noise_r_diag = terms.measurement_noise_r_diag;
+  observation.terms.fused_cost = terms.fused_cost;
+  observation.terms.eligible = terms.eligible;
+  observation.terms.reject_reason = terms.reject_reason;
+  observability_->WritePair(frame_id_, observation);
 }
 
 float MotTracker::ComputeIoU(const cv::Rect2f &a, const cv::Rect2f &b) const {
@@ -1411,8 +1328,6 @@ void MotTracker::ApplyGmc(const cv::Mat &frame, std::vector<TrackState> *tracks,
     *out_warp = cv::Mat::eye(2, 3, CV_32F);
   }
   if (!config_.gmc_enabled || frame.empty()) {
-    diag_gmc_ok_ = false;
-    diag_gmc_warp_ = cv::Mat::eye(2, 3, CV_32F);
     return;
   }
 
@@ -1420,8 +1335,6 @@ void MotTracker::ApplyGmc(const cv::Mat &frame, std::vector<TrackState> *tracks,
   cv::cvtColor(frame, gray, cv::COLOR_BGR2GRAY);
   if (prev_gray_.empty()) {
     prev_gray_ = gray;
-    diag_gmc_ok_ = false;
-    diag_gmc_warp_ = cv::Mat::eye(2, 3, CV_32F);
     return;
   }
 
@@ -1533,8 +1446,6 @@ void MotTracker::ApplyGmc(const cv::Mat &frame, std::vector<TrackState> *tracks,
   if (out_warp != nullptr) {
     *out_warp = warp.clone();
   }
-  diag_gmc_ok_ = gmc_ok;
-  diag_gmc_warp_ = warp.clone();
   prev_gray_ = gray;
 }
 
@@ -1685,7 +1596,9 @@ std::vector<Track> MotTracker::UpdateOldMinimal(const std::vector<Detection> &de
 
 std::vector<Track> MotTracker::UpdateNewCore(const std::vector<Detection> &detections, const cv::Mat &frame) {
   frame_id_ += 1;
-  MaybeOpenDiagFiles();
+  if (observability_ != nullptr) {
+    observability_->BeginFrame(frame_id_);
+  }
   diag_snapshots_.clear();
   diag_snapshots_.resize(tracks_.size());
 
@@ -1738,9 +1651,7 @@ std::vector<Track> MotTracker::UpdateNewCore(const std::vector<Detection> &detec
     snap.post_gmc_error_cov_pre = t.kf.errorCovPre.clone();
     snap.post_gmc_error_cov_post = t.kf.errorCovPost.clone();
   }
-  (void)gmc_ok;
-  (void)gmc_warp;
-  DiagWriteGmc();
+  DiagWriteGmc(gmc_ok, gmc_warp);
 
   std::vector<Detection> det_high;
   std::vector<cv::Mat> feat_high;

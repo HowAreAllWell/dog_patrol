@@ -1,7 +1,7 @@
 #pragma once
 
 #include <array>
-#include <fstream>
+#include <memory>
 #include <opencv2/video/tracking.hpp>
 #include <string>
 #include <vector>
@@ -10,6 +10,8 @@
 #include "vision_demo_host/types.hpp"
 
 namespace vision_demo_host {
+
+class MotTrackerObservability;
 
 class MotTracker {
  public:
@@ -69,6 +71,11 @@ class MotTracker {
   };
 
   explicit MotTracker(Config config);
+  ~MotTracker();
+  MotTracker(MotTracker &&other) noexcept;
+  MotTracker &operator=(MotTracker &&other) noexcept;
+  MotTracker(const MotTracker &other) = delete;
+  MotTracker &operator=(const MotTracker &other) = delete;
 
   bool Initialize(std::string *error);
   std::vector<Track> Update(const std::vector<Detection> &detections, const cv::Mat &frame);
@@ -180,11 +187,10 @@ class MotTracker {
                                      bool enable_appearance, float iou_min) const;
   float AssociationCost(const TrackState &track, const Detection &det, const cv::Mat &det_feat,
                         bool enable_appearance, float iou_min, float *out_iou) const;
-  void MaybeOpenDiagFiles();
   bool DiagFrameEnabled() const;
   void DiagWriteTracks(const std::vector<Detection> &det_high, const std::vector<Detection> &det_low);
   void DiagWriteDetections(const std::vector<Detection> &det_high, const std::vector<Detection> &det_low) const;
-  void DiagWriteGmc() const;
+  void DiagWriteGmc(bool gmc_ok, const cv::Mat &gmc_warp) const;
   void DiagWritePairs(const std::string &stage_name, int track_idx, int det_local_idx, int det_src_idx,
                       const AssocTerms &terms, bool selected) const;
   AssociationEvidence EvidenceFromTerms(const AssocTerms &terms, const std::string &stage_name,
@@ -224,13 +230,7 @@ class MotTracker {
   std::vector<TrackState> tracks_;
   AppearanceFeatureService appearance_features_;
   cv::Mat prev_gray_;
-  mutable std::ofstream diag_tracks_csv_;
-  mutable std::ofstream diag_dets_csv_;
-  mutable std::ofstream diag_gmc_csv_;
-  mutable std::ofstream diag_pairs_csv_;
-  bool diag_files_opened_{false};
-  bool diag_gmc_ok_{false};
-  cv::Mat diag_gmc_warp_;
+  std::unique_ptr<MotTrackerObservability> observability_;
   std::vector<TrackDiagSnapshot> diag_snapshots_;
   std::vector<TrackletHypothesis> last_tracklet_hypotheses_;
   std::vector<TrackletHypothesis> pending_suppressed_new_track_hypotheses_;
