@@ -34,6 +34,7 @@ struct Options {
   float det_person_conf_threshold{0.10F};
   float det_car_conf_threshold{0.10F};
   std::string tracker_config_path{"/path/to/my_workplace/vision_demo_ws/src/vision_demo_host/config/bot_sort.yaml"};
+  bool tracker_gmc_enabled{vision_demo_host::MotTracker::Config::kDefaultGmcEnabled};
   std::string tracker_reid_backend{"light"};
   std::string tracker_reid_model_path{};
   int tracker_reid_input_width{128};
@@ -183,6 +184,7 @@ void PrintUsage() {
       << "  --det-person-conf <f>          (default: 0.10)\n"
       << "  --det-car-conf <f>             (default: 0.10)\n"
       << "  --tracker-config <path>\n"
+      << "  --tracker-gmc-enabled <true|false> (default: false)\n"
       << "  --tracker-reid-backend <light|osnet_onnx> (default: light)\n"
       << "  --tracker-reid-model-path <path>      (default: \"\")\n"
       << "  --tracker-reid-input-width <n>        (default: 128)\n"
@@ -299,6 +301,15 @@ bool ParseArgs(int argc, char **argv, Options *opt, std::string *error) {
       }
     } else if (arg == "--tracker-config") {
       opt->tracker_config_path = need(arg);
+    } else if (arg == "--tracker-gmc-enabled") {
+      bool v = true;
+      if (!ParseBool(need(arg), &v)) {
+        if (error != nullptr) {
+          *error = "Invalid value for --tracker-gmc-enabled";
+        }
+        return false;
+      }
+      opt->tracker_gmc_enabled = v;
     } else if (arg == "--tracker-reid-backend") {
       opt->tracker_reid_backend = need(arg);
     } else if (arg == "--tracker-reid-model-path") {
@@ -851,7 +862,7 @@ DatasetMetrics EvaluateOne(const Options &opt, const std::filesystem::path &data
 
   vision_demo_host::MotTracker::Config tracker_cfg;
   tracker_cfg.tracker_yaml_path = opt.tracker_config_path;
-  tracker_cfg.gmc_enabled = true;
+  tracker_cfg.gmc_enabled = opt.tracker_gmc_enabled;
   tracker_cfg.reid_enabled = true;
   tracker_cfg.gmc_method = "sparseOptFlow";
   tracker_cfg.gmc_downscale = 4;
@@ -1276,6 +1287,8 @@ int main(int argc, char **argv) {
   std::cout << "[offline_eval] det_thresholds raw=" << opt.det_raw_conf_threshold
             << " person=" << opt.det_person_conf_threshold
             << " car=" << opt.det_car_conf_threshold << std::endl;
+  std::cout << "[offline_eval] tracker_gmc_enabled="
+            << (opt.tracker_gmc_enabled ? "true" : "false") << std::endl;
   std::cout << "[offline_eval] target_lost_threshold_frames=" << opt.target_lost_threshold_frames << std::endl;
   bool all_ok = true;
   for (const auto &request : requests) {

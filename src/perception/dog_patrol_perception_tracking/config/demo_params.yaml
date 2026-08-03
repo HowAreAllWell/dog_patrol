@@ -21,7 +21,7 @@ vision_demo_host_node:
 
     tracker:
       config_path: "/path/to/my_workplace/vision_demo_ws/src/vision_demo_host/config/bot_sort.yaml"
-      gmc_enabled: true
+      gmc_enabled: false
       reid_enabled: true
       track_high_thresh: 0.5
       track_low_thresh: 0.1

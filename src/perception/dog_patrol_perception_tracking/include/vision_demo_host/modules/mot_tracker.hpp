@@ -14,9 +14,11 @@ namespace vision_demo_host {
 class MotTracker {
  public:
   struct Config {
+    static constexpr bool kDefaultGmcEnabled{false};
+
     std::string tracker_yaml_path;
     std::string core_mode{"new_core"};  // old_minimal | new_core
-    bool gmc_enabled{true};
+    bool gmc_enabled{kDefaultGmcEnabled};
     bool reid_enabled{true};
     float track_high_thresh{0.5F};
     float track_low_thresh{0.1F};

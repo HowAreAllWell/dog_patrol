@@ -8,7 +8,7 @@ Orin 宿主机侧视觉验收 demo，包含检测、短期跟踪、语义身份�
 - `camera_ingest`：仅 Hikrobot MVS；向下游返回自持有的 BGR8 图像和源帧元数据
 - `preprocess_infer`：YOLO26n TensorRT engine 推理（本机导出的 `.engine`）
 - `det_filter`：`person + car` 阈值过滤（配置化）
-- `mot_tracker`：BoT-SORT 风格实现（Kalman + 两阶段关联 + GMC + appearance）
+- `mot_tracker`：BoT-SORT 风格实现（Kalman + 两阶段关联 + 可选 GMC + appearance）
 - `primary_target_manager`：`person`-only 主目标规则（首锁最大框 + continuity-first）
 - `mission_coordinator`：ROS-independent 任务输出协调 seam；按任务状态 / semantic target / state sequence 只产生当前帧可信 bbox，并负责配置化同目标 loss/reacquire event 时序
 - `perception_readiness`：ROS-independent READY 聚合 seam；以 required capability contribution 和 `STARTUP state_seq` 产生至多一次 aggregate READY action
@@ -214,7 +214,7 @@ ros2 run vision_demo_host vision_demo_node --ros-args \
 - `new_track_thresh`
 - `match_thresh`
 - `track_buffer`
-- `gmc_method`（当前默认：`sparseOptFlow`）
+- `gmc_method`（当前默认：`sparseOptFlow`，仅在 `tracker.gmc_enabled=true` 时生效）
 - `gmc_downscale`（当前默认：`4`，表示 GMC 估计在 `1/4` 分辨率上进行）
 - `with_reid`（默认：`true`；运行时强制开启）
 - `confirm_hits`
@@ -222,7 +222,7 @@ ros2 run vision_demo_host vision_demo_node --ros-args \
 - `motion_gate_thresh`
 - `assoc_iou_weight` / `assoc_motion_weight` / `assoc_app_weight`
 - `appearance_gate` / `appearance_alpha` / `appearance_h_bins` / `appearance_s_bins`
-- `tracker.gmc_enabled` 由 ROS 参数控制；`tracker.reid_enabled` / `with_reid` 运行时会强制为 `true` 并打印告警。
+- `tracker.gmc_enabled` 由 ROS 参数控制，当前默认 `false`；移动平台或明显相机运动场景可显式设为 `true`。`tracker.reid_enabled` / `with_reid` 运行时会强制为 `true` 并打印告警。
 
 主目标生命周期配置：
 - `target.lost_threshold_frames`（默认 `180`；主目标/语义 identity missing 超过该帧数才进入 LOST 并允许重选，约 7.2s@25fps）
@@ -260,6 +260,10 @@ Tracker ReID 配置（`tracker.*`）：
 - `config/legacy/tracker_old_minimal.yaml`
 - `config/legacy/tracker_new_core_no_app.yaml`
 - `config/legacy/tracker_new_core_with_app.yaml`
+
+`offline_eval_recordings` 默认关闭 GMC；需要做显式对照或移动平台复现时使用
+`--tracker-gmc-enabled true|false`。该参数只覆盖本次离线回放的 tracker 配置，默认值为
+`false`，不会改变 live ROS 参数或 `config/bot_sort.yaml`。
 
 离线评估对照脚本必须显式传入 capture take 的 FFV1/MKV：
 
@@ -299,7 +303,7 @@ buffers 比较全部 SDK quality、写出 FFV1 variants、检测 CSV 和分段 p
 `PreprocessInfer` 默认不启用，避免因审计改变 production inference 行为。
 
 建议默认配置（当前）：
-- `gmc_enabled=true`
+- `gmc_enabled=false`
 - `gmc_method=sparseOptFlow`
 - `gmc_downscale=4`
 - `with_reid=true`（强制）
@@ -408,6 +412,7 @@ overlay 的渲染画布从 source BGR8 frame clone，绝不回写或标注 clean
 - `--det-person-conf <f>`（默认 `0.10`）
 - `--det-car-conf <f>`（默认 `0.10`）
 - `--tracker-config <path>`
+- `--tracker-gmc-enabled <true|false>`（默认 `false`）
 - `--tracker-reid-backend <light|osnet_onnx>`
 - `--tracker-reid-model-path <path>`
 - `--save-frame-csv <true|false>`

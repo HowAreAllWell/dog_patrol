@@ -29,3 +29,12 @@ done
 
 expect_failure 2 "Choose an FFV1 capture with --video or --datasets" "$OFFLINE_EVAL"
 expect_failure 2 "Unknown argument: --rtsp-url" "$OFFLINE_EVAL" --rtsp-url retired
+
+help_output="$($OFFLINE_EVAL --help 2>&1)"
+if [[ "$help_output" != *"--tracker-gmc-enabled <true|false> (default: false)"* ]]; then
+  echo "offline eval help does not document the default-disabled GMC switch" >&2
+  exit 1
+fi
+
+expect_failure 2 "Invalid value for --tracker-gmc-enabled" \
+  "$OFFLINE_EVAL" --tracker-gmc-enabled maybe

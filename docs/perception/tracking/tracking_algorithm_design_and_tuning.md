@@ -72,7 +72,7 @@ src/vision_demo_host/config/bot_sort.yaml
 - 使用 Kalman 运动预测保持短期连续性。
 - 用两阶段关联处理高分检测和低分检测。
 - 关联成本由 IoU、运动距离、外观特征共同组成。
-- GMC 用 `sparseOptFlow` 抵消移动平台或相机抖动带来的全局画面运动。
+- GMC 默认关闭；需要移动平台或相机抖动补偿时，用 `sparseOptFlow` 抵消全局画面运动。
 
 关键参数：
 
@@ -83,12 +83,13 @@ src/vision_demo_host/config/bot_sort.yaml
 - `stage1_iou_min` / `stage2_iou_min`：两阶段 IoU 下限。
 - `stage1_max_cost` / `stage2_max_cost` / `lost_recovery_max_cost`：最终关联成本门槛。
 - `assoc_iou_weight` / `assoc_motion_weight` / `assoc_app_weight`：IoU、运动、外观权重。
-- `gmc_method` / `gmc_downscale`：全局运动补偿方式和降采样。
+- `tracker.gmc_enabled`：全局运动补偿开关，当前默认关闭。
+- `gmc_method` / `gmc_downscale`：全局运动补偿方式和降采样，仅在 GMC 开启时生效。
 
 调参建议：
 
-- 相机或机器人运动明显，目标框整体漂移：保留 `gmc_method=sparseOptFlow`，优先调 `gmc_downscale`。
-- FPS 不足：先关可视化/录制；仍不足时可临时设 `tracker.gmc_enabled=false` 验证瓶颈。
+- 相机或机器人运动明显，目标框整体漂移：显式设 `tracker.gmc_enabled=true`，保留 `gmc_method=sparseOptFlow`，优先调 `gmc_downscale`。
+- FPS 不足：先关可视化/录制；GMC 默认已关闭，继续看 detector、ReID、identity 和输出写入成本。
 - 短遮挡后 raw track 频繁断：适当增大 `track_buffer` 或放宽 `lost_recovery_max_cost`，但会增加错绑风险。
 - 两个人交叉时 raw track 错换：不要只放宽阈值；优先看 Identity 层是否能把 semantic_id 拉回来。
 
@@ -249,7 +250,7 @@ ros2 run vision_demo_host vision_demo_node --ros-args \
 | 反光/手/碎片占 ID | birth gate | 提高 `target.min_person_area_px`，提高 detector 阈值，收紧 split/hidden 相关参数 |
 | 两人交叉后身份错乱 | Identity + feature freeze | `sid.overlap_iou_freeze`, `sid.split_stable_frames`, `sid.merge_hold_frames` |
 | 主目标短时离开后 LOST | Primary | 增大 `target.lost_threshold_frames` |
-| FPS 不足 | Runtime/GMC/ReID | 关闭可视化录制，调 GMC，避免 ONNX ReID |
+| FPS 不足 | Runtime/ReID/output | 关闭可视化录制，确认 GMC 未被显式开启，避免 ONNX ReID |
 
 ## 10. 最小验收标准
 

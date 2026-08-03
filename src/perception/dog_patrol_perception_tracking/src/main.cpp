@@ -98,7 +98,8 @@ class VisionDemoNode : public rclcpp::Node {
     this->declare_parameter<bool>("detector.enable_fake_detection", false);
 
     this->declare_parameter<std::string>("tracker.config_path", "");
-    this->declare_parameter<bool>("tracker.gmc_enabled", true);
+    this->declare_parameter<bool>("tracker.gmc_enabled",
+                                  vision_demo_host::MotTracker::Config::kDefaultGmcEnabled);
     this->declare_parameter<bool>("tracker.reid_enabled", true);
     this->declare_parameter<double>("tracker.track_high_thresh", 0.5);
     this->declare_parameter<double>("tracker.track_low_thresh", 0.1);

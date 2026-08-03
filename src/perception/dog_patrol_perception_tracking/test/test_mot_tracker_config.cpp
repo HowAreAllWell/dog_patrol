@@ -38,6 +38,11 @@ vision_demo_host::Detection PersonDet(const float confidence, const cv::Rect2f &
 
 }  // namespace
 
+TEST(MotTrackerConfigTest, DefaultConfigKeepsGmcDisabled) {
+  const vision_demo_host::MotTracker::Config cfg;
+  EXPECT_FALSE(cfg.gmc_enabled);
+}
+
 TEST(MotTrackerConfigTest, GmcDownscaleAndStageCostConfigParse) {
   const auto yaml = WriteTrackerConfig(
       "vision_demo_tracker_config_parse.yaml",

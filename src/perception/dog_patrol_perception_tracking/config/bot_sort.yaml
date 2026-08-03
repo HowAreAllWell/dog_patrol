@@ -1,5 +1,5 @@
 # Tracker-core v1 runtime config (ByteTrack / BoT-SORT-style).
-# GMC is enabled by default for moving platform scenarios.
+# GMC is disabled by default; enable tracker.gmc_enabled for moving platform scenarios.
 # Note: ReID is mandatory in current runtime and will be forced on.
 tracker_name: "bot_sort"
 core_mode: "new_core"
