@@ -11,6 +11,7 @@ Orin 宿主机侧视觉验收 demo，包含检测、短期跟踪、语义身份�
 - `mot_tracker`：BoT-SORT 风格实现（Kalman + 两阶段关联 + 可选 GMC + appearance）
 - `primary_target_manager`：`person`-only 主目标规则（首锁最大框 + continuity-first）
 - `mission_coordinator`：ROS-independent 任务输出协调 seam；按任务状态 / semantic target / state sequence 只产生当前帧可信 bbox，并负责配置化同目标 loss/reacquire event 时序
+- `mission_frame_transaction`：ROS-independent 一帧任务事务；在 identity 输出后统一执行 primary 更新、PATROL 目标确认、fresh bbox、loss/reacquire，并返回本帧 primary 诊断
 - `perception_readiness`：ROS-independent READY 聚合 seam；以 required capability contribution 和 `STARTUP state_seq` 产生至多一次 aggregate READY action
 - `mission_ros_adapter`：`dog_patrol_interfaces` 的唯一 ROS transport seam；可靠/transient state 输入、aggregate READY/event 输出和 best-effort 新鲜 bbox 输出均在此处映射
 
@@ -98,14 +99,15 @@ source /path/to/workspace/dog_patrol/install/setup.bash
 共享 `TargetBoundingBox` 当前没有 camera-frame-number 字段，因此 MVS frame number 保留为
 runtime 诊断元数据；公开消息不编码未在 shared contract 中定义的字段。
 
-ROS subscription callback 只验证并加锁保存 snapshot；camera、detector、tracker、identity、
-primary 和 coordinator 的 frame chain 由 live tick mutex 串行执行。即使用
+ROS subscription callback 只验证并加锁保存 snapshot；camera、detector、tracker 和 identity
+由 live tick mutex 串行执行。identity 输出后的 primary、target confirmation、bbox/loss/reacquire
+frame decision 由 `MissionFrameTransaction` 在 adapter 的 mission mutex 下执行。即使用
 `MultiThreadedExecutor` 也不会并发进入 detector/tracker/identity；mission-state subscription
 置于独立的 mutually-exclusive callback group，使它在 camera acquisition 或 inference 较慢时
 仍能及时写入最新 snapshot。READY、event 和 bbox 都在发布前于同一 mission mutex 下复核
-完整 snapshot；coordinator 的 one-shot action 也在该短临界区内计算并发布，因此不会把旧
+完整 snapshot；frame transaction 的 one-shot action 在该短临界区内计算并发布，因此不会把旧
 sequence、旧 target 或已 blocked 的 frame action 发到 ROS，亦不会因 state 交错而吞掉
-新的 loss/reacquisition action。
+新的 target-confirmed/loss/reacquisition action。
 
 无图形会话可运行独立进程 smoke：启动 `mission_ros_adapter_smoke`，使用另一个 ROS 2
 进程向默认 `/issue84/smoke/mission/state` 发布 `STARTUP(100)`、`PATROL(101)`、
@@ -117,8 +119,8 @@ TARGET_CONFIRMED、当前帧 bbox、TARGET_LOST 与 TARGET_REACQUIRED。该 fixt
 `target.reacquire_retention_sec=6`。
 
 完整 lifecycle 回归由 CTest `test_mission_pipeline_integration` 覆盖。它启动安装后的真实
-`dog_patrol_manager mission_supervisor`，再通过 production `PrimaryTargetManager`、
-`MissionCoordinator` 和 `MissionRosAdapter` 验证 STARTUP readiness、PATROL 首帧确认、fresh bbox、
+`dog_patrol_manager mission_supervisor`，再通过 production `MissionFrameTransaction`
+和 `MissionRosAdapter` 验证 STARTUP readiness、PATROL 首帧确认、fresh bbox、
 loss/block/reacquire/unblock、VERIFY、handled suppression 和 next-target selection。运行测试前必须
 source `/path/to/workspace/dog_patrol/install/setup.bash`；fixture 使用独立 ROS domain，并在退出时清理
 整个 supervisor process group。默认 CTest 使用无资产确定性 observations；在 Orin 上可显式追加

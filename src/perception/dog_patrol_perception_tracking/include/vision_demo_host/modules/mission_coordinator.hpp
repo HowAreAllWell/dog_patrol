@@ -37,6 +37,7 @@ struct MissionSnapshot {
 };
 
 enum class PerceptionMissionEvent {
+  kTargetConfirmed,
   kTargetLost,
   kTargetReacquired,
 };

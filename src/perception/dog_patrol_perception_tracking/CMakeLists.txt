@@ -45,6 +45,7 @@ set(MODULE_SOURCES
   src/modules/mot_tracker.cpp
   src/modules/primary_target_manager.cpp
   src/modules/mission_coordinator.cpp
+  src/modules/mission_frame_transaction.cpp
   src/modules/mission_ros_adapter.cpp
   src/modules/perception_readiness.cpp
   src/modules/primary_recovery_debug.cpp
@@ -204,6 +205,13 @@ if(BUILD_TESTING)
     target_compile_features(test_mission_coordinator PUBLIC cxx_std_17)
     target_include_directories(test_mission_coordinator PRIVATE include)
     target_link_libraries(test_mission_coordinator ${PROJECT_NAME}_modules)
+  endif()
+
+  ament_add_gtest(test_mission_frame_transaction test/test_mission_frame_transaction.cpp)
+  if(TARGET test_mission_frame_transaction)
+    target_compile_features(test_mission_frame_transaction PUBLIC cxx_std_17)
+    target_include_directories(test_mission_frame_transaction PRIVATE include)
+    target_link_libraries(test_mission_frame_transaction ${PROJECT_NAME}_modules)
   endif()
 
   ament_add_gtest(test_perception_readiness test/test_perception_readiness.cpp)

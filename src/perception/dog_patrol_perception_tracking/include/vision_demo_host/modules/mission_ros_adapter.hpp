@@ -5,29 +5,17 @@
 #include <mutex>
 #include <optional>
 #include <string>
+#include <vector>
 
 #include <dog_patrol_interfaces/msg/mission_event.hpp>
 #include <dog_patrol_interfaces/msg/mission_state.hpp>
 #include <dog_patrol_interfaces/msg/target_bounding_box.hpp>
 #include <rclcpp/rclcpp.hpp>
 
-#include "vision_demo_host/modules/mission_coordinator.hpp"
+#include "vision_demo_host/modules/mission_frame_transaction.hpp"
 #include "vision_demo_host/modules/perception_readiness.hpp"
 
 namespace vision_demo_host {
-
-// Metadata is carried alongside each processed camera frame. The patrol
-// interface has no camera-frame-number field, so the number remains runtime
-// diagnostic metadata while timestamp, optical frame, and source dimensions
-// are represented by TargetBoundingBox's Header and fields.
-struct SourceFrameMetadata {
-  std::uint64_t source_timestamp_ns{0};
-  std::uint32_t camera_frame_number{0};
-  bool camera_frame_number_available{false};
-  int image_width{0};
-  int image_height{0};
-  std::string optical_frame_id;
-};
 
 // The sole ROS transport boundary for mission-aware perception output. The
 // subscriber callback only validates and stores a snapshot under a mutex.
@@ -49,6 +37,7 @@ class MissionRosAdapter {
     // explicitly accepts the temporary placeholder or replaces it.
     bool authorization_placeholder_ready{false};
     std::string authorization_placeholder_detail;
+    PrimaryTargetManager::Config primary;
     MissionCoordinator::Config coordinator;
   };
 
@@ -75,6 +64,7 @@ class MissionRosAdapter {
   bool StoreMissionState(const dog_patrol_interfaces::msg::MissionState &message);
   std::optional<MissionSnapshot> CurrentMission() const;
   std::optional<MissionSnapshot> PreviousMission() const;
+  PrimaryTargetResult CurrentPrimary() const;
 
   DetectionTrackingReadinessContributor &detection_tracking_readiness();
   void AddRequiredReadinessContributor(std::unique_ptr<PerceptionReadinessContributor> contributor);
@@ -86,29 +76,21 @@ class MissionRosAdapter {
   // eligible STARTUP state sequence.
   void PublishReadiness();
 
-  // Processes actions from the current source frame only. Missing mission
-  // state, invalid metadata, stale state, and disallowed phases publish
-  // nothing; the coordinator remains the owner of loss/reacquisition policy.
-  void ProcessFrame(const MissionCoordinator::FrameInput &input,
-                    const SourceFrameMetadata &metadata);
-
-  // Publishes at most one TARGET_CONFIRMED for an unblocked PATROL state
-  // sequence after the live primary selector has locked a stable semantic ID.
-  bool PublishTargetConfirmed(const MissionSnapshot &mission,
-                              const PrimaryTargetResult &primary,
-                              const SourceFrameMetadata &metadata);
+  // Processes actions from the current source frame only. Mission state and
+  // primary-selection ordering stay inside the frame transaction; callers pass
+  // only current-frame perception evidence and metadata.
+  MissionFrameTransaction::Output ProcessFrame(
+      const std::vector<IdentityObservation> &identities,
+      MissionCoordinator::TimePoint source_time,
+      const SourceFrameMetadata &metadata);
 
  private:
   static std::optional<MissionPhase> MissionPhaseFromMessage(std::uint8_t state);
   static std::optional<MissionBlockCause> MissionBlockCauseFromMessage(std::uint8_t cause);
   static builtin_interfaces::msg::Time TimeMessage(std::uint64_t nanoseconds);
-  static bool IsTrustedPrimary(const PrimaryTargetResult &primary, int semantic_id);
   static dog_patrol_interfaces::msg::MissionEvent EventMessage(
       PerceptionMissionEvent event, int target_id, std::uint32_t observed_state_seq,
       std::uint64_t source_timestamp_ns);
-
-  // Caller must hold mission_mutex_.
-  bool MatchesLatestMissionUnderLock(const MissionSnapshot &mission) const;
 
   rclcpp::Node &node_;
   Config config_;
@@ -120,9 +102,8 @@ class MissionRosAdapter {
   MissionStateSequenceCursor state_sequence_;
   std::optional<MissionSnapshot> latest_mission_;
   std::optional<MissionSnapshot> previous_mission_;
-  std::optional<std::uint32_t> confirmed_patrol_state_seq_;
 
-  MissionCoordinator coordinator_;
+  MissionFrameTransaction frame_transaction_;
   PerceptionReadinessAggregator readiness_aggregator_;
   DetectionTrackingReadinessContributor *detection_tracking_readiness_{nullptr};
 };

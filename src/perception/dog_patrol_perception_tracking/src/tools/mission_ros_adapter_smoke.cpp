@@ -23,10 +23,7 @@ using vision_demo_host::MissionRosAdapter;
 using vision_demo_host::MissionSnapshot;
 using vision_demo_host::MutableReadinessContributor;
 using vision_demo_host::PerceptionReadiness;
-using vision_demo_host::PrimaryState;
-using vision_demo_host::PrimaryTargetResult;
 using vision_demo_host::SourceFrameMetadata;
-using vision_demo_host::Track;
 
 constexpr int kSmokeSemanticId = 42;
 constexpr int kSmokeRawTrackId = 7;
@@ -42,23 +39,6 @@ IdentityObservation TrustedObservation() {
   observation.bbox = cv::Rect2f{100.25F, 200.5F, 300.0F, 400.0F};
   observation.confidence = 0.92F;
   return observation;
-}
-
-PrimaryTargetResult TrustedPrimary() {
-  Track track;
-  track.id = kSmokeRawTrackId;
-  track.class_id = ClassId::kPerson;
-  track.is_confirmed = true;
-  track.authoritative = true;
-  track.bbox = cv::Rect2f{100.25F, 200.5F, 300.0F, 400.0F};
-  track.confidence = 0.92F;
-
-  PrimaryTargetResult primary;
-  primary.state = PrimaryState::kLocked;
-  primary.primary_target_id = kSmokeSemanticId;
-  primary.raw_track_id = kSmokeRawTrackId;
-  primary.primary_track = track;
-  return primary;
 }
 
 class MissionRosAdapterSmoke final : public rclcpp::Node {
@@ -124,10 +104,8 @@ class MissionRosAdapterSmoke final : public rclcpp::Node {
     }
 
     const SourceFrameMetadata metadata = Metadata();
-    const PrimaryTargetResult primary = TrustedPrimary();
     if (mission->phase == MissionPhase::kPatrol && !mission->blocked) {
-      (void)adapter_->PublishTargetConfirmed(mission.value(), primary, metadata);
-      adapter_->ProcessFrame({MissionSnapshot{}, {}, primary, source_time_}, metadata);
+      adapter_->ProcessFrame({TrustedObservation()}, source_time_, metadata);
       return;
     }
 
@@ -138,7 +116,7 @@ class MissionRosAdapterSmoke final : public rclcpp::Node {
     const std::vector<IdentityObservation> identities =
         trusted_target_frame ? std::vector<IdentityObservation>{TrustedObservation()}
                               : std::vector<IdentityObservation>{};
-    adapter_->ProcessFrame({MissionSnapshot{}, identities, primary, source_time_}, metadata);
+    adapter_->ProcessFrame(identities, source_time_, metadata);
   }
 
   std::unique_ptr<MissionRosAdapter> adapter_;

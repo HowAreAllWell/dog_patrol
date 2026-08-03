@@ -34,14 +34,15 @@ using vision_demo_host::IdentityObservation;
 using vision_demo_host::IdentityState;
 using vision_demo_host::MissionBlockCause;
 using vision_demo_host::MissionCoordinator;
+using vision_demo_host::MissionFrameTransaction;
 using vision_demo_host::MissionPhase;
 using vision_demo_host::MissionRosAdapter;
 using vision_demo_host::MissionSnapshot;
 using vision_demo_host::MutableReadinessContributor;
+using vision_demo_host::PerceptionMissionEvent;
 using vision_demo_host::PerceptionReadiness;
 using vision_demo_host::PrimaryState;
 using vision_demo_host::PrimaryTargetManager;
-using vision_demo_host::PrimaryTargetResult;
 using vision_demo_host::SourceFrameMetadata;
 
 using MissionEventMessage = dog_patrol_interfaces::msg::MissionEvent;
@@ -392,12 +393,12 @@ class MissionPipelineIntegrationDriver final : public rclcpp::Node {
  public:
   explicit MissionPipelineIntegrationDriver(MissionEvidence evidence)
       : Node("issue87_mission_pipeline_integration"),
-        primary_manager_(PrimaryConfig()),
         evidence_(std::move(evidence)) {
     MissionRosAdapter::Config config;
     config.mission_state_topic = "/issue87/integration/mission/state";
     config.mission_event_topic = "/issue87/integration/mission/event";
     config.target_bbox_topic = "/issue87/integration/perception/selected_target_bbox";
+    config.primary = PrimaryConfig();
     adapter_ = std::make_unique<MissionRosAdapter>(*this, config);
     adapter_->detection_tracking_readiness().ReportRuntimeStatus({true, true, {}});
     if (!adapter_->ReplaceRequiredReadinessContributor(
@@ -596,18 +597,11 @@ class MissionPipelineIntegrationDriver final : public rclcpp::Node {
            box.y_min == y_min && box.x_max == x_max && box.y_max == y_max;
   }
 
-  PrimaryTargetResult UpdatePrimary(const MissionSnapshot &mission,
-                                    const std::vector<IdentityObservation> &identities,
-                                    const MissionCoordinator::TimePoint source_time) {
-    return primary_manager_.UpdateForMission(identities, mission, adapter_->PreviousMission(), source_time);
-  }
-
-  void ProcessFrame(const MissionSnapshot &mission,
-                    const MissionCoordinator::TimePoint source_time,
-                    const EvidenceSlot slot) {
+  MissionFrameTransaction::Output ProcessFrame(
+      const MissionCoordinator::TimePoint source_time,
+      const EvidenceSlot slot) {
     const auto &frame = Frame(slot);
-    const auto primary = UpdatePrimary(mission, frame.identities, source_time);
-    adapter_->ProcessFrame({mission, frame.identities, primary, source_time}, frame.metadata);
+    return adapter_->ProcessFrame(frame.identities, source_time, frame.metadata);
   }
 
   void PublishExternalEvent(const MissionSnapshot &mission, const std::uint8_t source,
@@ -632,6 +626,15 @@ class MissionPipelineIntegrationDriver final : public rclcpp::Node {
       }
     }
     return count;
+  }
+
+  static bool OutputHasEvent(const MissionFrameTransaction::Output &output,
+                             const PerceptionMissionEvent event,
+                             const int target_id) {
+    return std::any_of(output.events.begin(), output.events.end(),
+                       [event, target_id](const auto &action) {
+                         return action.event == event && action.target_id == target_id;
+                       });
   }
 
   void StartMission(const MissionSnapshot &mission) {
@@ -667,18 +670,19 @@ class MissionPipelineIntegrationDriver final : public rclcpp::Node {
     }
 
     const auto &frame = Frame(EvidenceSlot::kSelection);
-    const auto primary = UpdatePrimary(mission, frame.identities, source_origin_);
+    const auto output = adapter_->ProcessFrame(frame.identities, source_origin_, frame.metadata);
+    const auto &primary = output.primary;
     if (!Require(primary.state == PrimaryState::kLocked &&
                      primary.primary_target_id == evidence_.first_semantic_id &&
                      primary.raw_track_id == evidence_.first_raw_id,
                  "first patrol frame did not select the largest eligible semantic target")) {
       return;
     }
-    if (!Require(adapter_->PublishTargetConfirmed(mission, primary, frame.metadata),
-                 "first-frame TARGET_CONFIRMED was not published")) {
+    if (!Require(OutputHasEvent(output, PerceptionMissionEvent::kTargetConfirmed,
+                                evidence_.first_semantic_id),
+                 "first-frame TARGET_CONFIRMED was not produced")) {
       return;
     }
-    adapter_->ProcessFrame({mission, frame.identities, primary, source_origin_}, frame.metadata);
     Advance(Stage::kWaitFirstConfirm);
   }
 
@@ -698,7 +702,7 @@ class MissionPipelineIntegrationDriver final : public rclcpp::Node {
         !Require(boxes_.empty(), "PATROL published a target bounding box")) {
       return;
     }
-    ProcessFrame(mission, source_origin_ + 100ms, EvidenceSlot::kConfirmation);
+    (void)ProcessFrame(source_origin_ + 100ms, EvidenceSlot::kConfirmation);
     Advance(Stage::kWaitConfirmBox);
   }
 
@@ -723,29 +727,31 @@ class MissionPipelineIntegrationDriver final : public rclcpp::Node {
         mission.blocked) {
       return;
     }
-    ProcessFrame(mission, source_origin_ + 200ms, EvidenceSlot::kApproach);
+    (void)ProcessFrame(source_origin_ + 200ms, EvidenceSlot::kApproach);
     Advance(Stage::kWaitApproachBox);
   }
 
   void PublishPreThresholdAbsence(const MissionSnapshot &mission) {
+    (void)mission;
     if (boxes_.size() < 2U) {
       return;
     }
     if (!Require(boxes_.size() == 2U, "APPROACH_TARGET did not publish one fresh bbox")) {
       return;
     }
-    ProcessFrame(mission, source_origin_ + 699ms, EvidenceSlot::kMissingBeforeTimeout);
+    (void)ProcessFrame(source_origin_ + 699ms, EvidenceSlot::kMissingBeforeTimeout);
     Advance(Stage::kWaitPreThreshold);
   }
 
   void PublishLossThreshold(const MissionSnapshot &mission) {
+    (void)mission;
     if (!Require(EventCount(MissionEventMessage::TARGET_LOST,
                             evidence_.first_semantic_id) == 0U,
                  "TARGET_LOST was emitted before the default 0.5 second threshold") ||
         !Require(boxes_.size() == 2U, "missing target reused a cached or fabricated bbox")) {
       return;
     }
-    ProcessFrame(mission, source_origin_ + 700ms, EvidenceSlot::kMissingAtTimeout);
+    (void)ProcessFrame(source_origin_ + 700ms, EvidenceSlot::kMissingAtTimeout);
     Advance(Stage::kWaitLostBlock);
   }
 
@@ -772,7 +778,7 @@ class MissionPipelineIntegrationDriver final : public rclcpp::Node {
                  "visual target did not recover under the same semantic ID with a new raw track")) {
       return;
     }
-    ProcessFrame(mission, source_origin_ + 800ms, EvidenceSlot::kReacquired);
+    (void)ProcessFrame(source_origin_ + 800ms, EvidenceSlot::kReacquired);
     Advance(Stage::kWaitUnblocked);
   }
 
@@ -791,7 +797,7 @@ class MissionPipelineIntegrationDriver final : public rclcpp::Node {
         !Require(boxes_.size() == 2U, "blocked reacquisition frame published before supervisor unblock")) {
       return;
     }
-    ProcessFrame(mission, source_origin_ + 900ms, EvidenceSlot::kResumed);
+    (void)ProcessFrame(source_origin_ + 900ms, EvidenceSlot::kResumed);
     Advance(Stage::kWaitResumedBox);
   }
 
@@ -817,7 +823,7 @@ class MissionPipelineIntegrationDriver final : public rclcpp::Node {
         mission.blocked) {
       return;
     }
-    ProcessFrame(mission, source_origin_ + 1000ms, EvidenceSlot::kVerification);
+    (void)ProcessFrame(source_origin_ + 1000ms, EvidenceSlot::kVerification);
     Advance(Stage::kWaitVerificationBox);
   }
 
@@ -842,10 +848,10 @@ class MissionPipelineIntegrationDriver final : public rclcpp::Node {
     }
     const auto &frame = Frame(EvidenceSlot::kSecondPatrol);
     const auto *handled = TargetObservation(EvidenceSlot::kSecondPatrol);
-    const auto primary = UpdatePrimary(mission, frame.identities, source_origin_ + 1100ms);
-    if (!Require(handled != nullptr && !primary_manager_.IsMissionEligible(*handled),
-                 "handled semantic target remained mission-eligible after returning to patrol") ||
-        !Require(handled != nullptr && handled->visible &&
+    const auto output = adapter_->ProcessFrame(frame.identities, source_origin_ + 1100ms,
+                                               frame.metadata);
+    const auto &primary = output.primary;
+    if (!Require(handled != nullptr && handled->visible &&
                      handled->semantic_id == evidence_.first_semantic_id,
                  "handled target was removed from perception observations") ||
         !Require(primary.state == PrimaryState::kLocked &&
@@ -854,12 +860,11 @@ class MissionPipelineIntegrationDriver final : public rclcpp::Node {
                  "first new patrol frame did not select the next-largest eligible target")) {
       return;
     }
-    if (!Require(adapter_->PublishTargetConfirmed(mission, primary, frame.metadata),
+    if (!Require(OutputHasEvent(output, PerceptionMissionEvent::kTargetConfirmed,
+                                evidence_.next_semantic_id),
                  "next eligible target was not confirmed")) {
       return;
     }
-    adapter_->ProcessFrame({mission, frame.identities, primary, source_origin_ + 1100ms},
-                           frame.metadata);
     Advance(Stage::kWaitSecondConfirm);
   }
 
@@ -883,7 +888,6 @@ class MissionPipelineIntegrationDriver final : public rclcpp::Node {
     finished_ = true;
   }
 
-  PrimaryTargetManager primary_manager_;
   MissionEvidence evidence_;
   std::unique_ptr<MissionRosAdapter> adapter_;
   rclcpp::Publisher<MissionEventMessage>::SharedPtr external_event_publisher_;

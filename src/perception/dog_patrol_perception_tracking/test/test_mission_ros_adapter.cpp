@@ -28,13 +28,9 @@ using vision_demo_host::MissionBlockCause;
 using vision_demo_host::MissionCoordinator;
 using vision_demo_host::MissionPhase;
 using vision_demo_host::MissionRosAdapter;
-using vision_demo_host::MissionSnapshot;
 using vision_demo_host::MutableReadinessContributor;
 using vision_demo_host::PerceptionReadiness;
-using vision_demo_host::PrimaryState;
-using vision_demo_host::PrimaryTargetResult;
 using vision_demo_host::SourceFrameMetadata;
-using vision_demo_host::Track;
 
 using MissionEventMessage = dog_patrol_interfaces::msg::MissionEvent;
 using MissionStateMessage = dog_patrol_interfaces::msg::MissionState;
@@ -63,24 +59,6 @@ IdentityObservation TrustedPerson(const int semantic_id, const int raw_track_id,
   identity.bbox = bbox;
   identity.confidence = 0.92F;
   return identity;
-}
-
-PrimaryTargetResult LockedPrimary(const int semantic_id, const int raw_track_id,
-                                  const cv::Rect2f bbox = cv::Rect2f{1.2F, 2.3F, 30.0F, 40.0F}) {
-  Track track;
-  track.id = raw_track_id;
-  track.class_id = ClassId::kPerson;
-  track.is_confirmed = true;
-  track.authoritative = true;
-  track.bbox = bbox;
-  track.confidence = 0.92F;
-
-  PrimaryTargetResult primary;
-  primary.state = PrimaryState::kLocked;
-  primary.primary_target_id = semantic_id;
-  primary.raw_track_id = raw_track_id;
-  primary.primary_track = track;
-  return primary;
 }
 
 SourceFrameMetadata Metadata(const std::uint64_t source_timestamp_ns) {
@@ -297,8 +275,7 @@ TEST_F(MissionRosAdapterTest, DropsFrameOutputWhenMissionStateHasAdvanced) {
       State(102U, MissionStateMessage::CONFIRM_TARGET, 42U)));
   ASSERT_TRUE(adapter.StoreMissionState(State(103U, MissionStateMessage::PATROL)));
   const auto trusted = TrustedPerson(42, 7);
-  adapter.ProcessFrame({MissionSnapshot{}, {trusted}, LockedPrimary(42, 7),
-                        MissionCoordinator::TimePoint{}},
+  adapter.ProcessFrame({trusted}, MissionCoordinator::TimePoint{},
                        Metadata(1710000000000000000ULL));
   executor.spin_some();
   EXPECT_TRUE(boxes.empty());
@@ -329,13 +306,11 @@ TEST_F(MissionRosAdapterTest, EmitsLossForTheLatestStateSequenceAfterTargetState
       State(102U, MissionStateMessage::CONFIRM_TARGET, 42U)));
   const auto trusted = TrustedPerson(42, 7);
   const auto source_time = MissionCoordinator::TimePoint{};
-  adapter.ProcessFrame({MissionSnapshot{}, {trusted}, LockedPrimary(42, 7), source_time},
-                       Metadata(1710000000000000000ULL));
+  adapter.ProcessFrame({trusted}, source_time, Metadata(1710000000000000000ULL));
 
   ASSERT_TRUE(adapter.StoreMissionState(
       State(103U, MissionStateMessage::APPROACH_TARGET, 42U)));
-  adapter.ProcessFrame({MissionSnapshot{}, {}, PrimaryTargetResult{},
-                        source_time + std::chrono::milliseconds{500}},
+  adapter.ProcessFrame({}, source_time + std::chrono::milliseconds{500},
                        Metadata(1710000000500000000ULL));
   ASSERT_TRUE(SpinUntil(executor, [&events] { return events.size() == 1U; }));
   EXPECT_EQ(events.front().event, MissionEventMessage::TARGET_LOST);
@@ -370,13 +345,12 @@ TEST_F(MissionRosAdapterTest, TreatsAnOffImageIdentityAsMissingForTargetLoss) {
   ASSERT_TRUE(adapter.StoreMissionState(
       State(102U, MissionStateMessage::CONFIRM_TARGET, 42U)));
   const auto source_time = MissionCoordinator::TimePoint{};
-  adapter.ProcessFrame({MissionSnapshot{}, {TrustedPerson(42, 7)}, LockedPrimary(42, 7), source_time},
+  adapter.ProcessFrame({TrustedPerson(42, 7)}, source_time,
                        Metadata(1710000000000000000ULL));
   ASSERT_TRUE(SpinUntil(executor, [&boxes] { return boxes.size() == 1U; }));
 
   const auto off_image_person = TrustedPerson(42, 7, cv::Rect2f{700.0F, 2.0F, 4.0F, 4.0F});
-  adapter.ProcessFrame({MissionSnapshot{}, {off_image_person}, LockedPrimary(42, 7),
-                        source_time + std::chrono::milliseconds{500}},
+  adapter.ProcessFrame({off_image_person}, source_time + std::chrono::milliseconds{500},
                        Metadata(1710000000500000000ULL));
   ASSERT_TRUE(SpinUntil(executor, [&events] { return events.size() == 1U; }));
   EXPECT_EQ(events.front().event, MissionEventMessage::TARGET_LOST);
@@ -474,12 +448,9 @@ TEST_F(MissionRosAdapterTest, HeadlessRosSmokeForReadyTargetAndLossReacquisition
     return mission.has_value() && mission->state_seq == 101U;
   }));
   const auto trusted = TrustedPerson(42, 7);
-  const auto primary = LockedPrimary(42, 7);
   const auto source_time = MissionCoordinator::TimePoint{};
-  adapter.ProcessFrame({MissionSnapshot{}, {trusted}, primary, source_time}, Metadata(1710000000000000000ULL));
+  adapter.ProcessFrame({trusted}, source_time, Metadata(1710000000000000000ULL));
   EXPECT_TRUE(boxes.empty());
-  ASSERT_TRUE(adapter.PublishTargetConfirmed(adapter.CurrentMission().value(), primary,
-                                             Metadata(1710000000000000000ULL)));
   ASSERT_TRUE(SpinUntil(executor, [&events] { return events.size() == 2U; }));
   EXPECT_EQ(events.back().event, MissionEventMessage::TARGET_CONFIRMED);
   EXPECT_EQ(events.back().target_id, 42U);
@@ -489,14 +460,13 @@ TEST_F(MissionRosAdapterTest, HeadlessRosSmokeForReadyTargetAndLossReacquisition
     const auto mission = adapter.CurrentMission();
     return mission.has_value() && mission->state_seq == 102U;
   }));
-  adapter.ProcessFrame({MissionSnapshot{}, {trusted}, primary, source_time}, Metadata(1710000000100000000ULL));
+  adapter.ProcessFrame({trusted}, source_time, Metadata(1710000000100000000ULL));
   ASSERT_TRUE(SpinUntil(executor, [&boxes] { return boxes.size() == 1U; }));
   EXPECT_EQ(boxes.back().target_id, 42U);
   EXPECT_EQ(boxes.back().header.stamp.sec, 1710000000);
   EXPECT_EQ(boxes.back().header.stamp.nanosec, 100000000U);
 
-  adapter.ProcessFrame({MissionSnapshot{}, {}, PrimaryTargetResult{},
-                        source_time + std::chrono::milliseconds{500}},
+  adapter.ProcessFrame({}, source_time + std::chrono::milliseconds{500},
                        Metadata(1710000000600000000ULL));
   ASSERT_TRUE(SpinUntil(executor, [&events] { return events.size() == 3U; }));
   EXPECT_EQ(events.back().event, MissionEventMessage::TARGET_LOST);
@@ -509,8 +479,7 @@ TEST_F(MissionRosAdapterTest, HeadlessRosSmokeForReadyTargetAndLossReacquisition
     const auto mission = adapter.CurrentMission();
     return mission.has_value() && mission->state_seq == 103U;
   }));
-  adapter.ProcessFrame({MissionSnapshot{}, {trusted}, primary,
-                        source_time + std::chrono::milliseconds{600}},
+  adapter.ProcessFrame({trusted}, source_time + std::chrono::milliseconds{600},
                        Metadata(1710000000700000000ULL));
   ASSERT_TRUE(SpinUntil(executor, [&events] { return events.size() == 4U; }));
   EXPECT_EQ(events.back().event, MissionEventMessage::TARGET_REACQUIRED);

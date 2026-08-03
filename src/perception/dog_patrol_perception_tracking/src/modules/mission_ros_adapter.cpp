@@ -23,7 +23,9 @@ bool IsFinite(const float value) { return std::isfinite(value); }
 }  // namespace
 
 MissionRosAdapter::MissionRosAdapter(rclcpp::Node &node, Config config)
-    : node_(node), config_(std::move(config)), coordinator_(config_.coordinator) {
+    : node_(node),
+      config_(std::move(config)),
+      frame_transaction_(config_.primary, config_.coordinator) {
   if (config_.mission_state_topic.empty() || config_.mission_event_topic.empty() ||
       config_.target_bbox_topic.empty()) {
     throw std::invalid_argument("mission ROS topic names must not be empty");
@@ -211,6 +213,11 @@ std::optional<MissionSnapshot> MissionRosAdapter::PreviousMission() const {
   return previous_mission_;
 }
 
+PrimaryTargetResult MissionRosAdapter::CurrentPrimary() const {
+  std::lock_guard<std::mutex> lock(mission_mutex_);
+  return frame_transaction_.CurrentPrimary();
+}
+
 DetectionTrackingReadinessContributor &MissionRosAdapter::detection_tracking_readiness() {
   if (detection_tracking_readiness_ == nullptr) {
     throw std::logic_error("detection/tracking readiness contributor is unavailable");
@@ -238,6 +245,10 @@ dog_patrol_interfaces::msg::MissionEvent MissionRosAdapter::EventMessage(
   message.target_id = target_id > 0 ? static_cast<std::uint32_t>(target_id) : 0U;
   message.source = MissionEventMessage::SOURCE_PERCEPTION;
   switch (event) {
+    case PerceptionMissionEvent::kTargetConfirmed:
+      message.event = MissionEventMessage::TARGET_CONFIRMED;
+      message.detail = "largest eligible current-frame semantic target selected";
+      break;
     case PerceptionMissionEvent::kTargetLost:
       message.event = MissionEventMessage::TARGET_LOST;
       message.detail = "current semantic target has no fresh trusted bbox";
@@ -248,13 +259,6 @@ dog_patrol_interfaces::msg::MissionEvent MissionRosAdapter::EventMessage(
       break;
   }
   return message;
-}
-
-bool MissionRosAdapter::MatchesLatestMissionUnderLock(const MissionSnapshot &mission) const {
-  return latest_mission_.has_value() && latest_mission_->state_seq == mission.state_seq &&
-         latest_mission_->phase == mission.phase && latest_mission_->target_id == mission.target_id &&
-         latest_mission_->blocked == mission.blocked &&
-         latest_mission_->block_cause == mission.block_cause;
 }
 
 void MissionRosAdapter::PublishReadiness() {
@@ -276,85 +280,31 @@ void MissionRosAdapter::PublishReadiness() {
   mission_event_publisher_->publish(message);
 }
 
-void MissionRosAdapter::ProcessFrame(const MissionCoordinator::FrameInput &input,
-                                     const SourceFrameMetadata &metadata) {
-  // Keep coordinator's stateful one-shot decisions and their publication in
-  // one short mission-state critical section. Detector/tracker/identity work
-  // has already completed in the live pipeline; this only serializes the
-  // coordinator with StoreMissionState so an action cannot be dropped after
-  // its coordinator latch was committed.
+MissionFrameTransaction::Output MissionRosAdapter::ProcessFrame(
+    const std::vector<IdentityObservation> &identities,
+    const MissionCoordinator::TimePoint source_time,
+    const SourceFrameMetadata &metadata) {
+  // Keep frame-transaction stateful one-shot decisions and publication in one
+  // short mission-state critical section. Detector/tracker/identity work has
+  // already completed in the live pipeline; this only serializes transaction
+  // latches with StoreMissionState so an action cannot be dropped after its
+  // latch was committed.
   std::lock_guard<std::mutex> lock(mission_mutex_);
-  if (!latest_mission_.has_value()) {
-    return;
-  }
-
-  // The coordinator's fresh-observation latch must only see geometry that can
-  // actually be represented by the shared TargetBoundingBox contract. Otherwise
-  // an off-image identity could reset loss timing while no bbox is publishable.
-  std::vector<IdentityObservation> projectable_identities;
-  projectable_identities.reserve(input.identities.size());
-  for (const auto &identity : input.identities) {
-    FreshTargetBoxAction candidate;
-    candidate.target_id = identity.semantic_id;
-    candidate.bbox = identity.bbox;
-    candidate.confidence = identity.confidence;
-    if (TargetBoxFromAction(candidate, metadata).has_value()) {
-      projectable_identities.push_back(identity);
-    }
-  }
-  const MissionCoordinator::FrameInput current_input{
-      latest_mission_.value(), projectable_identities, input.primary, input.source_time};
-  const MissionCoordinator::Output output = coordinator_.Update(current_input);
+  MissionFrameTransaction::Output output = frame_transaction_.Update(
+      {latest_mission_, previous_mission_, identities, source_time, metadata});
   for (const auto &event : output.events) {
     mission_event_publisher_->publish(
         EventMessage(event.event, event.target_id, event.observed_state_seq,
                      metadata.source_timestamp_ns));
   }
   if (!output.target_box.has_value()) {
-    return;
+    return output;
   }
   const auto message = TargetBoxFromAction(output.target_box.value(), metadata);
   if (message.has_value()) {
     target_bbox_publisher_->publish(message.value());
   }
-}
-
-bool MissionRosAdapter::IsTrustedPrimary(const PrimaryTargetResult &primary,
-                                         const int semantic_id) {
-  if (semantic_id <= 0 || primary.state != PrimaryState::kLocked ||
-      primary.primary_target_id != semantic_id || !primary.primary_track.has_value()) {
-    return false;
-  }
-  const Track &track = primary.primary_track.value();
-  return track.authoritative && track.id == primary.raw_track_id && track.is_confirmed &&
-         track.class_id == ClassId::kPerson;
-}
-
-bool MissionRosAdapter::PublishTargetConfirmed(const MissionSnapshot &mission,
-                                               const PrimaryTargetResult &primary,
-                                               const SourceFrameMetadata &metadata) {
-  if (mission.phase != MissionPhase::kPatrol || mission.blocked ||
-      mission.block_cause != MissionBlockCause::kNone || mission.target_id != 0 ||
-      !IsTrustedPrimary(primary, primary.primary_target_id) ||
-      metadata.source_timestamp_ns == 0U) {
-    return false;
-  }
-  {
-    std::lock_guard<std::mutex> lock(mission_mutex_);
-    if (!MatchesLatestMissionUnderLock(mission) || confirmed_patrol_state_seq_ == mission.state_seq) {
-      return false;
-    }
-    confirmed_patrol_state_seq_ = mission.state_seq;
-    dog_patrol_interfaces::msg::MissionEvent message;
-    message.header.stamp = TimeMessage(metadata.source_timestamp_ns);
-    message.observed_state_seq = mission.state_seq;
-    message.target_id = static_cast<std::uint32_t>(primary.primary_target_id);
-    message.source = MissionEventMessage::SOURCE_PERCEPTION;
-    message.event = MissionEventMessage::TARGET_CONFIRMED;
-    message.detail = "largest eligible current-frame semantic target selected";
-    mission_event_publisher_->publish(message);
-  }
-  return true;
+  return output;
 }
 
 }  // namespace vision_demo_host

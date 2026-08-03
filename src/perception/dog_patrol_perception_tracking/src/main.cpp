@@ -39,12 +39,12 @@ class VisionDemoNode : public rclcpp::Node {
         infer_(vision_demo_host::PreprocessInfer::Config{}),
         det_filter_(vision_demo_host::DetFilter::Config{}),
         tracker_(vision_demo_host::MotTracker::Config{}),
-        primary_manager_(vision_demo_host::PrimaryTargetManager::Config{}),
         identity_manager_(vision_demo_host::IdentityManager::Config{}) {
     RejectRetiredCameraParameterOverrides();
     DeclareParameters();
-    InitializeMissionRosAdapter();
-    LoadConfigAndInitialize();
+    const auto target_cfg = LoadPrimaryTargetConfig();
+    InitializeMissionRosAdapter(target_cfg);
+    LoadConfigAndInitialize(target_cfg);
 
     const int timer_ms = this->get_parameter("runtime.tick_ms").as_int();
     timer_ = this->create_wall_timer(std::chrono::milliseconds(timer_ms),
@@ -173,7 +173,32 @@ class VisionDemoNode : public rclcpp::Node {
     this->declare_parameter<int>("runtime.tick_ms", 33);
   }
 
-  void InitializeMissionRosAdapter() {
+  vision_demo_host::PrimaryTargetManager::Config LoadPrimaryTargetConfig() {
+    vision_demo_host::PrimaryTargetManager::Config target_cfg;
+    target_cfg.lost_threshold_frames = this->get_parameter("target.lost_threshold_frames").as_int();
+    target_cfg.min_person_area_px =
+        static_cast<float>(this->get_parameter("target.min_person_area_px").as_double());
+    target_cfg.max_center_jump_norm =
+        std::max(0.0F, static_cast<float>(this->get_parameter("target.max_center_jump_norm").as_double()));
+    target_cfg.min_area_ratio =
+        std::max(0.0F, static_cast<float>(this->get_parameter("target.min_area_ratio").as_double()));
+    target_cfg.max_area_ratio =
+        std::max(target_cfg.min_area_ratio,
+                 static_cast<float>(this->get_parameter("target.max_area_ratio").as_double()));
+    target_cfg.pending_recovery_frames =
+        std::max(0, static_cast<int>(this->get_parameter("target.pending_recovery_frames").as_int()));
+    const double handled_ignore_absence_sec =
+        this->get_parameter("target.handled_ignore_absence_sec").as_double();
+    if (!std::isfinite(handled_ignore_absence_sec) || handled_ignore_absence_sec <= 0.0) {
+      throw std::runtime_error("target.handled_ignore_absence_sec must be positive");
+    }
+    target_cfg.handled_ignore_absence = std::chrono::duration_cast<
+        vision_demo_host::PrimaryTargetManager::Duration>(
+        std::chrono::duration<double>(handled_ignore_absence_sec));
+    return target_cfg;
+  }
+
+  void InitializeMissionRosAdapter(const vision_demo_host::PrimaryTargetManager::Config &target_cfg) {
     const double lost_timeout_sec = this->get_parameter("target.lost_event_timeout_sec").as_double();
     const double reacquire_retention_sec =
         this->get_parameter("target.reacquire_retention_sec").as_double();
@@ -197,6 +222,7 @@ class VisionDemoNode : public rclcpp::Node {
         this->get_parameter("perception.authorization_placeholder_ready").as_bool();
     mission_config.authorization_placeholder_detail =
         this->get_parameter("perception.authorization_placeholder_detail").as_string();
+    mission_config.primary = target_cfg;
     mission_config.coordinator.lost_event_timeout = std::chrono::duration_cast<
         vision_demo_host::MissionCoordinator::Duration>(std::chrono::duration<double>(lost_timeout_sec));
     mission_config.coordinator.reacquire_retention = std::chrono::duration_cast<
@@ -210,7 +236,7 @@ class VisionDemoNode : public rclcpp::Node {
         std::make_unique<vision_demo_host::MissionRosAdapter>(*this, std::move(mission_config));
   }
 
-  void LoadConfigAndInitialize() {
+  void LoadConfigAndInitialize(const vision_demo_host::PrimaryTargetManager::Config &target_cfg) {
     std::string error;
 
     vision_demo_host::CameraIngest::Config camera_cfg;
@@ -304,28 +330,6 @@ class VisionDemoNode : public rclcpp::Node {
       throw std::runtime_error("mot_tracker init failed: " + error);
     }
     mission_ros_adapter_->detection_tracking_readiness().ReportRuntimeStatus({true, true, {}});
-
-    vision_demo_host::PrimaryTargetManager::Config target_cfg;
-    target_cfg.lost_threshold_frames = this->get_parameter("target.lost_threshold_frames").as_int();
-    target_cfg.min_person_area_px =
-        static_cast<float>(this->get_parameter("target.min_person_area_px").as_double());
-    target_cfg.max_center_jump_norm =
-        std::max(0.0F, static_cast<float>(this->get_parameter("target.max_center_jump_norm").as_double()));
-    target_cfg.min_area_ratio =
-        std::max(0.0F, static_cast<float>(this->get_parameter("target.min_area_ratio").as_double()));
-    target_cfg.max_area_ratio =
-        std::max(target_cfg.min_area_ratio, static_cast<float>(this->get_parameter("target.max_area_ratio").as_double()));
-    target_cfg.pending_recovery_frames =
-        std::max(0, static_cast<int>(this->get_parameter("target.pending_recovery_frames").as_int()));
-    const double handled_ignore_absence_sec =
-        this->get_parameter("target.handled_ignore_absence_sec").as_double();
-    if (!std::isfinite(handled_ignore_absence_sec) || handled_ignore_absence_sec <= 0.0) {
-      throw std::runtime_error("target.handled_ignore_absence_sec must be positive");
-    }
-    target_cfg.handled_ignore_absence = std::chrono::duration_cast<
-        vision_demo_host::PrimaryTargetManager::Duration>(
-        std::chrono::duration<double>(handled_ignore_absence_sec));
-    primary_manager_ = vision_demo_host::PrimaryTargetManager(target_cfg);
 
     vision_demo_host::IdentityManager::Config sid_cfg;
     sid_cfg.max_missing_frames = target_cfg.lost_threshold_frames;
@@ -596,21 +600,14 @@ class VisionDemoNode : public rclcpp::Node {
     mission_ros_adapter_->detection_tracking_readiness().ReportRuntimeStatus({true, true, {}});
 
     const auto source_time = MonotonicSourceTime();
-    const auto mission = mission_ros_adapter_->CurrentMission();
-    const auto primary_prev = primary_manager_.GetState();
+    const auto primary_prev = mission_ros_adapter_->CurrentPrimary();
     auto identity_result = identity_manager_.Update(
         vision_demo_host::TrackletObservationsFromTracks(tracks), tracker_.LastTrackletHypotheses(), primary_prev,
         &frame);
-    auto primary = primary_manager_.UpdateForMission(
-        identity_result.identities, mission, mission_ros_adapter_->PreviousMission(), source_time);
     const auto source_metadata = SourceMetadata(acquired_frame);
-    if (mission.has_value() && mission->phase == vision_demo_host::MissionPhase::kPatrol) {
-      mission_ros_adapter_->PublishTargetConfirmed(mission.value(), primary, source_metadata);
-    }
-    mission_ros_adapter_->ProcessFrame(
-        {vision_demo_host::MissionSnapshot{}, identity_result.identities, primary,
-         source_time},
-        source_metadata);
+    auto mission_frame = mission_ros_adapter_->ProcessFrame(
+        identity_result.identities, source_time, source_metadata);
+    auto primary = mission_frame.primary;
 
     if (monitor_.ShouldReport()) {
       const int primary_id = primary.primary_target_id;
@@ -646,7 +643,8 @@ class VisionDemoNode : public rclcpp::Node {
     if (visualizer_ != nullptr) {
       visualizer_->Submit(std::move(acquired_frame.bgr8), std::move(tracks), std::move(primary),
                           std::move(identity_result),
-                          primary_manager_.LastDecisionReason(), primary_manager_.LastRejectReason());
+                          std::move(mission_frame.primary_decision_reason),
+                          std::move(mission_frame.primary_reject_reason));
     }
   }
 
@@ -660,7 +658,6 @@ class VisionDemoNode : public rclcpp::Node {
   rclcpp::CallbackGroup::SharedPtr mission_state_callback_group_;
   std::string camera_optical_frame_id_;
   std::mutex pipeline_mutex_;
-  vision_demo_host::PrimaryTargetManager primary_manager_;
   vision_demo_host::IdentityManager identity_manager_;
   std::unique_ptr<vision_demo_host::VisualizerRecorder> visualizer_;
   vision_demo_host::RuntimeMonitor monitor_;
