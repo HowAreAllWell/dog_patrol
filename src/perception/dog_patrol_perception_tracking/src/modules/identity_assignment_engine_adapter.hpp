@@ -24,6 +24,8 @@
 
 namespace vision_demo_host {
 
+class IdentityAssignmentFrameTransaction;
+
 // Internal assignment/update adapter. IdentityManager owns the public identity
 // boundary and runtime state; this class adapts tracks into the current
 // assignment, recovery, and debug-update engine.
@@ -130,6 +132,8 @@ class IdentityAssignmentEngineAdapter {
   std::vector<IdentitySnapshot> IdentitySnapshots() const;
 
  private:
+  friend class IdentityAssignmentFrameTransaction;
+
   struct Assignment {
     int track_idx{-1};
     int semantic_id{-1};

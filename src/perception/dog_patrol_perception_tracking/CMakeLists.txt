@@ -77,6 +77,7 @@ set(MODULE_SOURCES
   src/modules/identity_runtime_lifecycle_coordinator.cpp
   src/modules/identity_runtime_mutation_applier.cpp
   src/modules/identity_assignment_engine_adapter.cpp
+  src/modules/identity_assignment_frame_transaction.cpp
   src/modules/identity_observation_projection.cpp
   src/modules/identity_manager.cpp
   src/modules/visualizer_recorder.cpp
@@ -258,6 +259,14 @@ if(BUILD_TESTING)
     target_include_directories(test_identity_assignment_engine_adapter PRIVATE include src/modules)
     target_link_libraries(test_identity_assignment_engine_adapter ${PROJECT_NAME}_modules)
     ament_target_dependencies(test_identity_assignment_engine_adapter rclcpp)
+  endif()
+
+  ament_add_gtest(test_identity_assignment_frame_transaction test/test_identity_assignment_frame_transaction.cpp)
+  if(TARGET test_identity_assignment_frame_transaction)
+    target_compile_features(test_identity_assignment_frame_transaction PUBLIC cxx_std_17)
+    target_include_directories(test_identity_assignment_frame_transaction PRIVATE include src/modules)
+    target_link_libraries(test_identity_assignment_frame_transaction ${PROJECT_NAME}_modules)
+    ament_target_dependencies(test_identity_assignment_frame_transaction rclcpp)
   endif()
 
   ament_add_gtest(test_identity_manager test/test_identity_manager.cpp)
