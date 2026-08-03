@@ -9,6 +9,8 @@ Orin 宿主机侧视觉验收 demo，包含检测、短期跟踪、语义身份�
 - `preprocess_infer`：YOLO26n TensorRT engine 推理（本机导出的 `.engine`）
 - `det_filter`：`person + car` 阈值过滤（配置化）
 - `mot_tracker`：BoT-SORT 风格实现（Kalman + 两阶段关联 + 可选 GMC + appearance）
+- `perception_config_materializer`：ROS 参数 / 离线 request 到 tracker、identity、visualizer
+  运行态配置的统一 materialization 入口
 - `primary_target_manager`：`person`-only 主目标规则（首锁最大框 + continuity-first）
 - `mission_coordinator`：ROS-independent 任务输出协调 seam；按任务状态 / semantic target / state sequence 只产生当前帧可信 bbox，并负责配置化同目标 loss/reacquire event 时序
 - `mission_frame_transaction`：ROS-independent 一帧任务事务；在 identity 输出后统一执行 primary 更新、PATROL 目标确认、fresh bbox、loss/reacquire，并返回本帧 primary 诊断
@@ -28,6 +30,11 @@ Orin 宿主机侧视觉验收 demo，包含检测、短期跟踪、语义身份�
 ## 关键配置
 
 默认参数文件：`config/demo_params.yaml`
+
+live ROS 参数和 `OfflineReplayRun` request 会先进入
+`PerceptionConfigMaterializer`，再生成 tracker、identity 和 visualizer 的运行态 config。该入口统一
+GMC/ReID 默认、tracker/SID ReID 强制开启、ReID 输入尺寸下限、SID 参数 clamp，以及 visualizer 对
+SID 生效配置的镜像；`MotTracker` 的 `config/bot_sort.yaml` 解析仍由 tracker 内部负责。
 
 核心项：
 - `camera.mvs_model` / `camera.mvs_serial`

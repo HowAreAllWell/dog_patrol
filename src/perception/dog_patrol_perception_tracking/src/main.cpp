@@ -20,6 +20,7 @@
 #include "vision_demo_host/modules/identity_manager.hpp"
 #include "vision_demo_host/modules/mission_ros_adapter.hpp"
 #include "vision_demo_host/modules/mot_tracker.hpp"
+#include "vision_demo_host/modules/perception_config_materializer.hpp"
 #include "vision_demo_host/modules/perception_readiness.hpp"
 #include "vision_demo_host/modules/preprocess_infer.hpp"
 #include "vision_demo_host/modules/primary_target_manager.hpp"
@@ -76,6 +77,10 @@ class VisionDemoNode : public rclcpp::Node {
   }
 
   void DeclareParameters() {
+    const vision_demo_host::PerceptionConfigMaterializer::TrackerInput tracker_defaults;
+    const vision_demo_host::PerceptionConfigMaterializer::IdentityInput identity_defaults;
+    const vision_demo_host::PerceptionConfigMaterializer::VisualizerInput visualizer_defaults;
+
     this->declare_parameter<std::string>("camera.mvs_model", "MV-CU013-A0UC");
     this->declare_parameter<std::string>("camera.mvs_serial", "");
     this->declare_parameter<int>("camera.width", 1280);
@@ -97,23 +102,22 @@ class VisionDemoNode : public rclcpp::Node {
     this->declare_parameter<double>("detector.car_conf_threshold", 0.10);
     this->declare_parameter<bool>("detector.enable_fake_detection", false);
 
-    this->declare_parameter<std::string>("tracker.config_path", "");
-    this->declare_parameter<bool>("tracker.gmc_enabled",
-                                  vision_demo_host::MotTracker::Config::kDefaultGmcEnabled);
-    this->declare_parameter<bool>("tracker.reid_enabled", true);
-    this->declare_parameter<double>("tracker.track_high_thresh", 0.5);
-    this->declare_parameter<double>("tracker.track_low_thresh", 0.1);
-    this->declare_parameter<double>("tracker.new_track_thresh", 0.7);
-    this->declare_parameter<double>("tracker.match_thresh", 0.8);
-    this->declare_parameter<int>("tracker.track_buffer", 30);
-    this->declare_parameter<std::string>("tracker.gmc_method", "sparseOptFlow");
-    this->declare_parameter<int>("tracker.gmc_downscale", 4);
-    this->declare_parameter<bool>("tracker.with_reid", true);
-    this->declare_parameter<std::string>("tracker.reid_backend", "light");
-    this->declare_parameter<std::string>("tracker.reid_model_path", "");
-    this->declare_parameter<int>("tracker.reid_input_width", 128);
-    this->declare_parameter<int>("tracker.reid_input_height", 256);
-    this->declare_parameter<int>("target.lost_threshold_frames", 180);
+    this->declare_parameter<std::string>("tracker.config_path", tracker_defaults.config_path);
+    this->declare_parameter<bool>("tracker.gmc_enabled", tracker_defaults.gmc_enabled);
+    this->declare_parameter<bool>("tracker.reid_enabled", tracker_defaults.reid_enabled);
+    this->declare_parameter<double>("tracker.track_high_thresh", tracker_defaults.track_high_thresh);
+    this->declare_parameter<double>("tracker.track_low_thresh", tracker_defaults.track_low_thresh);
+    this->declare_parameter<double>("tracker.new_track_thresh", tracker_defaults.new_track_thresh);
+    this->declare_parameter<double>("tracker.match_thresh", tracker_defaults.match_thresh);
+    this->declare_parameter<int>("tracker.track_buffer", tracker_defaults.track_buffer);
+    this->declare_parameter<std::string>("tracker.gmc_method", tracker_defaults.gmc_method);
+    this->declare_parameter<int>("tracker.gmc_downscale", tracker_defaults.gmc_downscale);
+    this->declare_parameter<bool>("tracker.with_reid", tracker_defaults.with_reid);
+    this->declare_parameter<std::string>("tracker.reid_backend", tracker_defaults.reid_backend);
+    this->declare_parameter<std::string>("tracker.reid_model_path", tracker_defaults.reid_model_path);
+    this->declare_parameter<int>("tracker.reid_input_width", tracker_defaults.reid_input_width);
+    this->declare_parameter<int>("tracker.reid_input_height", tracker_defaults.reid_input_height);
+    this->declare_parameter<int>("target.lost_threshold_frames", identity_defaults.target_lost_threshold_frames);
     this->declare_parameter<double>("target.min_person_area_px", 1000.0);
     this->declare_parameter<double>("target.max_center_jump_norm", 2.0);
     this->declare_parameter<double>("target.min_area_ratio", 0.25);
@@ -134,40 +138,44 @@ class VisionDemoNode : public rclcpp::Node {
         "perception.authorization_placeholder_detail",
         "authorization capability has not been integrated");
 
-    this->declare_parameter<int>("sid.feat_bank_size", 30);
-    this->declare_parameter<double>("sid.recover_sim_thresh_strict", 0.85);
-    this->declare_parameter<double>("sid.recover_sim_thresh_relaxed", 0.75);
-    this->declare_parameter<int>("sid.recover_relaxed_max_missing_frames", 180);
-    this->declare_parameter<int>("sid.occlusion_protect_frames", 30);
-    this->declare_parameter<double>("sid.missing_assign_min_area_ratio", 0.40);
-    this->declare_parameter<double>("sid.missing_assign_max_area_ratio", 4.00);
-    this->declare_parameter<double>("sid.missing_assign_max_center_dist_norm", 2.50);
-    this->declare_parameter<double>("sid.missing_assign_max_app_cost", 0.50);
-    this->declare_parameter<double>("sid.overlap_iou_freeze", 0.10);
-    this->declare_parameter<int>("sid.split_stable_frames", 3);
-    this->declare_parameter<int>("sid.merge_hold_frames", 2);
-    this->declare_parameter<double>("sid.app_w", 0.70);
-    this->declare_parameter<double>("sid.geo_w", 0.20);
-    this->declare_parameter<double>("sid.time_w", 0.10);
-    this->declare_parameter<double>("sid.active_assign_max_cost", 0.55);
-    this->declare_parameter<double>("sid.recovery_max_cost", 0.45);
-    this->declare_parameter<double>("sid.raw_continuity_max_cost", 0.55);
-    this->declare_parameter<double>("sid.min_assignment_margin", 0.08);
-    this->declare_parameter<int>("sid.stable_frames_before_feature_update", 3);
-    this->declare_parameter<bool>("sid.merged_requires_overlap", true);
-    this->declare_parameter<bool>("sid.reid_enable", true);
-    this->declare_parameter<std::string>("sid.reid_backend", "light");
-    this->declare_parameter<std::string>("sid.reid_model_path", "");
-    this->declare_parameter<int>("sid.reid_input_width", 128);
-    this->declare_parameter<int>("sid.reid_input_height", 256);
+    this->declare_parameter<int>("sid.feat_bank_size", identity_defaults.feat_bank_size);
+    this->declare_parameter<double>("sid.recover_sim_thresh_strict", identity_defaults.recover_sim_thresh_strict);
+    this->declare_parameter<double>("sid.recover_sim_thresh_relaxed", identity_defaults.recover_sim_thresh_relaxed);
+    this->declare_parameter<int>("sid.recover_relaxed_max_missing_frames",
+                                 identity_defaults.recover_relaxed_max_missing_frames);
+    this->declare_parameter<int>("sid.occlusion_protect_frames", identity_defaults.occlusion_protect_frames);
+    this->declare_parameter<double>("sid.missing_assign_min_area_ratio",
+                                    identity_defaults.missing_assign_min_area_ratio);
+    this->declare_parameter<double>("sid.missing_assign_max_area_ratio",
+                                    identity_defaults.missing_assign_max_area_ratio);
+    this->declare_parameter<double>("sid.missing_assign_max_center_dist_norm",
+                                    identity_defaults.missing_assign_max_center_dist_norm);
+    this->declare_parameter<double>("sid.missing_assign_max_app_cost", identity_defaults.missing_assign_max_app_cost);
+    this->declare_parameter<double>("sid.overlap_iou_freeze", identity_defaults.overlap_iou_freeze);
+    this->declare_parameter<int>("sid.split_stable_frames", identity_defaults.split_stable_frames);
+    this->declare_parameter<int>("sid.merge_hold_frames", identity_defaults.merge_hold_frames);
+    this->declare_parameter<double>("sid.app_w", identity_defaults.app_w);
+    this->declare_parameter<double>("sid.geo_w", identity_defaults.geo_w);
+    this->declare_parameter<double>("sid.time_w", identity_defaults.time_w);
+    this->declare_parameter<double>("sid.active_assign_max_cost", identity_defaults.active_assign_max_cost);
+    this->declare_parameter<double>("sid.recovery_max_cost", identity_defaults.recovery_max_cost);
+    this->declare_parameter<double>("sid.raw_continuity_max_cost", identity_defaults.raw_continuity_max_cost);
+    this->declare_parameter<double>("sid.min_assignment_margin", identity_defaults.min_assignment_margin);
+    this->declare_parameter<int>("sid.stable_frames_before_feature_update",
+                                 identity_defaults.stable_frames_before_feature_update);
+    this->declare_parameter<bool>("sid.merged_requires_overlap", identity_defaults.merged_requires_overlap);
+    this->declare_parameter<bool>("sid.reid_enable", identity_defaults.reid_enable);
+    this->declare_parameter<std::string>("sid.reid_backend", identity_defaults.reid_backend);
+    this->declare_parameter<std::string>("sid.reid_model_path", identity_defaults.reid_model_path);
+    this->declare_parameter<int>("sid.reid_input_width", identity_defaults.reid_input_width);
+    this->declare_parameter<int>("sid.reid_input_height", identity_defaults.reid_input_height);
 
-    this->declare_parameter<bool>("visualization.enable", false);
-    this->declare_parameter<int>("visualization.queue_capacity", 4);
-    this->declare_parameter<bool>("recording.enable", false);
-    this->declare_parameter<std::string>("recording.output_root", "data/diagnostics/live_overlays");
-    this->declare_parameter<std::string>("recording.path",
-                                         "data/diagnostics/live_overlays/vision_demo_overlay.mkv");
-    this->declare_parameter<double>("recording.fps", 30.0);
+    this->declare_parameter<bool>("visualization.enable", visualizer_defaults.enable_preview);
+    this->declare_parameter<int>("visualization.queue_capacity", visualizer_defaults.queue_capacity);
+    this->declare_parameter<bool>("recording.enable", visualizer_defaults.enable_recording);
+    this->declare_parameter<std::string>("recording.output_root", visualizer_defaults.recording_output_root);
+    this->declare_parameter<std::string>("recording.path", visualizer_defaults.recording_path);
+    this->declare_parameter<double>("recording.fps", visualizer_defaults.recording_fps);
     this->declare_parameter<bool>("runtime.inference_timing_metrics", true);
 
     this->declare_parameter<int>("runtime.tick_ms", 33);
@@ -283,31 +291,29 @@ class VisionDemoNode : public rclcpp::Node {
         static_cast<float>(this->get_parameter("detector.car_conf_threshold").as_double());
     det_filter_ = vision_demo_host::DetFilter(filter_cfg);
 
-    vision_demo_host::MotTracker::Config tracker_cfg;
-    tracker_cfg.tracker_yaml_path = this->get_parameter("tracker.config_path").as_string();
-    tracker_cfg.gmc_enabled = this->get_parameter("tracker.gmc_enabled").as_bool();
-    const bool tracker_reid_enabled_param = this->get_parameter("tracker.reid_enabled").as_bool();
-    tracker_cfg.reid_enabled = tracker_reid_enabled_param;
-    tracker_cfg.track_high_thresh =
+    vision_demo_host::PerceptionConfigMaterializer::TrackerInput tracker_input;
+    tracker_input.config_path = this->get_parameter("tracker.config_path").as_string();
+    tracker_input.gmc_enabled = this->get_parameter("tracker.gmc_enabled").as_bool();
+    tracker_input.reid_enabled = this->get_parameter("tracker.reid_enabled").as_bool();
+    tracker_input.track_high_thresh =
         static_cast<float>(this->get_parameter("tracker.track_high_thresh").as_double());
-    tracker_cfg.track_low_thresh =
+    tracker_input.track_low_thresh =
         static_cast<float>(this->get_parameter("tracker.track_low_thresh").as_double());
-    tracker_cfg.new_track_thresh =
+    tracker_input.new_track_thresh =
         static_cast<float>(this->get_parameter("tracker.new_track_thresh").as_double());
-    tracker_cfg.match_thresh = static_cast<float>(this->get_parameter("tracker.match_thresh").as_double());
-    tracker_cfg.track_buffer = this->get_parameter("tracker.track_buffer").as_int();
-    tracker_cfg.gmc_method = this->get_parameter("tracker.gmc_method").as_string();
-    tracker_cfg.gmc_downscale =
-        std::max(1, static_cast<int>(this->get_parameter("tracker.gmc_downscale").as_int()));
-    const bool tracker_with_reid_param = this->get_parameter("tracker.with_reid").as_bool();
-    tracker_cfg.with_reid = tracker_with_reid_param;
-    tracker_cfg.reid_backend = this->get_parameter("tracker.reid_backend").as_string();
-    tracker_cfg.reid_model_path = this->get_parameter("tracker.reid_model_path").as_string();
-    tracker_cfg.reid_input_width =
-        std::max(16, static_cast<int>(this->get_parameter("tracker.reid_input_width").as_int()));
-    tracker_cfg.reid_input_height =
-        std::max(16, static_cast<int>(this->get_parameter("tracker.reid_input_height").as_int()));
-    if (!tracker_reid_enabled_param || !tracker_with_reid_param) {
+    tracker_input.match_thresh = static_cast<float>(this->get_parameter("tracker.match_thresh").as_double());
+    tracker_input.track_buffer = this->get_parameter("tracker.track_buffer").as_int();
+    tracker_input.gmc_method = this->get_parameter("tracker.gmc_method").as_string();
+    tracker_input.gmc_downscale = static_cast<int>(this->get_parameter("tracker.gmc_downscale").as_int());
+    tracker_input.with_reid = this->get_parameter("tracker.with_reid").as_bool();
+    tracker_input.reid_backend = this->get_parameter("tracker.reid_backend").as_string();
+    tracker_input.reid_model_path = this->get_parameter("tracker.reid_model_path").as_string();
+    tracker_input.reid_input_width = static_cast<int>(this->get_parameter("tracker.reid_input_width").as_int());
+    tracker_input.reid_input_height = static_cast<int>(this->get_parameter("tracker.reid_input_height").as_int());
+    vision_demo_host::PerceptionConfigMaterializer::Diagnostics tracker_config_diagnostics;
+    auto tracker_cfg = vision_demo_host::PerceptionConfigMaterializer::MaterializeTrackerConfig(
+        tracker_input, &tracker_config_diagnostics);
+    if (tracker_config_diagnostics.tracker_reid_forced) {
       RCLCPP_WARN(get_logger(), "reid is mandatory; override tracker.reid_enabled/with_reid to true");
     }
     if (infer_cfg.raw_conf_threshold > tracker_cfg.track_low_thresh) {
@@ -321,8 +327,6 @@ class VisionDemoNode : public rclcpp::Node {
                   "detector class thresholds person=%.3f car=%.3f exceed tracker.track_low_thresh %.3f; low-score recovery may be pre-filtered",
                   filter_cfg.person_conf_threshold, filter_cfg.car_conf_threshold, tracker_cfg.track_low_thresh);
     }
-    tracker_cfg.reid_enabled = true;
-    tracker_cfg.with_reid = true;
     tracker_ = vision_demo_host::MotTracker(tracker_cfg);
     if (!tracker_.Initialize(&error)) {
       mission_ros_adapter_->detection_tracking_readiness().ReportRuntimeStatus(
@@ -331,58 +335,52 @@ class VisionDemoNode : public rclcpp::Node {
     }
     mission_ros_adapter_->detection_tracking_readiness().ReportRuntimeStatus({true, true, {}});
 
-    vision_demo_host::IdentityManager::Config sid_cfg;
-    sid_cfg.max_missing_frames = target_cfg.lost_threshold_frames;
-    sid_cfg.feat_bank_size =
-        std::max(1, static_cast<int>(this->get_parameter("sid.feat_bank_size").as_int()));
-    sid_cfg.recover_sim_thresh_strict = std::clamp(
-        static_cast<float>(this->get_parameter("sid.recover_sim_thresh_strict").as_double()), 0.0F, 1.0F);
-    sid_cfg.recover_sim_thresh_relaxed = std::clamp(
-        static_cast<float>(this->get_parameter("sid.recover_sim_thresh_relaxed").as_double()), 0.0F, 1.0F);
-    sid_cfg.recover_relaxed_max_missing_frames =
-        std::max(1, static_cast<int>(this->get_parameter("sid.recover_relaxed_max_missing_frames").as_int()));
-    sid_cfg.occlusion_protect_frames =
-        std::max(0, static_cast<int>(this->get_parameter("sid.occlusion_protect_frames").as_int()));
-    sid_cfg.missing_assign_min_area_ratio = std::max(
-        0.01F, static_cast<float>(this->get_parameter("sid.missing_assign_min_area_ratio").as_double()));
-    sid_cfg.missing_assign_max_area_ratio = std::max(
-        sid_cfg.missing_assign_min_area_ratio,
-        static_cast<float>(this->get_parameter("sid.missing_assign_max_area_ratio").as_double()));
-    sid_cfg.missing_assign_max_center_dist_norm = std::max(
-        0.1F, static_cast<float>(this->get_parameter("sid.missing_assign_max_center_dist_norm").as_double()));
-    sid_cfg.missing_assign_max_app_cost = std::clamp(
-        static_cast<float>(this->get_parameter("sid.missing_assign_max_app_cost").as_double()), 0.0F, 1.0F);
-    sid_cfg.overlap_iou_freeze =
-        std::max(0.0F, static_cast<float>(this->get_parameter("sid.overlap_iou_freeze").as_double()));
-    sid_cfg.split_stable_frames =
-        std::max(1, static_cast<int>(this->get_parameter("sid.split_stable_frames").as_int()));
-    sid_cfg.merge_hold_frames =
-        std::max(1, static_cast<int>(this->get_parameter("sid.merge_hold_frames").as_int()));
-    sid_cfg.app_w = std::max(0.0F, static_cast<float>(this->get_parameter("sid.app_w").as_double()));
-    sid_cfg.geo_w = std::max(0.0F, static_cast<float>(this->get_parameter("sid.geo_w").as_double()));
-    sid_cfg.time_w = std::max(0.0F, static_cast<float>(this->get_parameter("sid.time_w").as_double()));
-    sid_cfg.active_assign_max_cost = std::clamp(
-        static_cast<float>(this->get_parameter("sid.active_assign_max_cost").as_double()), 0.0F, 1.0F);
-    sid_cfg.recovery_max_cost = std::clamp(
-        static_cast<float>(this->get_parameter("sid.recovery_max_cost").as_double()), 0.0F, 1.0F);
-    sid_cfg.raw_continuity_max_cost = std::clamp(
-        static_cast<float>(this->get_parameter("sid.raw_continuity_max_cost").as_double()), 0.0F, 1.0F);
-    sid_cfg.min_assignment_margin = std::max(
-        0.0F, static_cast<float>(this->get_parameter("sid.min_assignment_margin").as_double()));
-    sid_cfg.stable_frames_before_feature_update =
-        std::max(1, static_cast<int>(this->get_parameter("sid.stable_frames_before_feature_update").as_int()));
-    sid_cfg.merged_requires_overlap = this->get_parameter("sid.merged_requires_overlap").as_bool();
-    const bool sid_reid_enable_param = this->get_parameter("sid.reid_enable").as_bool();
-    if (!sid_reid_enable_param) {
+    vision_demo_host::PerceptionConfigMaterializer::IdentityInput sid_input;
+    sid_input.target_lost_threshold_frames = target_cfg.lost_threshold_frames;
+    sid_input.feat_bank_size = static_cast<int>(this->get_parameter("sid.feat_bank_size").as_int());
+    sid_input.recover_sim_thresh_strict =
+        static_cast<float>(this->get_parameter("sid.recover_sim_thresh_strict").as_double());
+    sid_input.recover_sim_thresh_relaxed =
+        static_cast<float>(this->get_parameter("sid.recover_sim_thresh_relaxed").as_double());
+    sid_input.recover_relaxed_max_missing_frames =
+        static_cast<int>(this->get_parameter("sid.recover_relaxed_max_missing_frames").as_int());
+    sid_input.occlusion_protect_frames = static_cast<int>(this->get_parameter("sid.occlusion_protect_frames").as_int());
+    sid_input.missing_assign_min_area_ratio =
+        static_cast<float>(this->get_parameter("sid.missing_assign_min_area_ratio").as_double());
+    sid_input.missing_assign_max_area_ratio =
+        static_cast<float>(this->get_parameter("sid.missing_assign_max_area_ratio").as_double());
+    sid_input.missing_assign_max_center_dist_norm =
+        static_cast<float>(this->get_parameter("sid.missing_assign_max_center_dist_norm").as_double());
+    sid_input.missing_assign_max_app_cost =
+        static_cast<float>(this->get_parameter("sid.missing_assign_max_app_cost").as_double());
+    sid_input.overlap_iou_freeze =
+        static_cast<float>(this->get_parameter("sid.overlap_iou_freeze").as_double());
+    sid_input.split_stable_frames = static_cast<int>(this->get_parameter("sid.split_stable_frames").as_int());
+    sid_input.merge_hold_frames = static_cast<int>(this->get_parameter("sid.merge_hold_frames").as_int());
+    sid_input.app_w = static_cast<float>(this->get_parameter("sid.app_w").as_double());
+    sid_input.geo_w = static_cast<float>(this->get_parameter("sid.geo_w").as_double());
+    sid_input.time_w = static_cast<float>(this->get_parameter("sid.time_w").as_double());
+    sid_input.active_assign_max_cost =
+        static_cast<float>(this->get_parameter("sid.active_assign_max_cost").as_double());
+    sid_input.recovery_max_cost = static_cast<float>(this->get_parameter("sid.recovery_max_cost").as_double());
+    sid_input.raw_continuity_max_cost =
+        static_cast<float>(this->get_parameter("sid.raw_continuity_max_cost").as_double());
+    sid_input.min_assignment_margin =
+        static_cast<float>(this->get_parameter("sid.min_assignment_margin").as_double());
+    sid_input.stable_frames_before_feature_update =
+        static_cast<int>(this->get_parameter("sid.stable_frames_before_feature_update").as_int());
+    sid_input.merged_requires_overlap = this->get_parameter("sid.merged_requires_overlap").as_bool();
+    sid_input.reid_enable = this->get_parameter("sid.reid_enable").as_bool();
+    sid_input.reid_backend = this->get_parameter("sid.reid_backend").as_string();
+    sid_input.reid_model_path = this->get_parameter("sid.reid_model_path").as_string();
+    sid_input.reid_input_width = static_cast<int>(this->get_parameter("sid.reid_input_width").as_int());
+    sid_input.reid_input_height = static_cast<int>(this->get_parameter("sid.reid_input_height").as_int());
+    vision_demo_host::PerceptionConfigMaterializer::Diagnostics identity_config_diagnostics;
+    const auto sid_cfg = vision_demo_host::PerceptionConfigMaterializer::MaterializeIdentityConfig(
+        sid_input, &identity_config_diagnostics);
+    if (identity_config_diagnostics.identity_reid_forced) {
       RCLCPP_WARN(get_logger(), "reid is mandatory; override sid.reid_enable to true");
     }
-    sid_cfg.reid_enable = true;
-    sid_cfg.reid_backend = this->get_parameter("sid.reid_backend").as_string();
-    sid_cfg.reid_model_path = this->get_parameter("sid.reid_model_path").as_string();
-    sid_cfg.reid_input_width =
-        std::max(16, static_cast<int>(this->get_parameter("sid.reid_input_width").as_int()));
-    sid_cfg.reid_input_height =
-        std::max(16, static_cast<int>(this->get_parameter("sid.reid_input_height").as_int()));
     identity_manager_ = vision_demo_host::IdentityManager(sid_cfg);
     if (!identity_manager_.Initialize(&error)) {
       throw std::runtime_error("identity_manager init failed: " + error);
@@ -396,47 +394,15 @@ class VisionDemoNode : public rclcpp::Node {
     }
     cv::Mat &frame = acquired_frame.bgr8;
 
-    vision_demo_host::VisualizerRecorder::Config viz_cfg;
-    viz_cfg.enable_preview = this->get_parameter("visualization.enable").as_bool();
-    viz_cfg.enable_recording = this->get_parameter("recording.enable").as_bool();
-    viz_cfg.recording_output_root = this->get_parameter("recording.output_root").as_string();
-    viz_cfg.recording_path = this->get_parameter("recording.path").as_string();
-    viz_cfg.recording_fps = this->get_parameter("recording.fps").as_double();
-    const int visualization_queue_capacity = this->get_parameter("visualization.queue_capacity").as_int();
-    viz_cfg.queue_capacity = visualization_queue_capacity > 0
-                                 ? static_cast<std::size_t>(visualization_queue_capacity)
-                                 : 0U;
-    viz_cfg.semantic_id_max_missing_frames = target_cfg.lost_threshold_frames;
-    viz_cfg.sid_feat_bank_size = this->get_parameter("sid.feat_bank_size").as_int();
-    viz_cfg.sid_recover_sim_thresh_strict =
-        static_cast<float>(this->get_parameter("sid.recover_sim_thresh_strict").as_double());
-    viz_cfg.sid_recover_sim_thresh_relaxed =
-        static_cast<float>(this->get_parameter("sid.recover_sim_thresh_relaxed").as_double());
-    viz_cfg.sid_recover_relaxed_max_missing_frames =
-        this->get_parameter("sid.recover_relaxed_max_missing_frames").as_int();
-    viz_cfg.sid_occlusion_protect_frames = this->get_parameter("sid.occlusion_protect_frames").as_int();
-    viz_cfg.sid_overlap_iou_freeze =
-        static_cast<float>(this->get_parameter("sid.overlap_iou_freeze").as_double());
-    viz_cfg.sid_split_stable_frames = this->get_parameter("sid.split_stable_frames").as_int();
-    viz_cfg.sid_merge_hold_frames = this->get_parameter("sid.merge_hold_frames").as_int();
-    viz_cfg.sid_app_w = static_cast<float>(this->get_parameter("sid.app_w").as_double());
-    viz_cfg.sid_geo_w = static_cast<float>(this->get_parameter("sid.geo_w").as_double());
-    viz_cfg.sid_time_w = static_cast<float>(this->get_parameter("sid.time_w").as_double());
-    viz_cfg.sid_active_assign_max_cost =
-        static_cast<float>(this->get_parameter("sid.active_assign_max_cost").as_double());
-    viz_cfg.sid_recovery_max_cost = static_cast<float>(this->get_parameter("sid.recovery_max_cost").as_double());
-    viz_cfg.sid_raw_continuity_max_cost =
-        static_cast<float>(this->get_parameter("sid.raw_continuity_max_cost").as_double());
-    viz_cfg.sid_min_assignment_margin =
-        static_cast<float>(this->get_parameter("sid.min_assignment_margin").as_double());
-    viz_cfg.sid_stable_frames_before_feature_update =
-        this->get_parameter("sid.stable_frames_before_feature_update").as_int();
-    viz_cfg.sid_merged_requires_overlap = this->get_parameter("sid.merged_requires_overlap").as_bool();
-    viz_cfg.sid_reid_enable = true;
-    viz_cfg.sid_reid_backend = this->get_parameter("sid.reid_backend").as_string();
-    viz_cfg.sid_reid_model_path = this->get_parameter("sid.reid_model_path").as_string();
-    viz_cfg.sid_reid_input_width = this->get_parameter("sid.reid_input_width").as_int();
-    viz_cfg.sid_reid_input_height = this->get_parameter("sid.reid_input_height").as_int();
+    vision_demo_host::PerceptionConfigMaterializer::VisualizerInput viz_input;
+    viz_input.enable_preview = this->get_parameter("visualization.enable").as_bool();
+    viz_input.enable_recording = this->get_parameter("recording.enable").as_bool();
+    viz_input.recording_output_root = this->get_parameter("recording.output_root").as_string();
+    viz_input.recording_path = this->get_parameter("recording.path").as_string();
+    viz_input.recording_fps = this->get_parameter("recording.fps").as_double();
+    viz_input.queue_capacity = static_cast<int>(this->get_parameter("visualization.queue_capacity").as_int());
+    const auto viz_cfg =
+        vision_demo_host::PerceptionConfigMaterializer::MaterializeVisualizerConfig(viz_input, sid_cfg);
     visualizer_ = std::make_unique<vision_demo_host::VisualizerRecorder>(viz_cfg);
     if (!visualizer_->Initialize(frame.size(), &error)) {
       throw std::runtime_error("visualizer_recorder init failed: " + error);

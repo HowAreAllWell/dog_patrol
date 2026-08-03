@@ -1,16 +1,17 @@
-#include <algorithm>
 #include <filesystem>
 #include <iostream>
 #include <sstream>
 #include <string>
 #include <vector>
 
-#include "vision_demo_host/modules/mot_tracker.hpp"
+#include "vision_demo_host/modules/perception_config_materializer.hpp"
 #include "vision_demo_host/tools/identity_offline_metrics.hpp"
 #include "vision_demo_host/tools/offline_eval_schema.hpp"
 #include "vision_demo_host/tools/offline_replay_run.hpp"
 
 namespace {
+
+using PerceptionConfigMaterializer = vision_demo_host::PerceptionConfigMaterializer;
 
 struct Options {
   std::filesystem::path recordings_root{"data/captures"};
@@ -22,11 +23,11 @@ struct Options {
   float det_person_conf_threshold{0.10F};
   float det_car_conf_threshold{0.10F};
   std::string tracker_config_path{"/path/to/my_workplace/vision_demo_ws/src/vision_demo_host/config/bot_sort.yaml"};
-  bool tracker_gmc_enabled{vision_demo_host::MotTracker::Config::kDefaultGmcEnabled};
-  std::string tracker_reid_backend{"light"};
+  bool tracker_gmc_enabled{PerceptionConfigMaterializer::TrackerInput{}.gmc_enabled};
+  std::string tracker_reid_backend{PerceptionConfigMaterializer::kDefaultReidBackend};
   std::string tracker_reid_model_path{};
-  int tracker_reid_input_width{128};
-  int tracker_reid_input_height{256};
+  int tracker_reid_input_width{PerceptionConfigMaterializer::kDefaultReidInputWidth};
+  int tracker_reid_input_height{PerceptionConfigMaterializer::kDefaultReidInputHeight};
   bool save_frame_csv{true};
   bool save_sid_scores{true};
   bool save_tracks_csv{true};
@@ -35,33 +36,39 @@ struct Options {
   bool short_dataset_dir_names{true};
   std::string overlay_video_name{"eval_overlay.mkv"};
   std::filesystem::path explicit_video_path;
-  int target_lost_threshold_frames{180};
-  int sid_feat_bank_size{30};
-  float sid_recover_sim_thresh_strict{0.85F};
-  float sid_recover_sim_thresh_relaxed{0.75F};
-  int sid_recover_relaxed_max_missing_frames{180};
-  int sid_occlusion_protect_frames{30};
-  float sid_missing_assign_min_area_ratio{0.40F};
-  float sid_missing_assign_max_area_ratio{4.00F};
-  float sid_missing_assign_max_center_dist_norm{2.50F};
-  float sid_missing_assign_max_app_cost{0.50F};
-  float sid_overlap_iou_freeze{0.10F};
-  int sid_split_stable_frames{3};
-  int sid_merge_hold_frames{2};
-  float sid_app_w{0.70F};
-  float sid_geo_w{0.20F};
-  float sid_time_w{0.10F};
-  float sid_active_assign_max_cost{0.55F};
-  float sid_recovery_max_cost{0.45F};
-  float sid_raw_continuity_max_cost{0.55F};
-  float sid_min_assignment_margin{0.08F};
-  int sid_stable_frames_before_feature_update{3};
-  bool sid_merged_requires_overlap{true};
-  bool sid_reid_enable{true};  // compatibility input, runtime forces true.
-  std::string sid_reid_backend{"light"};
+  int target_lost_threshold_frames{PerceptionConfigMaterializer::IdentityInput{}.target_lost_threshold_frames};
+  int sid_feat_bank_size{PerceptionConfigMaterializer::IdentityInput{}.feat_bank_size};
+  float sid_recover_sim_thresh_strict{PerceptionConfigMaterializer::IdentityInput{}.recover_sim_thresh_strict};
+  float sid_recover_sim_thresh_relaxed{PerceptionConfigMaterializer::IdentityInput{}.recover_sim_thresh_relaxed};
+  int sid_recover_relaxed_max_missing_frames{
+      PerceptionConfigMaterializer::IdentityInput{}.recover_relaxed_max_missing_frames};
+  int sid_occlusion_protect_frames{PerceptionConfigMaterializer::IdentityInput{}.occlusion_protect_frames};
+  float sid_missing_assign_min_area_ratio{
+      PerceptionConfigMaterializer::IdentityInput{}.missing_assign_min_area_ratio};
+  float sid_missing_assign_max_area_ratio{
+      PerceptionConfigMaterializer::IdentityInput{}.missing_assign_max_area_ratio};
+  float sid_missing_assign_max_center_dist_norm{
+      PerceptionConfigMaterializer::IdentityInput{}.missing_assign_max_center_dist_norm};
+  float sid_missing_assign_max_app_cost{
+      PerceptionConfigMaterializer::IdentityInput{}.missing_assign_max_app_cost};
+  float sid_overlap_iou_freeze{PerceptionConfigMaterializer::IdentityInput{}.overlap_iou_freeze};
+  int sid_split_stable_frames{PerceptionConfigMaterializer::IdentityInput{}.split_stable_frames};
+  int sid_merge_hold_frames{PerceptionConfigMaterializer::IdentityInput{}.merge_hold_frames};
+  float sid_app_w{PerceptionConfigMaterializer::IdentityInput{}.app_w};
+  float sid_geo_w{PerceptionConfigMaterializer::IdentityInput{}.geo_w};
+  float sid_time_w{PerceptionConfigMaterializer::IdentityInput{}.time_w};
+  float sid_active_assign_max_cost{PerceptionConfigMaterializer::IdentityInput{}.active_assign_max_cost};
+  float sid_recovery_max_cost{PerceptionConfigMaterializer::IdentityInput{}.recovery_max_cost};
+  float sid_raw_continuity_max_cost{PerceptionConfigMaterializer::IdentityInput{}.raw_continuity_max_cost};
+  float sid_min_assignment_margin{PerceptionConfigMaterializer::IdentityInput{}.min_assignment_margin};
+  int sid_stable_frames_before_feature_update{
+      PerceptionConfigMaterializer::IdentityInput{}.stable_frames_before_feature_update};
+  bool sid_merged_requires_overlap{PerceptionConfigMaterializer::IdentityInput{}.merged_requires_overlap};
+  bool sid_reid_enable{PerceptionConfigMaterializer::IdentityInput{}.reid_enable};  // compatibility input.
+  std::string sid_reid_backend{PerceptionConfigMaterializer::kDefaultReidBackend};
   std::string sid_reid_model_path{};
-  int sid_reid_input_width{128};
-  int sid_reid_input_height{256};
+  int sid_reid_input_width{PerceptionConfigMaterializer::kDefaultReidInputWidth};
+  int sid_reid_input_height{PerceptionConfigMaterializer::kDefaultReidInputHeight};
   std::vector<std::string> datasets;
 };
 
@@ -73,7 +80,11 @@ std::string Trim(const std::string &s) {
   const auto end = s.find_last_not_of(" \t\r\n");
   return s.substr(begin, end - begin + 1);
 }
+
+const char *BoolLiteral(bool value) { return value ? "true" : "false"; }
+
 void PrintUsage() {
+  const Options defaults;
   std::cout
       << "Usage: offline_eval_recordings [options]\n"
       << "  --recordings-root <path>      (default: data/captures)\n"
@@ -84,11 +95,15 @@ void PrintUsage() {
       << "  --det-person-conf <f>          (default: 0.10)\n"
       << "  --det-car-conf <f>             (default: 0.10)\n"
       << "  --tracker-config <path>\n"
-      << "  --tracker-gmc-enabled <true|false> (default: false)\n"
-      << "  --tracker-reid-backend <light|osnet_onnx> (default: light)\n"
+      << "  --tracker-gmc-enabled <true|false> (default: "
+      << BoolLiteral(defaults.tracker_gmc_enabled) << ")\n"
+      << "  --tracker-reid-backend <light|osnet_onnx> (default: "
+      << defaults.tracker_reid_backend << ")\n"
       << "  --tracker-reid-model-path <path>      (default: \"\")\n"
-      << "  --tracker-reid-input-width <n>        (default: 128)\n"
-      << "  --tracker-reid-input-height <n>       (default: 256)\n"
+      << "  --tracker-reid-input-width <n>        (default: "
+      << defaults.tracker_reid_input_width << ")\n"
+      << "  --tracker-reid-input-height <n>       (default: "
+      << defaults.tracker_reid_input_height << ")\n"
       << "  --datasets <a,b,c>            (FFV1 take directories below --recordings-root)\n"
       << "  --video <path>                (one explicit FFV1/MKV take; overrides --datasets)\n"
       << "  One of --video or --datasets is required. Historical MP4 is migration-regression input only.\n"
@@ -101,33 +116,58 @@ void PrintUsage() {
       << "  --short-dataset-dir-names <true|false> (default: true, output s01/s02/...)\n"
       << "  --overlay-video-name <name>   (default: eval_overlay.mkv; filename only)\n"
       << "  --eval-video-name <name>      (compatibility alias for --overlay-video-name)\n"
-      << "  --target-lost-threshold-frames <n>     (default: 180)\n"
-      << "  --sid-feat-bank-size <n>               (default: 30)\n"
-      << "  --sid-recover-sim-thresh-strict <f>    (default: 0.85)\n"
-      << "  --sid-recover-sim-thresh-relaxed <f>   (default: 0.75)\n"
-      << "  --sid-recover-relaxed-max-missing-frames <n> (default: 180)\n"
-      << "  --sid-occlusion-protect-frames <n>           (default: 30)\n"
-      << "  --sid-missing-assign-min-area-ratio <f>      (default: 0.40)\n"
-      << "  --sid-missing-assign-max-area-ratio <f>      (default: 4.00)\n"
-      << "  --sid-missing-assign-max-center-dist-norm <f> (default: 2.50)\n"
-      << "  --sid-missing-assign-max-app-cost <f>  (default: 0.50)\n"
-      << "  --sid-overlap-iou-freeze <f>           (default: 0.10)\n"
-      << "  --sid-split-stable-frames <n>          (default: 3)\n"
-      << "  --sid-merge-hold-frames <n>            (default: 2)\n"
-      << "  --sid-app-w <f>                        (default: 0.70)\n"
-      << "  --sid-geo-w <f>                        (default: 0.20)\n"
-      << "  --sid-time-w <f>                       (default: 0.10)\n"
-      << "  --sid-active-assign-max-cost <f>       (default: 0.55)\n"
-      << "  --sid-recovery-max-cost <f>            (default: 0.45)\n"
-      << "  --sid-raw-continuity-max-cost <f>      (default: 0.55)\n"
-      << "  --sid-min-assignment-margin <f>        (default: 0.08)\n"
-      << "  --sid-stable-frames-before-feature-update <n> (default: 3)\n"
-      << "  --sid-merged-requires-overlap <true|false> (default: true)\n"
+      << "  --target-lost-threshold-frames <n>     (default: "
+      << defaults.target_lost_threshold_frames << ")\n"
+      << "  --sid-feat-bank-size <n>               (default: "
+      << defaults.sid_feat_bank_size << ")\n"
+      << "  --sid-recover-sim-thresh-strict <f>    (default: "
+      << defaults.sid_recover_sim_thresh_strict << ")\n"
+      << "  --sid-recover-sim-thresh-relaxed <f>   (default: "
+      << defaults.sid_recover_sim_thresh_relaxed << ")\n"
+      << "  --sid-recover-relaxed-max-missing-frames <n> (default: "
+      << defaults.sid_recover_relaxed_max_missing_frames << ")\n"
+      << "  --sid-occlusion-protect-frames <n>           (default: "
+      << defaults.sid_occlusion_protect_frames << ")\n"
+      << "  --sid-missing-assign-min-area-ratio <f>      (default: "
+      << defaults.sid_missing_assign_min_area_ratio << ")\n"
+      << "  --sid-missing-assign-max-area-ratio <f>      (default: "
+      << defaults.sid_missing_assign_max_area_ratio << ")\n"
+      << "  --sid-missing-assign-max-center-dist-norm <f> (default: "
+      << defaults.sid_missing_assign_max_center_dist_norm << ")\n"
+      << "  --sid-missing-assign-max-app-cost <f>  (default: "
+      << defaults.sid_missing_assign_max_app_cost << ")\n"
+      << "  --sid-overlap-iou-freeze <f>           (default: "
+      << defaults.sid_overlap_iou_freeze << ")\n"
+      << "  --sid-split-stable-frames <n>          (default: "
+      << defaults.sid_split_stable_frames << ")\n"
+      << "  --sid-merge-hold-frames <n>            (default: "
+      << defaults.sid_merge_hold_frames << ")\n"
+      << "  --sid-app-w <f>                        (default: "
+      << defaults.sid_app_w << ")\n"
+      << "  --sid-geo-w <f>                        (default: "
+      << defaults.sid_geo_w << ")\n"
+      << "  --sid-time-w <f>                       (default: "
+      << defaults.sid_time_w << ")\n"
+      << "  --sid-active-assign-max-cost <f>       (default: "
+      << defaults.sid_active_assign_max_cost << ")\n"
+      << "  --sid-recovery-max-cost <f>            (default: "
+      << defaults.sid_recovery_max_cost << ")\n"
+      << "  --sid-raw-continuity-max-cost <f>      (default: "
+      << defaults.sid_raw_continuity_max_cost << ")\n"
+      << "  --sid-min-assignment-margin <f>        (default: "
+      << defaults.sid_min_assignment_margin << ")\n"
+      << "  --sid-stable-frames-before-feature-update <n> (default: "
+      << defaults.sid_stable_frames_before_feature_update << ")\n"
+      << "  --sid-merged-requires-overlap <true|false> (default: "
+      << BoolLiteral(defaults.sid_merged_requires_overlap) << ")\n"
       << "  --sid-reid-enable <true|false>         (compat-only; runtime forces true)\n"
-      << "  --sid-reid-backend <light|osnet_onnx> (default: light)\n"
+      << "  --sid-reid-backend <light|osnet_onnx> (default: "
+      << defaults.sid_reid_backend << ")\n"
       << "  --sid-reid-model-path <path>           (default: \"\")\n"
-      << "  --sid-reid-input-width <n>             (default: 128)\n"
-      << "  --sid-reid-input-height <n>            (default: 256)\n"
+      << "  --sid-reid-input-width <n>             (default: "
+      << defaults.sid_reid_input_width << ")\n"
+      << "  --sid-reid-input-height <n>            (default: "
+      << defaults.sid_reid_input_height << ")\n"
       << "  --help\n\n"
       << vision_demo_host::tools::PerFrameCsvHelp() << "\n"
       << vision_demo_host::tools::TrackletHypothesesCsvHelp() << "\n"
@@ -217,7 +257,7 @@ bool ParseArgs(int argc, char **argv, Options *opt, std::string *error) {
     } else if (arg == "--tracker-reid-input-width") {
       const std::string s = need(arg);
       try {
-        opt->tracker_reid_input_width = std::max(16, std::stoi(s));
+        opt->tracker_reid_input_width = std::stoi(s);
       } catch (...) {
         if (error != nullptr) {
           *error = "Invalid --tracker-reid-input-width: " + s;
@@ -227,7 +267,7 @@ bool ParseArgs(int argc, char **argv, Options *opt, std::string *error) {
     } else if (arg == "--tracker-reid-input-height") {
       const std::string s = need(arg);
       try {
-        opt->tracker_reid_input_height = std::max(16, std::stoi(s));
+        opt->tracker_reid_input_height = std::stoi(s);
       } catch (...) {
         if (error != nullptr) {
           *error = "Invalid --tracker-reid-input-height: " + s;
@@ -546,7 +586,7 @@ bool ParseArgs(int argc, char **argv, Options *opt, std::string *error) {
     } else if (arg == "--sid-reid-input-width") {
       const std::string s = need(arg);
       try {
-        opt->sid_reid_input_width = std::max(16, std::stoi(s));
+        opt->sid_reid_input_width = std::stoi(s);
       } catch (...) {
         if (error != nullptr) {
           *error = "Invalid --sid-reid-input-width: " + s;
@@ -556,7 +596,7 @@ bool ParseArgs(int argc, char **argv, Options *opt, std::string *error) {
     } else if (arg == "--sid-reid-input-height") {
       const std::string s = need(arg);
       try {
-        opt->sid_reid_input_height = std::max(16, std::stoi(s));
+        opt->sid_reid_input_height = std::stoi(s);
       } catch (...) {
         if (error != nullptr) {
           *error = "Invalid --sid-reid-input-height: " + s;

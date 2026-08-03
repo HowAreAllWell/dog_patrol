@@ -18,6 +18,7 @@
 #include "vision_demo_host/modules/det_filter.hpp"
 #include "vision_demo_host/modules/identity_manager.hpp"
 #include "vision_demo_host/modules/mot_tracker.hpp"
+#include "vision_demo_host/modules/perception_config_materializer.hpp"
 #include "vision_demo_host/modules/preprocess_infer.hpp"
 #include "vision_demo_host/modules/primary_recovery_debug.hpp"
 #include "vision_demo_host/modules/primary_target_manager.hpp"
@@ -27,6 +28,48 @@
 #include "vision_demo_host/types.hpp"
 
 namespace vision_demo_host::tools {
+
+OfflineReplayRun::TrackerConfig::TrackerConfig() {
+  const PerceptionConfigMaterializer::TrackerInput defaults;
+  config_path = "/path/to/my_workplace/vision_demo_ws/src/vision_demo_host/config/bot_sort.yaml";
+  gmc_enabled = defaults.gmc_enabled;
+  reid_backend = defaults.reid_backend;
+  reid_model_path = defaults.reid_model_path;
+  reid_input_width = defaults.reid_input_width;
+  reid_input_height = defaults.reid_input_height;
+}
+
+OfflineReplayRun::IdentityConfig::IdentityConfig() {
+  const PerceptionConfigMaterializer::IdentityInput defaults;
+  target_lost_threshold_frames = defaults.target_lost_threshold_frames;
+  feat_bank_size = defaults.feat_bank_size;
+  recover_sim_thresh_strict = defaults.recover_sim_thresh_strict;
+  recover_sim_thresh_relaxed = defaults.recover_sim_thresh_relaxed;
+  recover_relaxed_max_missing_frames = defaults.recover_relaxed_max_missing_frames;
+  occlusion_protect_frames = defaults.occlusion_protect_frames;
+  missing_assign_min_area_ratio = defaults.missing_assign_min_area_ratio;
+  missing_assign_max_area_ratio = defaults.missing_assign_max_area_ratio;
+  missing_assign_max_center_dist_norm = defaults.missing_assign_max_center_dist_norm;
+  missing_assign_max_app_cost = defaults.missing_assign_max_app_cost;
+  overlap_iou_freeze = defaults.overlap_iou_freeze;
+  split_stable_frames = defaults.split_stable_frames;
+  merge_hold_frames = defaults.merge_hold_frames;
+  app_w = defaults.app_w;
+  geo_w = defaults.geo_w;
+  time_w = defaults.time_w;
+  active_assign_max_cost = defaults.active_assign_max_cost;
+  recovery_max_cost = defaults.recovery_max_cost;
+  raw_continuity_max_cost = defaults.raw_continuity_max_cost;
+  min_assignment_margin = defaults.min_assignment_margin;
+  stable_frames_before_feature_update = defaults.stable_frames_before_feature_update;
+  merged_requires_overlap = defaults.merged_requires_overlap;
+  reid_enable = defaults.reid_enable;
+  reid_backend = defaults.reid_backend;
+  reid_model_path = defaults.reid_model_path;
+  reid_input_width = defaults.reid_input_width;
+  reid_input_height = defaults.reid_input_height;
+}
+
 namespace {
 
 struct DatasetMetrics {
@@ -294,17 +337,16 @@ DatasetMetrics EvaluateOne(const OfflineReplayRun::Request &request,
   filter_cfg.car_conf_threshold = std::max(0.0F, request.detector.car_conf_threshold);
   DetFilter det_filter(filter_cfg);
 
-  MotTracker::Config tracker_cfg;
-  tracker_cfg.tracker_yaml_path = request.tracker.config_path;
-  tracker_cfg.gmc_enabled = request.tracker.gmc_enabled;
-  tracker_cfg.reid_enabled = true;
-  tracker_cfg.gmc_method = "sparseOptFlow";
-  tracker_cfg.gmc_downscale = 4;
-  tracker_cfg.with_reid = true;
-  tracker_cfg.reid_backend = request.tracker.reid_backend;
-  tracker_cfg.reid_model_path = request.tracker.reid_model_path;
-  tracker_cfg.reid_input_width = std::max(16, request.tracker.reid_input_width);
-  tracker_cfg.reid_input_height = std::max(16, request.tracker.reid_input_height);
+  PerceptionConfigMaterializer::TrackerInput tracker_input;
+  tracker_input.config_path = request.tracker.config_path;
+  tracker_input.gmc_enabled = request.tracker.gmc_enabled;
+  tracker_input.reid_backend = request.tracker.reid_backend;
+  tracker_input.reid_model_path = request.tracker.reid_model_path;
+  tracker_input.reid_input_width = request.tracker.reid_input_width;
+  tracker_input.reid_input_height = request.tracker.reid_input_height;
+  PerceptionConfigMaterializer::Diagnostics tracker_config_diagnostics;
+  const auto tracker_cfg =
+      PerceptionConfigMaterializer::MaterializeTrackerConfig(tracker_input, &tracker_config_diagnostics);
   MotTracker tracker(tracker_cfg);
   if (!tracker.Initialize(&err)) {
     m.error = "mot_tracker init failed: " + err;
@@ -328,40 +370,40 @@ DatasetMetrics EvaluateOne(const OfflineReplayRun::Request &request,
   target_cfg.min_person_area_px = 1000.0F;
   PrimaryTargetManager primary_mgr(target_cfg);
 
-  IdentityManager::Config sid_cfg;
-  sid_cfg.max_missing_frames = std::max(1, request.identity.target_lost_threshold_frames);
-  sid_cfg.feat_bank_size = std::max(1, request.identity.feat_bank_size);
-  sid_cfg.recover_sim_thresh_strict = std::clamp(request.identity.recover_sim_thresh_strict, 0.0F, 1.0F);
-  sid_cfg.recover_sim_thresh_relaxed = std::clamp(request.identity.recover_sim_thresh_relaxed, 0.0F, 1.0F);
-  sid_cfg.recover_relaxed_max_missing_frames = std::max(1, request.identity.recover_relaxed_max_missing_frames);
-  sid_cfg.occlusion_protect_frames = std::max(0, request.identity.occlusion_protect_frames);
-  sid_cfg.missing_assign_min_area_ratio = std::max(0.01F, request.identity.missing_assign_min_area_ratio);
-  sid_cfg.missing_assign_max_area_ratio =
-      std::max(sid_cfg.missing_assign_min_area_ratio, request.identity.missing_assign_max_area_ratio);
-  sid_cfg.missing_assign_max_center_dist_norm =
-      std::max(0.1F, request.identity.missing_assign_max_center_dist_norm);
-  sid_cfg.missing_assign_max_app_cost = std::clamp(request.identity.missing_assign_max_app_cost, 0.0F, 1.0F);
-  sid_cfg.overlap_iou_freeze = std::max(0.0F, request.identity.overlap_iou_freeze);
-  sid_cfg.split_stable_frames = std::max(1, request.identity.split_stable_frames);
-  sid_cfg.merge_hold_frames = std::max(1, request.identity.merge_hold_frames);
-  sid_cfg.app_w = std::max(0.0F, request.identity.app_w);
-  sid_cfg.geo_w = std::max(0.0F, request.identity.geo_w);
-  sid_cfg.time_w = std::max(0.0F, request.identity.time_w);
-  sid_cfg.active_assign_max_cost = std::clamp(request.identity.active_assign_max_cost, 0.0F, 1.0F);
-  sid_cfg.recovery_max_cost = std::clamp(request.identity.recovery_max_cost, 0.0F, 1.0F);
-  sid_cfg.raw_continuity_max_cost = std::clamp(request.identity.raw_continuity_max_cost, 0.0F, 1.0F);
-  sid_cfg.min_assignment_margin = std::max(0.0F, request.identity.min_assignment_margin);
-  sid_cfg.stable_frames_before_feature_update =
-      std::max(1, request.identity.stable_frames_before_feature_update);
-  sid_cfg.merged_requires_overlap = request.identity.merged_requires_overlap;
-  if (!request.identity.reid_enable) {
+  PerceptionConfigMaterializer::IdentityInput sid_input;
+  sid_input.target_lost_threshold_frames = request.identity.target_lost_threshold_frames;
+  sid_input.feat_bank_size = request.identity.feat_bank_size;
+  sid_input.recover_sim_thresh_strict = request.identity.recover_sim_thresh_strict;
+  sid_input.recover_sim_thresh_relaxed = request.identity.recover_sim_thresh_relaxed;
+  sid_input.recover_relaxed_max_missing_frames = request.identity.recover_relaxed_max_missing_frames;
+  sid_input.occlusion_protect_frames = request.identity.occlusion_protect_frames;
+  sid_input.missing_assign_min_area_ratio = request.identity.missing_assign_min_area_ratio;
+  sid_input.missing_assign_max_area_ratio = request.identity.missing_assign_max_area_ratio;
+  sid_input.missing_assign_max_center_dist_norm = request.identity.missing_assign_max_center_dist_norm;
+  sid_input.missing_assign_max_app_cost = request.identity.missing_assign_max_app_cost;
+  sid_input.overlap_iou_freeze = request.identity.overlap_iou_freeze;
+  sid_input.split_stable_frames = request.identity.split_stable_frames;
+  sid_input.merge_hold_frames = request.identity.merge_hold_frames;
+  sid_input.app_w = request.identity.app_w;
+  sid_input.geo_w = request.identity.geo_w;
+  sid_input.time_w = request.identity.time_w;
+  sid_input.active_assign_max_cost = request.identity.active_assign_max_cost;
+  sid_input.recovery_max_cost = request.identity.recovery_max_cost;
+  sid_input.raw_continuity_max_cost = request.identity.raw_continuity_max_cost;
+  sid_input.min_assignment_margin = request.identity.min_assignment_margin;
+  sid_input.stable_frames_before_feature_update = request.identity.stable_frames_before_feature_update;
+  sid_input.merged_requires_overlap = request.identity.merged_requires_overlap;
+  sid_input.reid_enable = request.identity.reid_enable;
+  sid_input.reid_backend = request.identity.reid_backend;
+  sid_input.reid_model_path = request.identity.reid_model_path;
+  sid_input.reid_input_width = request.identity.reid_input_width;
+  sid_input.reid_input_height = request.identity.reid_input_height;
+  PerceptionConfigMaterializer::Diagnostics identity_config_diagnostics;
+  const auto sid_cfg =
+      PerceptionConfigMaterializer::MaterializeIdentityConfig(sid_input, &identity_config_diagnostics);
+  if (identity_config_diagnostics.identity_reid_forced) {
     std::cout << "[offline_eval] reid is mandatory; override --sid-reid-enable=false to true" << std::endl;
   }
-  sid_cfg.reid_enable = true;
-  sid_cfg.reid_backend = request.identity.reid_backend;
-  sid_cfg.reid_model_path = request.identity.reid_model_path;
-  sid_cfg.reid_input_width = std::max(16, request.identity.reid_input_width);
-  sid_cfg.reid_input_height = std::max(16, request.identity.reid_input_height);
   IdentityManager identity_manager(sid_cfg);
   if (!identity_manager.Initialize(&err)) {
     m.error = "identity_manager init failed: " + err;

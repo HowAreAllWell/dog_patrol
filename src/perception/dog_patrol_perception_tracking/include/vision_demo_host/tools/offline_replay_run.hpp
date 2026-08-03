@@ -18,42 +18,46 @@ class OfflineReplayRun {
   };
 
   struct TrackerConfig {
-    std::string config_path{"/path/to/my_workplace/vision_demo_ws/src/vision_demo_host/config/bot_sort.yaml"};
-    bool gmc_enabled{false};
-    std::string reid_backend{"light"};
-    std::string reid_model_path{};
-    int reid_input_width{128};
-    int reid_input_height{256};
+    TrackerConfig();
+
+    std::string config_path;
+    bool gmc_enabled;
+    std::string reid_backend;
+    std::string reid_model_path;
+    int reid_input_width;
+    int reid_input_height;
   };
 
   struct IdentityConfig {
-    int target_lost_threshold_frames{180};
-    int feat_bank_size{30};
-    float recover_sim_thresh_strict{0.85F};
-    float recover_sim_thresh_relaxed{0.75F};
-    int recover_relaxed_max_missing_frames{180};
-    int occlusion_protect_frames{30};
-    float missing_assign_min_area_ratio{0.40F};
-    float missing_assign_max_area_ratio{4.00F};
-    float missing_assign_max_center_dist_norm{2.50F};
-    float missing_assign_max_app_cost{0.50F};
-    float overlap_iou_freeze{0.10F};
-    int split_stable_frames{3};
-    int merge_hold_frames{2};
-    float app_w{0.70F};
-    float geo_w{0.20F};
-    float time_w{0.10F};
-    float active_assign_max_cost{0.55F};
-    float recovery_max_cost{0.45F};
-    float raw_continuity_max_cost{0.55F};
-    float min_assignment_margin{0.08F};
-    int stable_frames_before_feature_update{3};
-    bool merged_requires_overlap{true};
-    bool reid_enable{true};
-    std::string reid_backend{"light"};
-    std::string reid_model_path{};
-    int reid_input_width{128};
-    int reid_input_height{256};
+    IdentityConfig();
+
+    int target_lost_threshold_frames;
+    int feat_bank_size;
+    float recover_sim_thresh_strict;
+    float recover_sim_thresh_relaxed;
+    int recover_relaxed_max_missing_frames;
+    int occlusion_protect_frames;
+    float missing_assign_min_area_ratio;
+    float missing_assign_max_area_ratio;
+    float missing_assign_max_center_dist_norm;
+    float missing_assign_max_app_cost;
+    float overlap_iou_freeze;
+    int split_stable_frames;
+    int merge_hold_frames;
+    float app_w;
+    float geo_w;
+    float time_w;
+    float active_assign_max_cost;
+    float recovery_max_cost;
+    float raw_continuity_max_cost;
+    float min_assignment_margin;
+    int stable_frames_before_feature_update;
+    bool merged_requires_overlap;
+    bool reid_enable;
+    std::string reid_backend;
+    std::string reid_model_path;
+    int reid_input_width;
+    int reid_input_height;
   };
 
   struct OutputConfig {

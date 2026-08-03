@@ -48,6 +48,7 @@ set(MODULE_SOURCES
   src/modules/mission_coordinator.cpp
   src/modules/mission_frame_transaction.cpp
   src/modules/mission_ros_adapter.cpp
+  src/modules/perception_config_materializer.cpp
   src/modules/perception_readiness.cpp
   src/modules/primary_recovery_debug.cpp
   src/modules/feature_update_policy.cpp
@@ -222,6 +223,13 @@ if(BUILD_TESTING)
     target_compile_features(test_perception_readiness PUBLIC cxx_std_17)
     target_include_directories(test_perception_readiness PRIVATE include)
     target_link_libraries(test_perception_readiness ${PROJECT_NAME}_modules)
+  endif()
+
+  ament_add_gtest(test_perception_config_materializer test/test_perception_config_materializer.cpp)
+  if(TARGET test_perception_config_materializer)
+    target_compile_features(test_perception_config_materializer PUBLIC cxx_std_17)
+    target_include_directories(test_perception_config_materializer PRIVATE include)
+    target_link_libraries(test_perception_config_materializer ${PROJECT_NAME}_modules)
   endif()
 
   ament_add_gtest(test_mission_ros_adapter test/test_mission_ros_adapter.cpp)

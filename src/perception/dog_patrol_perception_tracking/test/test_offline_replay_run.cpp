@@ -5,6 +5,7 @@
 #include <sstream>
 #include <string>
 
+#include "vision_demo_host/modules/perception_config_materializer.hpp"
 #include "vision_demo_host/tools/offline_replay_run.hpp"
 
 namespace {
@@ -72,6 +73,29 @@ TEST_F(OfflineReplayRunTest, RejectsResultDirectoryInsideSourceBeforeCreatingRun
   EXPECT_EQ(result.exit_code, 2);
   EXPECT_FALSE(result.all_ok);
   EXPECT_FALSE(std::filesystem::exists(result.run_dir));
+}
+
+TEST_F(OfflineReplayRunTest, RequestDefaultsUsePerceptionMaterializerInputs) {
+  const vision_demo_host::tools::OfflineReplayRun::Request request;
+  const vision_demo_host::PerceptionConfigMaterializer::TrackerInput tracker_defaults;
+  const vision_demo_host::PerceptionConfigMaterializer::IdentityInput identity_defaults;
+
+  EXPECT_EQ(request.tracker.gmc_enabled, tracker_defaults.gmc_enabled);
+  EXPECT_EQ(request.tracker.reid_backend, tracker_defaults.reid_backend);
+  EXPECT_EQ(request.tracker.reid_input_width, tracker_defaults.reid_input_width);
+  EXPECT_EQ(request.tracker.reid_input_height, tracker_defaults.reid_input_height);
+
+  EXPECT_EQ(request.identity.target_lost_threshold_frames,
+            identity_defaults.target_lost_threshold_frames);
+  EXPECT_EQ(request.identity.feat_bank_size, identity_defaults.feat_bank_size);
+  EXPECT_FLOAT_EQ(request.identity.recover_sim_thresh_strict,
+                  identity_defaults.recover_sim_thresh_strict);
+  EXPECT_FLOAT_EQ(request.identity.recover_sim_thresh_relaxed,
+                  identity_defaults.recover_sim_thresh_relaxed);
+  EXPECT_EQ(request.identity.reid_enable, identity_defaults.reid_enable);
+  EXPECT_EQ(request.identity.reid_backend, identity_defaults.reid_backend);
+  EXPECT_EQ(request.identity.reid_input_width, identity_defaults.reid_input_width);
+  EXPECT_EQ(request.identity.reid_input_height, identity_defaults.reid_input_height);
 }
 
 }  // namespace
