@@ -112,6 +112,7 @@ constexpr std::size_t SlotIndex(const EvidenceSlot slot) {
   return static_cast<std::size_t>(slot);
 }
 
+#ifdef VISION_DEMO_HOST_ENABLE_ORIN_RUNTIME
 SourceFrameMetadata ReplayMetadata(const std::size_t frame_index, const double fps,
                                    const int width, const int height,
                                    const std::string &frame_id) {
@@ -126,6 +127,7 @@ SourceFrameMetadata ReplayMetadata(const std::size_t frame_index, const double f
   metadata.optical_frame_id = frame_id;
   return metadata;
 }
+#endif
 
 const IdentityObservation *VisiblePersonWithSemanticId(
     const std::vector<IdentityObservation> &identities, const int semantic_id) {
@@ -138,6 +140,7 @@ const IdentityObservation *VisiblePersonWithSemanticId(
   return nullptr;
 }
 
+#ifdef VISION_DEMO_HOST_ENABLE_ORIN_RUNTIME
 std::vector<const IdentityObservation *> VisiblePeople(
     const std::vector<IdentityObservation> &identities) {
   std::vector<const IdentityObservation *> people;
@@ -152,6 +155,7 @@ std::vector<const IdentityObservation *> VisiblePeople(
   });
   return people;
 }
+#endif
 
 MissionEvidence BuildSyntheticEvidence() {
   MissionEvidence evidence;
@@ -199,6 +203,7 @@ MissionEvidence BuildSyntheticEvidence() {
   return evidence;
 }
 
+#ifdef VISION_DEMO_HOST_ENABLE_ORIN_RUNTIME
 std::optional<MissionEvidence> FindVisualMissionEvidence(
     const std::vector<EvidenceFrame> &frames, std::string *error) {
   for (std::size_t selection = 0U; selection + 1U < frames.size(); ++selection) {
@@ -276,9 +281,17 @@ std::optional<MissionEvidence> FindVisualMissionEvidence(
   }
   return std::nullopt;
 }
+#endif
 
 std::optional<MissionEvidence> BuildVisualEvidence(const VisualReplayConfig &config,
                                                    std::string *error) {
+#ifndef VISION_DEMO_HOST_ENABLE_ORIN_RUNTIME
+  (void)config;
+  if (error != nullptr) {
+    *error = "visual replay requires a build with TRACKING_ENABLE_ORIN_RUNTIME=ON";
+  }
+  return std::nullopt;
+#else
   vision_demo_host::PreprocessInfer::Config infer_config;
   infer_config.detector_runtime_path = config.detector_engine_path;
   infer_config.raw_conf_threshold = 0.10F;
@@ -346,6 +359,7 @@ std::optional<MissionEvidence> BuildVisualEvidence(const VisualReplayConfig &con
   evidence->track_positive_frames = track_positive_frames;
   evidence->source_description = config.video_path;
   return evidence;
+#endif
 }
 
 PrimaryTargetManager::Config PrimaryConfig() {

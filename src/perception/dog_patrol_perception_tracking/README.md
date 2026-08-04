@@ -156,12 +156,43 @@ lifecycle。该模式不是 active H.264 runtime 入口。命令、资产哈希�
 
 ## 构建
 
+构建目标按依赖边界拆分为：`vision_demo_host_core`（tracking、identity、primary、mission
+transaction、配置及可移植 offline schema/metrics）、`vision_demo_host_ros_adapter`、
+`vision_demo_host_orin_runtime`（CUDA/TensorRT/Hik MVS）、`vision_demo_host_recording`
+（FFmpeg）和 `vision_demo_host_offline_runtime`。core 与完整 runtime 使用同一套算法实现，不存在
+CI 专用算法分支。
+
+普通 ROS 2 Ubuntu 环境使用 portable 构建；它不查找 CUDA、TensorRT、Hik MVS 或 FFmpeg，也不
+构建真实相机/推理 executable、录制工具、真实离线 replay 和对应测试：
+
 ```bash
-cd /path/to/my_workplace/vision_demo_ws
+cd /path/to/vision_demo_ws
 source /opt/ros/humble/setup.bash
-source /path/to/workspace/dog_patrol/install/setup.bash
-colcon build --packages-select vision_demo_host
+source /path/to/dog_patrol/install/setup.bash
+colcon build --packages-select vision_demo_host \
+  --cmake-args -DTRACKING_ENABLE_ORIN_RUNTIME=OFF
+colcon test --packages-select vision_demo_host --event-handlers console_direct+ \
+  --return-code-on-test-failure
+colcon test-result --verbose --all
 ```
+
+Orin 完整构建显式开启 runtime（该选项当前默认也是 `ON`，命令中仍显式写出以保证部署可复现）：
+
+```bash
+cd /path/to/vision_demo_ws
+source /opt/ros/humble/setup.bash
+source /path/to/dog_patrol/install/setup.bash
+colcon build --packages-select vision_demo_host \
+  --cmake-args -DTRACKING_ENABLE_ORIN_RUNTIME=ON
+colcon test --packages-select vision_demo_host --event-handlers console_direct+ \
+  --return-code-on-test-failure
+colcon test-result --verbose --all
+```
+
+完整 runtime 需要目标 JetPack 对应的 CUDA toolkit、TensorRT development files、安装在
+`/opt/MVS` 的 Hikrobot MVS SDK，以及可由 `pkg-config` 找到的 `libavcodec`、`libavformat`、
+`libavutil` development packages。显式开启后缺少任一项会在 CMake 配置阶段给出安装/路径提示，
+并指出可用 `-DTRACKING_ENABLE_ORIN_RUNTIME=OFF` 执行 portable 构建。
 
 ## 运行（示例）
 
