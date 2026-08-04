@@ -2,7 +2,7 @@
 <package format="3">
   <name>dog_patrol_perception_orchestrator</name>
   <version>0.1.0</version>
-  <description>ROS-independent perception business orchestration for dog_patrol.</description>
+  <description>Perception business orchestration and ROS adapters for dog_patrol.</description>
   <maintainer email="77225398+HowAreAllWell@users.noreply.github.com">HowAreAllWell</maintainer>
   <license>BSD-3-Clause</license>
 

@@ -5,7 +5,7 @@
 ## 当前状态
 
 - `dog_patrol_interfaces`：已实现，保存主状态机、任务事件、目标框和导航状态消息。
-- `dog_patrol_perception_interfaces`：已实现，保存感知内部 `CapabilityStatus` 合同。
+- `dog_patrol_perception_interfaces`：已实现，保存感知内部 capability、授权证据和主目标 crop 合同。
 - `dog_patrol_manager`：已实现，包含 ROS-independent 状态机和 `mission_supervisor` ROS 2 节点。
 - `navigation/`：只保留模块入口说明，导航实现尚未迁入。
 - `dog_patrol_perception_tracking`：已从视觉准备仓保留必要历史导入；普通环境构建
@@ -17,11 +17,13 @@
 - tracking 已提供不创建 mission ROS adapter 的正式 standalone Orin 启动方式，并通过
   ROS-independent `PrimaryTargetObservation` 返回当前可信语义主目标及自持有目标图像；mission 与
   standalone 均通过有界异步 ROS adapter 以 `TrackedTargetImage` 向独立人脸进程交付同帧 crop。
-- `dog_patrol_perception_orchestrator`：已实现授权编排和 capability readiness ROS 节点；真实人脸、语音 provider 尚未接入，因此生产环境不会提前发布感知 READY。
+- `dog_patrol_perception_orchestrator`：已实现授权编排、授权事件 adapter 和 capability readiness ROS 节点；真实人脸、语音 provider 尚未接入，因此生产环境不会提前发布感知 READY 或伪造授权结果。
 - 感知域已提供整体部署 requirements 和统一 Orin 环境检查，显式区分 tracking、face、voice 和 orchestrator 当前状态。
 - tracking 已在当前感知 Orin 完成 full-runtime build/test、真实 Hik 30 FPS、standalone 隔离、
   真人 semantic primary、主目标 crop/离场停发和慢消费者不反压验收；verified baseline 见
   [`docs/perception/tracking/issue14_tracking_hardware_acceptance.md`](docs/perception/tracking/issue14_tracking_hardware_acceptance.md)。
+- detection/tracking 接入父 Spec #3 已完成独立整体验收；子票、合并、CI、现场证据与明确后续边界见
+  [`docs/perception/tracking/issue3_spec_acceptance.md`](docs/perception/tracking/issue3_spec_acceptance.md)。
 - 人脸实现尚未建立。
 - 语音实现和导航整机验收尚未完成；它们与人脸接入继续作为后续工作，不属于 tracking
   迁入和仓库切换的完成证据。
@@ -83,6 +85,8 @@ tracking 的 portable/Orin 构建、运行和配置说明见
 [`src/perception/dog_patrol_perception_tracking/README.md`](src/perception/dog_patrol_perception_tracking/README.md)。
 旧仓归档、追溯和回退锚点见
 [`docs/perception/tracking/issue15_authoritative_entry_archive.md`](docs/perception/tracking/issue15_authoritative_entry_archive.md)。
+父 Spec 的整体验收矩阵见
+[`docs/perception/tracking/issue3_spec_acceptance.md`](docs/perception/tracking/issue3_spec_acceptance.md)。
 
 ## 协作方式
 

@@ -14,7 +14,7 @@
 | tracking | `implemented` | Jetson Orin；CUDA/TensorRT、Hikrobot MVS SDK、相机、本机 engine、ROS 参数；仅 `osnet_onnx` 后端需要 ReID ONNX | 完整 Orin build/test；相机可枚举；live 节点加载 engine 并稳定输出 tracking 指标 |
 | face | `not-integrated` | 预期从 `TrackedTargetImage` 消费同帧主目标 crop；实现、模型和白名单尚未进入本仓 | 当前只验证 crop transport；不得把测试 provider 当作生产 readiness |
 | voice | `not-integrated` | 实现、语音 SDK/模型、音频设备和生产 provider 尚未进入本仓 | 当前不能发布生产 `voice` READY |
-| orchestrator | `integrating` | ROS 2 Humble；已有 readiness 聚合和 ROS-independent 授权规则 | tracking/face/voice 对当前 STARTUP sequence 都 ready 才能发布感知整体 READY；真实 face/voice 结果 adapter 尚未接入 |
+| orchestrator | `integrating` | ROS 2 Humble；已有 readiness 聚合、ROS-independent 授权规则和通用授权事件 adapter | tracking/face/voice 对当前 STARTUP sequence 都 ready 才能发布感知整体 READY；真实 face/voice provider 尚未接入 |
 
 环境检查中的最终 `PASS` 表示“当前已实现范围的部署前置条件完整”，不会把
 `not-integrated` 模块伪装成 ready，也不等价于 mission 中的感知整体 `READY`。
