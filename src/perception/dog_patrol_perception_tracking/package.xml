@@ -10,6 +10,7 @@
 
   <depend>rclcpp</depend>
   <depend>dog_patrol_interfaces</depend>
+  <depend>dog_patrol_perception_interfaces</depend>
   <depend>libopencv-dev</depend>
   <build_depend>pkg-config</build_depend>
   <build_depend>libavcodec-dev</build_depend>

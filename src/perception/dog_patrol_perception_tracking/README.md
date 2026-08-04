@@ -64,25 +64,16 @@ coordinator 的 one-shot action 转发，绝不缓存 bbox。`PATROL` 只会在�
 authoritative `CONFIRM_TARGET`、`APPROACH_TARGET`、`VERIFY_IDENTITY` 或
 `TRACK_INTRUDER` state 后才发布新的 bbox。
 
-`PerceptionReadinessAggregator` 只接受 `MissionSnapshot` 和 required contributor，复用
-`MissionCoordinator` 的 mission phase / `state_seq` 术语：只有当前 `STARTUP state_seq`
-中所有 required contributor 都为 ready 时，才产生一次 `PerceptionReadyAction`；非
-`STARTUP`、旧 sequence、同 sequence duplicate update 都不产生 READY。视觉侧应使用
-`DetectionTrackingReadinessContributor` 报告 detector/tracker 的 ready、not-ready 或
-failure；既有 `dog_patrol_perception_tracking_node` 的 detector/tracker 初始化、camera source-frame failure 和
-detector/tracker frame-processing exception 会更新它。尚未接入的 authorization 和任意未来能力必须使用
-`PlaceholderReadinessContributor(capability, owner, replacement_seam, readiness)`，显式
-写明 owner 与替换入口；placeholder 默认 not-ready，只有部署明确认可临时能力时才传
-ready。接入实际 capability 时以同名 `ReplaceRequiredContributor` 替换，不能改变
-mission-supervisor 或 vision-node policy。`MissionRosAdapter` 已把 real
-detector/tracker contributor 和 owner 为 `dog_patrol authorization module` 的
-`authorization` required placeholder 注册到同一聚合中；后者默认 not-ready，替换入口为
-`MissionRosAdapter::ReplaceRequiredReadinessContributor("authorization", provider)`。
-只有部署显式设置 `perception.authorization_placeholder_ready:=true`（临时认可）或通过该
-replacement seam 接入真实 provider，当前 `STARTUP` sequence 才能汇总后发布一次
-`SOURCE_PERCEPTION/READY`。外部模块可通过
-`AddRequiredReadinessContributor` 在同一 aggregate seam 注册明确的 placeholder 或
-实际 contributor；未 ready 的 required contributor 不会被假装成 ready。
+`DetectionTrackingReadiness` 从 detector/tracker 的真实初始化和运行状态映射
+ready、not-ready 或 error；现有 live node 的 detector/tracker 初始化、camera source-frame
+failure 和 detector/tracker frame-processing exception 会更新它。`MissionRosAdapter` 只在
+当前 `STARTUP state_seq` 将该状态发布为感知内部 `CapabilityStatus`，使用 reliable +
+transient-local QoS；它不再持有其他 capability placeholder，也不发布感知整体 READY。
+若 camera、detector 或 tracker 初始化失败，节点保持运行但不进入 frame pipeline，以便在收到
+STARTUP 后持续发布 ERROR；运行期取帧或 detector/tracker 处理异常也会先发布 ERROR，再等待
+后续帧恢复并重新报告 READY。
+`detection_tracking`、`face`、`voice` 的 required 聚合和每个 STARTUP sequence 的一次性
+`SOURCE_PERCEPTION/READY` 由 `dog_patrol_perception_orchestrator perception_readiness` 拥有。
 
 ## Patrol ROS 2 contract
 
@@ -111,7 +102,7 @@ ROS subscription callback 只验证并加锁保存 snapshot；camera、detector�
 frame decision 由 `MissionFrameTransaction` 在 adapter 的 mission mutex 下执行。即使用
 `MultiThreadedExecutor` 也不会并发进入 detector/tracker/identity；mission-state subscription
 置于独立的 mutually-exclusive callback group，使它在 camera acquisition 或 inference 较慢时
-仍能及时写入最新 snapshot。READY、event 和 bbox 都在发布前于同一 mission mutex 下复核
+仍能及时写入最新 snapshot。capability status、event 和 bbox 都在发布前于同一 mission mutex 下复核
 完整 snapshot；frame transaction 的 one-shot action 在该短临界区内计算并发布，因此不会把旧
 sequence、旧 target 或已 blocked 的 frame action 发到 ROS，亦不会因 state 交错而吞掉
 新的 target-confirmed/loss/reacquisition action。
@@ -119,14 +110,15 @@ sequence、旧 target 或已 blocked 的 frame action 发到 ROS，亦不会因 
 无图形会话可运行独立进程 smoke：启动 `mission_ros_adapter_smoke`，使用另一个 ROS 2
 进程向默认 `/issue84/smoke/mission/state` 发布 `STARTUP(100)`、`PATROL(101)`、
 `CONFIRM_TARGET(102,target_id=42)`，再发布同目标的 blocked
-`CONFIRM_TARGET(103, BLOCK_TARGET_LOST)`；通过外部 `ros2 topic echo` 观察 READY、
+`CONFIRM_TARGET(103, BLOCK_TARGET_LOST)`；通过外部 `ros2 topic echo` 观察 tracking capability status、
 TARGET_CONFIRMED、当前帧 bbox、TARGET_LOST 与 TARGET_REACQUIRED。该 fixture 使用固定的
 可信 synthetic frame，只验收 DDS/adapter transport，不能替代真 Hik 相机中的真实检测验收。
 默认 `smoke.reacquire_retention_sec=30` 只为给 CLI 操作留出时间；production node 仍使用
 `target.reacquire_retention_sec=6`。
 
 完整 lifecycle 回归由 CTest `test_mission_pipeline_integration` 覆盖。它启动安装后的真实
-`dog_patrol_manager mission_supervisor`，再通过 production `MissionFrameTransaction`
+`dog_patrol_manager mission_supervisor` 和 `dog_patrol_perception_orchestrator perception_readiness`，
+再通过 production `MissionFrameTransaction`
 和 `MissionRosAdapter` 验证 STARTUP readiness、PATROL 首帧确认、fresh bbox、
 loss/block/reacquire/unblock、VERIFY、handled suppression 和 next-target selection。运行测试前必须
 source `/path/to/dog_patrol/install/setup.bash`；fixture 使用独立 ROS domain，并在退出时清理

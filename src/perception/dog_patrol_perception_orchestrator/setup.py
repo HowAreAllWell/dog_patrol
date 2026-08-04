@@ -23,4 +23,9 @@ setup(
     ),
     license="BSD-3-Clause",
     tests_require=["pytest"],
+    entry_points={
+        "console_scripts": [
+            "perception_readiness = dog_patrol_perception_orchestrator.readiness_node:main",
+        ],
+    },
 )

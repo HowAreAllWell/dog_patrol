@@ -5,13 +5,14 @@
 ## 当前状态
 
 - `dog_patrol_interfaces`：已实现，保存主状态机、任务事件、目标框和导航状态消息。
+- `dog_patrol_perception_interfaces`：已实现，保存感知内部 `CapabilityStatus` 合同。
 - `dog_patrol_manager`：已实现，包含 ROS-independent 状态机和 `mission_supervisor` ROS 2 节点。
 - `navigation/`：只保留模块入口说明，导航实现尚未迁入。
 - `dog_patrol_perception_tracking`：已从视觉准备仓保留必要历史导入；普通环境构建
   portable tracking 核心和 ROS adapter，Orin runtime 由部署端显式开启。
 - tracking 公共 mission tracer 已接入同工作区安装后的真实 `mission_supervisor`，无资产路径纳入普通
   CI，覆盖目标确认、fresh bbox、丢失/重获及无效状态输入门禁。
-- `dog_patrol_perception_orchestrator`：已实现纯 Python 授权编排；readiness、真实人脸和语音结果尚未接入。
+- `dog_patrol_perception_orchestrator`：已实现授权编排和 capability readiness ROS 节点；真实人脸、语音 provider 尚未接入，因此生产环境不会提前发布感知 READY。
 - 人脸实现尚未建立。
 - 目标公开远程：`https://github.com/HowAreAllWell/dog_patrol`
 
@@ -22,6 +23,7 @@ src/contracts/dog_patrol_interfaces/       # 两团队共同维护的 ROS 2 合�
 src/orchestration/dog_patrol_manager/      # 主状态机和 supervisor
 src/navigation/                            # 导航模块预留位置
 src/perception/                            # 感知业务编排入口
+src/perception/dog_patrol_perception_interfaces/ # 感知内部 ROS 2 合同
 src/perception/dog_patrol_perception_tracking/ # tracking 核心与可选 Orin runtime
 docs/contracts/                             # 可评审的接口协议
 docs/perception/tracking/                    # tracking 稳定说明与迁移验收证据
@@ -35,13 +37,15 @@ ROS 2 package 名称保持 `dog_patrol_` 前缀；上层目录是所有权和代
 ```bash
 source /opt/ros/humble/setup.bash
 colcon build --packages-select \
-  dog_patrol_interfaces dog_patrol_manager \
+  dog_patrol_interfaces dog_patrol_perception_interfaces \
+  dog_patrol_manager \
   dog_patrol_perception_orchestrator \
   dog_patrol_perception_tracking \
   --cmake-args -DTRACKING_ENABLE_ORIN_RUNTIME=OFF
 source install/setup.bash
 colcon test --packages-select \
-  dog_patrol_interfaces dog_patrol_manager \
+  dog_patrol_interfaces dog_patrol_perception_interfaces \
+  dog_patrol_manager \
   dog_patrol_perception_orchestrator \
   dog_patrol_perception_tracking \
   --event-handlers console_direct+

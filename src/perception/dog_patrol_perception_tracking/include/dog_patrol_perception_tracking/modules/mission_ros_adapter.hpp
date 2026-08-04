@@ -1,7 +1,6 @@
 #pragma once
 
 #include <cstdint>
-#include <memory>
 #include <mutex>
 #include <optional>
 #include <string>
@@ -10,6 +9,7 @@
 #include <dog_patrol_interfaces/msg/mission_event.hpp>
 #include <dog_patrol_interfaces/msg/mission_state.hpp>
 #include <dog_patrol_interfaces/msg/target_bounding_box.hpp>
+#include <dog_patrol_perception_interfaces/msg/capability_status.hpp>
 #include <rclcpp/rclcpp.hpp>
 
 #include "dog_patrol_perception_tracking/modules/mission_frame_transaction.hpp"
@@ -19,7 +19,7 @@ namespace dog_patrol_perception_tracking {
 
 // The sole ROS transport boundary for mission-aware perception output. The
 // subscriber callback only validates and stores a snapshot under a mutex.
-// Call PublishReadiness/ProcessFrame from the serialized live processing path;
+// Call PublishCapabilityStatus/ProcessFrame from the serialized live processing path;
 // they own coordinator and readiness state and never run detector/tracker/
 // identity work from a ROS subscription callback.
 class MissionRosAdapter {
@@ -28,15 +28,11 @@ class MissionRosAdapter {
     std::string mission_state_topic{"/mission/state"};
     std::string mission_event_topic{"/mission/event"};
     std::string target_bbox_topic{"/perception/selected_target_bbox"};
+    std::string capability_status_topic{"/perception/capability_status"};
     // The live node assigns this subscriber a callback group separate from
     // camera/inference so state reception remains responsive while a frame is
     // being processed. A null group uses the node default (unit-test default).
     rclcpp::CallbackGroup::SharedPtr mission_state_callback_group;
-    // Authorization is required for aggregate perception readiness but is
-    // not owned by this repository. It stays not-ready until an integration
-    // explicitly accepts the temporary placeholder or replaces it.
-    bool authorization_placeholder_ready{false};
-    std::string authorization_placeholder_detail;
     PrimaryTargetManager::Config primary;
     MissionCoordinator::Config coordinator;
   };
@@ -49,6 +45,7 @@ class MissionRosAdapter {
   static rclcpp::QoS MissionStateQos();
   static rclcpp::QoS MissionEventQos();
   static rclcpp::QoS TargetBoundingBoxQos();
+  static rclcpp::QoS CapabilityStatusQos();
 
   // Rejects unknown enum values and invalid state/block/target combinations.
   static std::optional<MissionSnapshot> MissionFromMessage(
@@ -66,15 +63,13 @@ class MissionRosAdapter {
   std::optional<MissionSnapshot> PreviousMission() const;
   PrimaryTargetResult CurrentPrimary() const;
 
-  DetectionTrackingReadinessContributor &detection_tracking_readiness();
-  void AddRequiredReadinessContributor(std::unique_ptr<PerceptionReadinessContributor> contributor);
-  bool ReplaceRequiredReadinessContributor(
-      std::string capability, std::unique_ptr<PerceptionReadinessContributor> contributor);
+  void ReportDetectionTrackingRuntimeStatus(
+      DetectionTrackingReadiness::RuntimeStatus status);
 
   // Call after detector/tracker initialization and periodically while the
-  // live loop is running so one aggregate READY action is published for each
-  // eligible STARTUP state sequence.
-  void PublishReadiness();
+  // live loop is running. This publishes only tracking's own current status,
+  // associated with the current STARTUP; the orchestrator owns aggregation.
+  void PublishCapabilityStatus();
 
   // Processes actions from the current source frame only. Mission state and
   // primary-selection ordering stay inside the frame transaction; callers pass
@@ -97,6 +92,8 @@ class MissionRosAdapter {
   rclcpp::Subscription<dog_patrol_interfaces::msg::MissionState>::SharedPtr mission_state_subscription_;
   rclcpp::Publisher<dog_patrol_interfaces::msg::MissionEvent>::SharedPtr mission_event_publisher_;
   rclcpp::Publisher<dog_patrol_interfaces::msg::TargetBoundingBox>::SharedPtr target_bbox_publisher_;
+  rclcpp::Publisher<dog_patrol_perception_interfaces::msg::CapabilityStatus>::SharedPtr
+      capability_status_publisher_;
 
   mutable std::mutex mission_mutex_;
   MissionStateSequenceCursor state_sequence_;
@@ -104,8 +101,7 @@ class MissionRosAdapter {
   std::optional<MissionSnapshot> previous_mission_;
 
   MissionFrameTransaction frame_transaction_;
-  PerceptionReadinessAggregator readiness_aggregator_;
-  DetectionTrackingReadinessContributor *detection_tracking_readiness_{nullptr};
+  DetectionTrackingReadiness detection_tracking_readiness_;
 };
 
 }  // namespace dog_patrol_perception_tracking

@@ -1,5 +1,14 @@
 # worklog
 
+## 2026-08-04 14:40 - 贯通感知 capability readiness
+
+- 目标：完成 dog_patrol #10，将 tracking 自身 readiness 与感知整体 READY 的所有权拆开并贯通。
+- 完成：新增感知内部 `dog_patrol_perception_interfaces/CapabilityStatus`；tracking 从真实 detector/tracker 初始化和运行状态发布带 STARTUP sequence 的 detection/tracking 状态，初始化失败时保持 tracer 存活、运行异常时先发布 ERROR 再尝试后续帧恢复；移除 authorization placeholder 和整体 READY 聚合；orchestrator 新增纯 Python 三能力聚合核心及 `perception_readiness` ROS 节点，将 detection/tracking、face、voice 固定为 required capability，并仅在三者对当前 STARTUP sequence 全部 ready 时发布一次感知 READY；CI 和公共 mission integration 已纳入新包与真实 orchestrator，测试 adapter 提供 face/voice 的 ready/not-ready/error 状态。
+- 关键结论：capability transport 使用 reliable + transient-local QoS；每个 provider 保留自身当前状态，晚启动 orchestrator 可恢复三者状态。face/voice 尚无生产 provider 时不会产生状态，因此不会通过 placeholder 假装整体 ready。tracking 的 TARGET_CONFIRMED、bbox、TARGET_LOST 和 TARGET_REACQUIRED 路径未改变。
+- 涉及文件：`src/perception/dog_patrol_perception_interfaces/msg/CapabilityStatus.msg`、`src/perception/dog_patrol_perception_orchestrator/dog_patrol_perception_orchestrator/readiness.py`、`src/perception/dog_patrol_perception_orchestrator/dog_patrol_perception_orchestrator/readiness_node.py`、`src/perception/dog_patrol_perception_tracking/src/modules/mission_ros_adapter.cpp`、`src/perception/dog_patrol_perception_tracking/src/perception_tracking_node.cpp`、`.github/workflows/ci.yml`、`README.md`、`worklog.md`。
+- 验证：五包 portable 独立构建通过；全仓汇总 385 tests、0 errors/failures/skipped；其中真实 supervisor + orchestrator mission integration、晚启动 transient-local transport、ready/not-ready/error、旧/重复/错误状态门禁及原 tracking 目标/bbox lifecycle 均通过；`git diff --check` 和 integration shell `bash -n` 通过。
+- 后续：真实 face/voice provider 仍待后续问题实现并发布同一 `CapabilityStatus`；当前测试 adapter 不安装到生产 package。
+
 ## 2026-08-04 14:16 - 闭合 tracking 公共 mission 合同
 
 - 目标：完成 dog_patrol #9，在主仓同一工作区用真实 mission supervisor 验证 tracking 公共任务链路。
