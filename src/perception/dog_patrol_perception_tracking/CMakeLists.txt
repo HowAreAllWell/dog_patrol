@@ -9,34 +9,12 @@ find_package(ament_cmake REQUIRED)
 find_package(rclcpp REQUIRED)
 find_package(dog_patrol_interfaces REQUIRED)
 find_package(OpenCV REQUIRED)
-find_package(CUDAToolkit REQUIRED)
-find_package(PkgConfig REQUIRED)
-pkg_check_modules(FFMPEG REQUIRED IMPORTED_TARGET libavcodec libavformat libavutil)
+option(
+  TRACKING_ENABLE_ORIN_RUNTIME
+  "Build the CUDA/TensorRT/Hik MVS runtime and FFmpeg recording/offline tools"
+  ON)
 
-find_library(TENSORRT_LIB nvinfer REQUIRED)
-find_path(TENSORRT_INCLUDE_DIR NvInfer.h REQUIRED)
-
-option(ENABLE_HIK_MVS "Enable Hikrobot MVS camera backend" ON)
-
-set(HIK_MVS_AVAILABLE OFF)
-if(ENABLE_HIK_MVS)
-  find_path(MVS_INCLUDE_DIR MvCameraControl.h PATHS /opt/MVS/include)
-  find_library(MVS_LIB MvCameraControl PATHS /opt/MVS/lib/64 /opt/MVS/lib/aarch64)
-  if(MVS_INCLUDE_DIR AND MVS_LIB)
-    set(HIK_MVS_AVAILABLE ON)
-    message(STATUS "Hik MVS backend enabled")
-    get_filename_component(MVS_LIB_DIR "${MVS_LIB}" DIRECTORY)
-  else()
-    message(WARNING "ENABLE_HIK_MVS=ON but the MVS SDK was not found under /opt/MVS; building without Hik MVS backend")
-  endif()
-endif()
-
-set(MODULE_SOURCES
-  src/modules/camera_ingest.cpp
-  src/modules/ffv1_mkv_writer.cpp
-  src/modules/ffv1_capture_workflow.cpp
-  src/modules/ffv1_capture_artifact_writer.cpp
-  src/modules/preprocess_infer.cpp
+set(CORE_SOURCES
   src/modules/yolo26_output_contract.cpp
   src/modules/det_filter.cpp
   src/modules/appearance_feature_service.cpp
@@ -47,7 +25,6 @@ set(MODULE_SOURCES
   src/modules/primary_target_manager.cpp
   src/modules/mission_coordinator.cpp
   src/modules/mission_frame_transaction.cpp
-  src/modules/mission_ros_adapter.cpp
   src/modules/perception_config_materializer.cpp
   src/modules/perception_readiness.cpp
   src/modules/primary_recovery_debug.cpp
@@ -82,37 +59,28 @@ set(MODULE_SOURCES
   src/modules/identity_assignment_frame_transaction.cpp
   src/modules/identity_observation_projection.cpp
   src/modules/identity_manager.cpp
-  src/modules/visualizer_recorder.cpp
   src/modules/runtime_monitor.cpp
   src/tools/offline_eval_input.cpp
-  src/tools/offline_replay_run.cpp
   src/tools/identity_offline_metrics.cpp
 )
 
-add_library(${PROJECT_NAME}_modules ${MODULE_SOURCES})
-target_include_directories(${PROJECT_NAME}_modules PUBLIC
+add_library(${PROJECT_NAME}_core ${CORE_SOURCES})
+target_include_directories(${PROJECT_NAME}_core PUBLIC
   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
   $<INSTALL_INTERFACE:include>
-  ${TENSORRT_INCLUDE_DIR})
-target_include_directories(${PROJECT_NAME}_modules PRIVATE src/modules)
-target_compile_features(${PROJECT_NAME}_modules PUBLIC cxx_std_17)
-ament_target_dependencies(${PROJECT_NAME}_modules rclcpp)
-ament_target_dependencies(${PROJECT_NAME}_modules dog_patrol_interfaces)
-target_link_libraries(${PROJECT_NAME}_modules ${OpenCV_LIBS} PkgConfig::FFMPEG)
-target_link_libraries(${PROJECT_NAME}_modules ${TENSORRT_LIB} CUDA::cudart)
-if(HIK_MVS_AVAILABLE)
-  target_include_directories(${PROJECT_NAME}_modules PRIVATE ${MVS_INCLUDE_DIR})
-  target_link_libraries(${PROJECT_NAME}_modules ${MVS_LIB})
-  target_compile_definitions(${PROJECT_NAME}_modules PRIVATE VISION_DEMO_HOST_ENABLE_HIK_MVS=1)
-  set_property(TARGET ${PROJECT_NAME}_modules APPEND PROPERTY BUILD_RPATH "${MVS_LIB_DIR}")
-  set_property(TARGET ${PROJECT_NAME}_modules APPEND PROPERTY INSTALL_RPATH "${MVS_LIB_DIR}")
-endif()
+  ${OpenCV_INCLUDE_DIRS})
+target_include_directories(${PROJECT_NAME}_core PRIVATE src/modules)
+target_compile_features(${PROJECT_NAME}_core PUBLIC cxx_std_17)
+target_link_libraries(${PROJECT_NAME}_core PUBLIC ${OpenCV_LIBS})
 
-add_executable(vision_demo_node src/main.cpp)
-target_compile_features(vision_demo_node PUBLIC cxx_std_17)
-ament_target_dependencies(vision_demo_node rclcpp)
-ament_target_dependencies(vision_demo_node dog_patrol_interfaces)
-target_link_libraries(vision_demo_node ${PROJECT_NAME}_modules)
+add_library(${PROJECT_NAME}_ros_adapter
+  src/modules/mission_ros_adapter.cpp)
+target_include_directories(${PROJECT_NAME}_ros_adapter PUBLIC
+  $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+  $<INSTALL_INTERFACE:include>)
+target_compile_features(${PROJECT_NAME}_ros_adapter PUBLIC cxx_std_17)
+ament_target_dependencies(${PROJECT_NAME}_ros_adapter rclcpp dog_patrol_interfaces)
+target_link_libraries(${PROJECT_NAME}_ros_adapter ${PROJECT_NAME}_core)
 
 # Deterministic, headless transport fixture for the issue #84 deployment
 # smoke. It is intentionally separate from the gtest process: a ROS CLI
@@ -120,87 +88,188 @@ target_link_libraries(vision_demo_node ${PROJECT_NAME}_modules)
 add_executable(mission_ros_adapter_smoke src/tools/mission_ros_adapter_smoke.cpp)
 target_compile_features(mission_ros_adapter_smoke PUBLIC cxx_std_17)
 ament_target_dependencies(mission_ros_adapter_smoke rclcpp dog_patrol_interfaces)
-target_link_libraries(mission_ros_adapter_smoke ${PROJECT_NAME}_modules)
+target_link_libraries(mission_ros_adapter_smoke ${PROJECT_NAME}_ros_adapter)
 
-add_executable(capture_ffv1 src/tools/capture_ffv1.cpp)
-target_compile_features(capture_ffv1 PUBLIC cxx_std_17)
-target_link_libraries(capture_ffv1 ${PROJECT_NAME}_modules ${OpenCV_LIBS})
+set(INSTALL_TARGETS
+  ${PROJECT_NAME}_core
+  ${PROJECT_NAME}_ros_adapter
+  mission_ros_adapter_smoke)
 
-add_executable(offline_eval_recordings src/tools/offline_eval_recordings.cpp)
-target_compile_features(offline_eval_recordings PUBLIC cxx_std_17)
-target_link_libraries(offline_eval_recordings ${PROJECT_NAME}_modules ${OpenCV_LIBS})
+if(TRACKING_ENABLE_ORIN_RUNTIME)
+  message(STATUS "Building the full Orin tracking runtime")
+  find_package(CUDAToolkit QUIET)
+  if(NOT CUDAToolkit_FOUND)
+    message(FATAL_ERROR
+      "TRACKING_ENABLE_ORIN_RUNTIME=ON requires the CUDA toolkit development files. "
+      "Install the CUDA toolkit for the target JetPack, set CUDAToolkit_ROOT if it is "
+      "installed in a non-standard location, or configure with "
+      "-DTRACKING_ENABLE_ORIN_RUNTIME=OFF for the portable core build.")
+  endif()
 
-if(HIK_MVS_AVAILABLE)
+  find_package(PkgConfig QUIET)
+  if(NOT PkgConfig_FOUND)
+    message(FATAL_ERROR
+      "TRACKING_ENABLE_ORIN_RUNTIME=ON requires pkg-config to locate FFmpeg. "
+      "Install pkg-config and the FFmpeg development packages, or configure with "
+      "-DTRACKING_ENABLE_ORIN_RUNTIME=OFF.")
+  endif()
+  pkg_check_modules(FFMPEG QUIET IMPORTED_TARGET libavcodec libavformat libavutil)
+  if(NOT FFMPEG_FOUND)
+    message(FATAL_ERROR
+      "TRACKING_ENABLE_ORIN_RUNTIME=ON requires FFmpeg development packages "
+      "(libavcodec, libavformat, and libavutil). Install their development packages, "
+      "or configure with -DTRACKING_ENABLE_ORIN_RUNTIME=OFF.")
+  endif()
+
+  find_path(TENSORRT_INCLUDE_DIR NvInfer.h)
+  find_library(TENSORRT_LIB nvinfer)
+  if(NOT TENSORRT_INCLUDE_DIR OR NOT TENSORRT_LIB)
+    message(FATAL_ERROR
+      "TRACKING_ENABLE_ORIN_RUNTIME=ON requires TensorRT headers and libnvinfer. "
+      "Install the TensorRT development package for the target JetPack, or configure "
+      "with -DTRACKING_ENABLE_ORIN_RUNTIME=OFF for the portable core build.")
+  endif()
+
+  find_path(MVS_INCLUDE_DIR MvCameraControl.h PATHS /opt/MVS/include)
+  find_library(MVS_LIB MvCameraControl PATHS /opt/MVS/lib/64 /opt/MVS/lib/aarch64)
+  if(NOT MVS_INCLUDE_DIR OR NOT MVS_LIB)
+    message(FATAL_ERROR
+      "TRACKING_ENABLE_ORIN_RUNTIME=ON requires the Hikrobot MVS SDK. "
+      "Install it under /opt/MVS (headers in include and libMvCameraControl in lib/64 "
+      "or lib/aarch64), or configure with -DTRACKING_ENABLE_ORIN_RUNTIME=OFF.")
+  endif()
+  get_filename_component(MVS_LIB_DIR "${MVS_LIB}" DIRECTORY)
+
+  add_library(${PROJECT_NAME}_orin_runtime
+    src/modules/camera_ingest.cpp
+    src/modules/preprocess_infer.cpp)
+  target_include_directories(${PROJECT_NAME}_orin_runtime PUBLIC
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+    $<INSTALL_INTERFACE:include>
+    ${TENSORRT_INCLUDE_DIR})
+  target_include_directories(${PROJECT_NAME}_orin_runtime PRIVATE ${MVS_INCLUDE_DIR})
+  target_compile_features(${PROJECT_NAME}_orin_runtime PUBLIC cxx_std_17)
+  target_compile_definitions(${PROJECT_NAME}_orin_runtime PRIVATE VISION_DEMO_HOST_ENABLE_HIK_MVS=1)
+  target_link_libraries(${PROJECT_NAME}_orin_runtime PUBLIC
+    ${PROJECT_NAME}_core ${TENSORRT_LIB} CUDA::cudart ${MVS_LIB})
+  set_property(TARGET ${PROJECT_NAME}_orin_runtime APPEND PROPERTY BUILD_RPATH "${MVS_LIB_DIR}")
+  set_property(TARGET ${PROJECT_NAME}_orin_runtime APPEND PROPERTY INSTALL_RPATH "${MVS_LIB_DIR}")
+
+  add_library(${PROJECT_NAME}_recording
+    src/modules/ffv1_mkv_writer.cpp
+    src/modules/ffv1_capture_workflow.cpp
+    src/modules/ffv1_capture_artifact_writer.cpp
+    src/modules/visualizer_recorder.cpp)
+  target_include_directories(${PROJECT_NAME}_recording PUBLIC
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+    $<INSTALL_INTERFACE:include>)
+  target_compile_features(${PROJECT_NAME}_recording PUBLIC cxx_std_17)
+  target_link_libraries(${PROJECT_NAME}_recording PUBLIC
+    ${PROJECT_NAME}_core ${PROJECT_NAME}_orin_runtime PkgConfig::FFMPEG)
+
+  add_library(${PROJECT_NAME}_offline_runtime
+    src/tools/offline_replay_run.cpp)
+  target_include_directories(${PROJECT_NAME}_offline_runtime PUBLIC
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+    $<INSTALL_INTERFACE:include>)
+  target_compile_features(${PROJECT_NAME}_offline_runtime PUBLIC cxx_std_17)
+  target_link_libraries(${PROJECT_NAME}_offline_runtime PUBLIC
+    ${PROJECT_NAME}_core ${PROJECT_NAME}_orin_runtime)
+
+  add_executable(vision_demo_node src/main.cpp)
+  target_compile_features(vision_demo_node PUBLIC cxx_std_17)
+  ament_target_dependencies(vision_demo_node rclcpp dog_patrol_interfaces)
+  target_link_libraries(vision_demo_node
+    ${PROJECT_NAME}_core
+    ${PROJECT_NAME}_ros_adapter
+    ${PROJECT_NAME}_orin_runtime
+    ${PROJECT_NAME}_recording)
+
+  add_executable(capture_ffv1 src/tools/capture_ffv1.cpp)
+  target_compile_features(capture_ffv1 PUBLIC cxx_std_17)
+  target_link_libraries(capture_ffv1 ${PROJECT_NAME}_recording)
+
+  add_executable(offline_eval_recordings src/tools/offline_eval_recordings.cpp)
+  target_compile_features(offline_eval_recordings PUBLIC cxx_std_17)
+  target_link_libraries(offline_eval_recordings ${PROJECT_NAME}_offline_runtime)
+
   add_executable(benchmark_bayer_input src/tools/benchmark_bayer_input.cpp)
   target_compile_features(benchmark_bayer_input PUBLIC cxx_std_17)
   target_include_directories(benchmark_bayer_input PRIVATE ${MVS_INCLUDE_DIR})
-  target_link_libraries(benchmark_bayer_input ${PROJECT_NAME}_modules ${OpenCV_LIBS} ${MVS_LIB})
+  target_link_libraries(benchmark_bayer_input ${PROJECT_NAME}_recording)
   set_property(TARGET benchmark_bayer_input APPEND PROPERTY BUILD_RPATH "${MVS_LIB_DIR}")
   set_property(TARGET benchmark_bayer_input APPEND PROPERTY INSTALL_RPATH "${MVS_LIB_DIR}")
+
+  list(APPEND INSTALL_TARGETS
+    ${PROJECT_NAME}_orin_runtime
+    ${PROJECT_NAME}_recording
+    ${PROJECT_NAME}_offline_runtime
+    vision_demo_node
+    capture_ffv1
+    offline_eval_recordings
+    benchmark_bayer_input)
+else()
+  message(STATUS
+    "Building portable tracking core and ROS adapter only "
+    "(TRACKING_ENABLE_ORIN_RUNTIME=OFF)")
 endif()
 
-install(TARGETS
-  ${PROJECT_NAME}_modules
-  vision_demo_node
-  mission_ros_adapter_smoke
-  capture_ffv1
-  offline_eval_recordings
-  DESTINATION lib/${PROJECT_NAME})
-
-if(HIK_MVS_AVAILABLE)
-  install(TARGETS benchmark_bayer_input DESTINATION lib/${PROJECT_NAME})
-endif()
+install(TARGETS ${INSTALL_TARGETS} DESTINATION lib/${PROJECT_NAME})
 
 install(DIRECTORY include/
   DESTINATION include)
 
-install(DIRECTORY config launch
-  DESTINATION share/${PROJECT_NAME})
+install(DIRECTORY config DESTINATION share/${PROJECT_NAME})
+if(TRACKING_ENABLE_ORIN_RUNTIME)
+  install(DIRECTORY launch DESTINATION share/${PROJECT_NAME})
+endif()
 
 ament_export_dependencies(dog_patrol_interfaces)
 
 if(BUILD_TESTING)
   find_package(ament_cmake_gtest REQUIRED)
 
-  add_test(
-    NAME test_retired_media_cli
-    COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/test/test_retired_media_cli.sh
-            $<TARGET_FILE:vision_demo_node>
-            $<TARGET_FILE:offline_eval_recordings>)
+  if(TRACKING_ENABLE_ORIN_RUNTIME)
+    add_test(
+      NAME test_retired_media_cli
+      COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/test/test_retired_media_cli.sh
+              $<TARGET_FILE:vision_demo_node>
+              $<TARGET_FILE:offline_eval_recordings>)
 
-  ament_add_gtest(test_camera_ingest_contract test/test_camera_ingest_contract.cpp)
-  if(TARGET test_camera_ingest_contract)
-    target_compile_features(test_camera_ingest_contract PUBLIC cxx_std_17)
-    target_include_directories(test_camera_ingest_contract PRIVATE include)
-    target_link_libraries(test_camera_ingest_contract ${PROJECT_NAME}_modules)
-  endif()
+    ament_add_gtest(test_camera_ingest_contract test/test_camera_ingest_contract.cpp)
+    if(TARGET test_camera_ingest_contract)
+      target_compile_features(test_camera_ingest_contract PUBLIC cxx_std_17)
+      target_include_directories(test_camera_ingest_contract PRIVATE include)
+      target_link_libraries(test_camera_ingest_contract ${PROJECT_NAME}_orin_runtime)
+    endif()
 
-  ament_add_gtest(test_preprocess_infer_timing test/test_preprocess_infer_timing.cpp)
-  if(TARGET test_preprocess_infer_timing)
-    target_compile_features(test_preprocess_infer_timing PUBLIC cxx_std_17)
-    target_include_directories(test_preprocess_infer_timing PRIVATE include)
-    target_link_libraries(test_preprocess_infer_timing ${PROJECT_NAME}_modules)
-  endif()
+    ament_add_gtest(test_preprocess_infer_timing test/test_preprocess_infer_timing.cpp)
+    if(TARGET test_preprocess_infer_timing)
+      target_compile_features(test_preprocess_infer_timing PUBLIC cxx_std_17)
+      target_include_directories(test_preprocess_infer_timing PRIVATE include)
+      target_link_libraries(test_preprocess_infer_timing ${PROJECT_NAME}_orin_runtime)
+    endif()
 
-  ament_add_gtest(test_ffv1_capture_workflow test/test_ffv1_capture_workflow.cpp)
-  if(TARGET test_ffv1_capture_workflow)
-    target_compile_features(test_ffv1_capture_workflow PUBLIC cxx_std_17)
-    target_include_directories(test_ffv1_capture_workflow PRIVATE include)
-    target_link_libraries(test_ffv1_capture_workflow ${PROJECT_NAME}_modules)
-  endif()
+    ament_add_gtest(test_ffv1_capture_workflow test/test_ffv1_capture_workflow.cpp)
+    if(TARGET test_ffv1_capture_workflow)
+      target_compile_features(test_ffv1_capture_workflow PUBLIC cxx_std_17)
+      target_include_directories(test_ffv1_capture_workflow PRIVATE include)
+      target_link_libraries(test_ffv1_capture_workflow ${PROJECT_NAME}_recording)
+    endif()
 
-  ament_add_gtest(test_visualizer_recorder test/test_visualizer_recorder.cpp)
-  if(TARGET test_visualizer_recorder)
-    target_compile_features(test_visualizer_recorder PUBLIC cxx_std_17)
-    target_include_directories(test_visualizer_recorder PRIVATE include)
-    target_link_libraries(test_visualizer_recorder ${PROJECT_NAME}_modules)
+    ament_add_gtest(test_visualizer_recorder test/test_visualizer_recorder.cpp)
+    if(TARGET test_visualizer_recorder)
+      target_compile_features(test_visualizer_recorder PUBLIC cxx_std_17)
+      target_include_directories(test_visualizer_recorder PRIVATE include)
+      target_link_libraries(test_visualizer_recorder ${PROJECT_NAME}_recording)
+    endif()
   endif()
 
   ament_add_gtest(test_primary_target_manager test/test_primary_target_manager.cpp)
   if(TARGET test_primary_target_manager)
     target_compile_features(test_primary_target_manager PUBLIC cxx_std_17)
     target_include_directories(test_primary_target_manager PRIVATE include)
-    target_link_libraries(test_primary_target_manager ${PROJECT_NAME}_modules)
+    target_link_libraries(test_primary_target_manager ${PROJECT_NAME}_core)
     ament_target_dependencies(test_primary_target_manager rclcpp)
   endif()
 
@@ -208,35 +277,35 @@ if(BUILD_TESTING)
   if(TARGET test_mission_coordinator)
     target_compile_features(test_mission_coordinator PUBLIC cxx_std_17)
     target_include_directories(test_mission_coordinator PRIVATE include)
-    target_link_libraries(test_mission_coordinator ${PROJECT_NAME}_modules)
+    target_link_libraries(test_mission_coordinator ${PROJECT_NAME}_core)
   endif()
 
   ament_add_gtest(test_mission_frame_transaction test/test_mission_frame_transaction.cpp)
   if(TARGET test_mission_frame_transaction)
     target_compile_features(test_mission_frame_transaction PUBLIC cxx_std_17)
     target_include_directories(test_mission_frame_transaction PRIVATE include)
-    target_link_libraries(test_mission_frame_transaction ${PROJECT_NAME}_modules)
+    target_link_libraries(test_mission_frame_transaction ${PROJECT_NAME}_core)
   endif()
 
   ament_add_gtest(test_perception_readiness test/test_perception_readiness.cpp)
   if(TARGET test_perception_readiness)
     target_compile_features(test_perception_readiness PUBLIC cxx_std_17)
     target_include_directories(test_perception_readiness PRIVATE include)
-    target_link_libraries(test_perception_readiness ${PROJECT_NAME}_modules)
+    target_link_libraries(test_perception_readiness ${PROJECT_NAME}_core)
   endif()
 
   ament_add_gtest(test_perception_config_materializer test/test_perception_config_materializer.cpp)
   if(TARGET test_perception_config_materializer)
     target_compile_features(test_perception_config_materializer PUBLIC cxx_std_17)
     target_include_directories(test_perception_config_materializer PRIVATE include)
-    target_link_libraries(test_perception_config_materializer ${PROJECT_NAME}_modules)
+    target_link_libraries(test_perception_config_materializer ${PROJECT_NAME}_core)
   endif()
 
   ament_add_gtest(test_mission_ros_adapter test/test_mission_ros_adapter.cpp)
   if(TARGET test_mission_ros_adapter)
     target_compile_features(test_mission_ros_adapter PUBLIC cxx_std_17)
     target_include_directories(test_mission_ros_adapter PRIVATE include)
-    target_link_libraries(test_mission_ros_adapter ${PROJECT_NAME}_modules)
+    target_link_libraries(test_mission_ros_adapter ${PROJECT_NAME}_ros_adapter)
     ament_target_dependencies(test_mission_ros_adapter rclcpp dog_patrol_interfaces)
   endif()
 
@@ -244,7 +313,14 @@ if(BUILD_TESTING)
     test/mission_pipeline_integration_driver.cpp)
   target_compile_features(test_mission_pipeline_integration_driver PUBLIC cxx_std_17)
   target_include_directories(test_mission_pipeline_integration_driver PRIVATE include)
-  target_link_libraries(test_mission_pipeline_integration_driver ${PROJECT_NAME}_modules)
+  target_link_libraries(test_mission_pipeline_integration_driver
+    ${PROJECT_NAME}_core ${PROJECT_NAME}_ros_adapter)
+  if(TRACKING_ENABLE_ORIN_RUNTIME)
+    target_compile_definitions(test_mission_pipeline_integration_driver PRIVATE
+      VISION_DEMO_HOST_ENABLE_ORIN_RUNTIME=1)
+    target_link_libraries(test_mission_pipeline_integration_driver
+      ${PROJECT_NAME}_orin_runtime)
+  endif()
   ament_target_dependencies(test_mission_pipeline_integration_driver rclcpp dog_patrol_interfaces)
   add_test(
     NAME test_mission_pipeline_integration
@@ -258,7 +334,7 @@ if(BUILD_TESTING)
   if(TARGET test_primary_recovery_debug)
     target_compile_features(test_primary_recovery_debug PUBLIC cxx_std_17)
     target_include_directories(test_primary_recovery_debug PRIVATE include)
-    target_link_libraries(test_primary_recovery_debug ${PROJECT_NAME}_modules)
+    target_link_libraries(test_primary_recovery_debug ${PROJECT_NAME}_core)
     ament_target_dependencies(test_primary_recovery_debug rclcpp)
   endif()
 
@@ -266,7 +342,7 @@ if(BUILD_TESTING)
   if(TARGET test_identity_assignment_engine_adapter)
     target_compile_features(test_identity_assignment_engine_adapter PUBLIC cxx_std_17)
     target_include_directories(test_identity_assignment_engine_adapter PRIVATE include src/modules)
-    target_link_libraries(test_identity_assignment_engine_adapter ${PROJECT_NAME}_modules)
+    target_link_libraries(test_identity_assignment_engine_adapter ${PROJECT_NAME}_core)
     ament_target_dependencies(test_identity_assignment_engine_adapter rclcpp)
   endif()
 
@@ -274,7 +350,7 @@ if(BUILD_TESTING)
   if(TARGET test_identity_assignment_frame_transaction)
     target_compile_features(test_identity_assignment_frame_transaction PUBLIC cxx_std_17)
     target_include_directories(test_identity_assignment_frame_transaction PRIVATE include src/modules)
-    target_link_libraries(test_identity_assignment_frame_transaction ${PROJECT_NAME}_modules)
+    target_link_libraries(test_identity_assignment_frame_transaction ${PROJECT_NAME}_core)
     ament_target_dependencies(test_identity_assignment_frame_transaction rclcpp)
   endif()
 
@@ -282,7 +358,7 @@ if(BUILD_TESTING)
   if(TARGET test_identity_manager)
     target_compile_features(test_identity_manager PUBLIC cxx_std_17)
     target_include_directories(test_identity_manager PRIVATE include)
-    target_link_libraries(test_identity_manager ${PROJECT_NAME}_modules)
+    target_link_libraries(test_identity_manager ${PROJECT_NAME}_core)
     ament_target_dependencies(test_identity_manager rclcpp)
   endif()
 
@@ -290,7 +366,7 @@ if(BUILD_TESTING)
   if(TARGET test_identity_observation_projection)
     target_compile_features(test_identity_observation_projection PUBLIC cxx_std_17)
     target_include_directories(test_identity_observation_projection PRIVATE include src/modules)
-    target_link_libraries(test_identity_observation_projection ${PROJECT_NAME}_modules)
+    target_link_libraries(test_identity_observation_projection ${PROJECT_NAME}_core)
     ament_target_dependencies(test_identity_observation_projection rclcpp)
   endif()
 
@@ -298,7 +374,7 @@ if(BUILD_TESTING)
   if(TARGET test_feature_update_policy)
     target_compile_features(test_feature_update_policy PUBLIC cxx_std_17)
     target_include_directories(test_feature_update_policy PRIVATE include)
-    target_link_libraries(test_feature_update_policy ${PROJECT_NAME}_modules)
+    target_link_libraries(test_feature_update_policy ${PROJECT_NAME}_core)
     ament_target_dependencies(test_feature_update_policy rclcpp)
   endif()
 
@@ -306,7 +382,7 @@ if(BUILD_TESTING)
   if(TARGET test_feature_geometry_update_state)
     target_compile_features(test_feature_geometry_update_state PUBLIC cxx_std_17)
     target_include_directories(test_feature_geometry_update_state PRIVATE include)
-    target_link_libraries(test_feature_geometry_update_state ${PROJECT_NAME}_modules)
+    target_link_libraries(test_feature_geometry_update_state ${PROJECT_NAME}_core)
     ament_target_dependencies(test_feature_geometry_update_state rclcpp)
   endif()
 
@@ -314,7 +390,7 @@ if(BUILD_TESTING)
   if(TARGET test_identity_runtime_record)
     target_compile_features(test_identity_runtime_record PUBLIC cxx_std_17)
     target_include_directories(test_identity_runtime_record PRIVATE include src/modules)
-    target_link_libraries(test_identity_runtime_record ${PROJECT_NAME}_modules)
+    target_link_libraries(test_identity_runtime_record ${PROJECT_NAME}_core)
     ament_target_dependencies(test_identity_runtime_record rclcpp)
   endif()
 
@@ -322,7 +398,7 @@ if(BUILD_TESTING)
   if(TARGET test_identity_record_lifecycle)
     target_compile_features(test_identity_record_lifecycle PUBLIC cxx_std_17)
     target_include_directories(test_identity_record_lifecycle PRIVATE include src/modules)
-    target_link_libraries(test_identity_record_lifecycle ${PROJECT_NAME}_modules)
+    target_link_libraries(test_identity_record_lifecycle ${PROJECT_NAME}_core)
     ament_target_dependencies(test_identity_record_lifecycle rclcpp)
   endif()
 
@@ -330,7 +406,7 @@ if(BUILD_TESTING)
   if(TARGET test_identity_runtime_lifecycle_coordinator)
     target_compile_features(test_identity_runtime_lifecycle_coordinator PUBLIC cxx_std_17)
     target_include_directories(test_identity_runtime_lifecycle_coordinator PRIVATE include src/modules)
-    target_link_libraries(test_identity_runtime_lifecycle_coordinator ${PROJECT_NAME}_modules)
+    target_link_libraries(test_identity_runtime_lifecycle_coordinator ${PROJECT_NAME}_core)
     ament_target_dependencies(test_identity_runtime_lifecycle_coordinator rclcpp)
   endif()
 
@@ -338,7 +414,7 @@ if(BUILD_TESTING)
   if(TARGET test_feature_bank_cost)
     target_compile_features(test_feature_bank_cost PUBLIC cxx_std_17)
     target_include_directories(test_feature_bank_cost PRIVATE include)
-    target_link_libraries(test_feature_bank_cost ${PROJECT_NAME}_modules)
+    target_link_libraries(test_feature_bank_cost ${PROJECT_NAME}_core)
     ament_target_dependencies(test_feature_bank_cost rclcpp)
   endif()
 
@@ -346,7 +422,7 @@ if(BUILD_TESTING)
   if(TARGET test_reliable_geometry_cost)
     target_compile_features(test_reliable_geometry_cost PUBLIC cxx_std_17)
     target_include_directories(test_reliable_geometry_cost PRIVATE include)
-    target_link_libraries(test_reliable_geometry_cost ${PROJECT_NAME}_modules)
+    target_link_libraries(test_reliable_geometry_cost ${PROJECT_NAME}_core)
     ament_target_dependencies(test_reliable_geometry_cost rclcpp)
   endif()
 
@@ -354,7 +430,7 @@ if(BUILD_TESTING)
   if(TARGET test_assignment_cost)
     target_compile_features(test_assignment_cost PUBLIC cxx_std_17)
     target_include_directories(test_assignment_cost PRIVATE include src/modules)
-    target_link_libraries(test_assignment_cost ${PROJECT_NAME}_modules)
+    target_link_libraries(test_assignment_cost ${PROJECT_NAME}_core)
     ament_target_dependencies(test_assignment_cost rclcpp)
   endif()
 
@@ -362,7 +438,7 @@ if(BUILD_TESTING)
   if(TARGET test_active_assignment_solver)
     target_compile_features(test_active_assignment_solver PUBLIC cxx_std_17)
     target_include_directories(test_active_assignment_solver PRIVATE include src/modules)
-    target_link_libraries(test_active_assignment_solver ${PROJECT_NAME}_modules)
+    target_link_libraries(test_active_assignment_solver ${PROJECT_NAME}_core)
     ament_target_dependencies(test_active_assignment_solver rclcpp)
   endif()
 
@@ -370,7 +446,7 @@ if(BUILD_TESTING)
   if(TARGET test_inactive_recovery_solver)
     target_compile_features(test_inactive_recovery_solver PUBLIC cxx_std_17)
     target_include_directories(test_inactive_recovery_solver PRIVATE include src/modules)
-    target_link_libraries(test_inactive_recovery_solver ${PROJECT_NAME}_modules)
+    target_link_libraries(test_inactive_recovery_solver ${PROJECT_NAME}_core)
     ament_target_dependencies(test_inactive_recovery_solver rclcpp)
   endif()
 
@@ -378,7 +454,7 @@ if(BUILD_TESTING)
   if(TARGET test_inactive_recovery_input_collector)
     target_compile_features(test_inactive_recovery_input_collector PUBLIC cxx_std_17)
     target_include_directories(test_inactive_recovery_input_collector PRIVATE include src/modules)
-    target_link_libraries(test_inactive_recovery_input_collector ${PROJECT_NAME}_modules)
+    target_link_libraries(test_inactive_recovery_input_collector ${PROJECT_NAME}_core)
     ament_target_dependencies(test_inactive_recovery_input_collector rclcpp)
   endif()
 
@@ -386,7 +462,7 @@ if(BUILD_TESTING)
   if(TARGET test_unresolved_track_final_resolution_coordinator)
     target_compile_features(test_unresolved_track_final_resolution_coordinator PUBLIC cxx_std_17)
     target_include_directories(test_unresolved_track_final_resolution_coordinator PRIVATE include src/modules)
-    target_link_libraries(test_unresolved_track_final_resolution_coordinator ${PROJECT_NAME}_modules)
+    target_link_libraries(test_unresolved_track_final_resolution_coordinator ${PROJECT_NAME}_core)
     ament_target_dependencies(test_unresolved_track_final_resolution_coordinator rclcpp)
   endif()
 
@@ -394,7 +470,7 @@ if(BUILD_TESTING)
   if(TARGET test_raw_continuity_decision)
     target_compile_features(test_raw_continuity_decision PUBLIC cxx_std_17)
     target_include_directories(test_raw_continuity_decision PRIVATE include src/modules)
-    target_link_libraries(test_raw_continuity_decision ${PROJECT_NAME}_modules)
+    target_link_libraries(test_raw_continuity_decision ${PROJECT_NAME}_core)
     ament_target_dependencies(test_raw_continuity_decision rclcpp)
   endif()
 
@@ -402,7 +478,7 @@ if(BUILD_TESTING)
   if(TARGET test_birth_candidate_decision)
     target_compile_features(test_birth_candidate_decision PUBLIC cxx_std_17)
     target_include_directories(test_birth_candidate_decision PRIVATE include src/modules)
-    target_link_libraries(test_birth_candidate_decision ${PROJECT_NAME}_modules)
+    target_link_libraries(test_birth_candidate_decision ${PROJECT_NAME}_core)
     ament_target_dependencies(test_birth_candidate_decision rclcpp)
   endif()
 
@@ -410,7 +486,7 @@ if(BUILD_TESTING)
   if(TARGET test_occlusion_mode_state)
     target_compile_features(test_occlusion_mode_state PUBLIC cxx_std_17)
     target_include_directories(test_occlusion_mode_state PRIVATE include src/modules)
-    target_link_libraries(test_occlusion_mode_state ${PROJECT_NAME}_modules)
+    target_link_libraries(test_occlusion_mode_state ${PROJECT_NAME}_core)
     ament_target_dependencies(test_occlusion_mode_state rclcpp)
   endif()
 
@@ -418,7 +494,7 @@ if(BUILD_TESTING)
   if(TARGET test_occlusion_group_shadow_lifecycle)
     target_compile_features(test_occlusion_group_shadow_lifecycle PUBLIC cxx_std_17)
     target_include_directories(test_occlusion_group_shadow_lifecycle PRIVATE include src/modules)
-    target_link_libraries(test_occlusion_group_shadow_lifecycle ${PROJECT_NAME}_modules)
+    target_link_libraries(test_occlusion_group_shadow_lifecycle ${PROJECT_NAME}_core)
     ament_target_dependencies(test_occlusion_group_shadow_lifecycle rclcpp)
   endif()
 
@@ -426,7 +502,7 @@ if(BUILD_TESTING)
   if(TARGET test_birth_candidate_store)
     target_compile_features(test_birth_candidate_store PUBLIC cxx_std_17)
     target_include_directories(test_birth_candidate_store PRIVATE include src/modules)
-    target_link_libraries(test_birth_candidate_store ${PROJECT_NAME}_modules)
+    target_link_libraries(test_birth_candidate_store ${PROJECT_NAME}_core)
     ament_target_dependencies(test_birth_candidate_store rclcpp)
   endif()
 
@@ -434,7 +510,7 @@ if(BUILD_TESTING)
   if(TARGET test_birth_manager)
     target_compile_features(test_birth_manager PUBLIC cxx_std_17)
     target_include_directories(test_birth_manager PRIVATE include src/modules)
-    target_link_libraries(test_birth_manager ${PROJECT_NAME}_modules)
+    target_link_libraries(test_birth_manager ${PROJECT_NAME}_core)
     ament_target_dependencies(test_birth_manager rclcpp)
   endif()
 
@@ -442,7 +518,7 @@ if(BUILD_TESTING)
   if(TARGET test_phase5_birth_coordinator)
     target_compile_features(test_phase5_birth_coordinator PUBLIC cxx_std_17)
     target_include_directories(test_phase5_birth_coordinator PRIVATE include src/modules)
-    target_link_libraries(test_phase5_birth_coordinator ${PROJECT_NAME}_modules)
+    target_link_libraries(test_phase5_birth_coordinator ${PROJECT_NAME}_core)
     ament_target_dependencies(test_phase5_birth_coordinator rclcpp)
   endif()
 
@@ -450,7 +526,7 @@ if(BUILD_TESTING)
   if(TARGET test_phase4_handoff_coordinator)
     target_compile_features(test_phase4_handoff_coordinator PUBLIC cxx_std_17)
     target_include_directories(test_phase4_handoff_coordinator PRIVATE include src/modules)
-    target_link_libraries(test_phase4_handoff_coordinator ${PROJECT_NAME}_modules)
+    target_link_libraries(test_phase4_handoff_coordinator ${PROJECT_NAME}_core)
     ament_target_dependencies(test_phase4_handoff_coordinator rclcpp)
   endif()
 
@@ -458,7 +534,7 @@ if(BUILD_TESTING)
   if(TARGET test_merged_single_blob_assignment_decision)
     target_compile_features(test_merged_single_blob_assignment_decision PUBLIC cxx_std_17)
     target_include_directories(test_merged_single_blob_assignment_decision PRIVATE include src/modules)
-    target_link_libraries(test_merged_single_blob_assignment_decision ${PROJECT_NAME}_modules)
+    target_link_libraries(test_merged_single_blob_assignment_decision ${PROJECT_NAME}_core)
     ament_target_dependencies(test_merged_single_blob_assignment_decision rclcpp)
   endif()
 
@@ -466,7 +542,7 @@ if(BUILD_TESTING)
   if(TARGET test_raw_semantic_binding)
     target_compile_features(test_raw_semantic_binding PUBLIC cxx_std_17)
     target_include_directories(test_raw_semantic_binding PRIVATE include src/modules)
-    target_link_libraries(test_raw_semantic_binding ${PROJECT_NAME}_modules)
+    target_link_libraries(test_raw_semantic_binding ${PROJECT_NAME}_core)
     ament_target_dependencies(test_raw_semantic_binding rclcpp)
   endif()
 
@@ -474,7 +550,7 @@ if(BUILD_TESTING)
   if(TARGET test_semantic_id_allocator)
     target_compile_features(test_semantic_id_allocator PUBLIC cxx_std_17)
     target_include_directories(test_semantic_id_allocator PRIVATE include src/modules)
-    target_link_libraries(test_semantic_id_allocator ${PROJECT_NAME}_modules)
+    target_link_libraries(test_semantic_id_allocator ${PROJECT_NAME}_core)
     ament_target_dependencies(test_semantic_id_allocator rclcpp)
   endif()
 
@@ -482,7 +558,7 @@ if(BUILD_TESTING)
   if(TARGET test_assignment_application_plan)
     target_compile_features(test_assignment_application_plan PUBLIC cxx_std_17)
     target_include_directories(test_assignment_application_plan PRIVATE include src/modules)
-    target_link_libraries(test_assignment_application_plan ${PROJECT_NAME}_modules)
+    target_link_libraries(test_assignment_application_plan ${PROJECT_NAME}_core)
     ament_target_dependencies(test_assignment_application_plan rclcpp)
   endif()
 
@@ -490,7 +566,7 @@ if(BUILD_TESTING)
   if(TARGET test_assignment_application_executor)
     target_compile_features(test_assignment_application_executor PUBLIC cxx_std_17)
     target_include_directories(test_assignment_application_executor PRIVATE include src/modules)
-    target_link_libraries(test_assignment_application_executor ${PROJECT_NAME}_modules)
+    target_link_libraries(test_assignment_application_executor ${PROJECT_NAME}_core)
     ament_target_dependencies(test_assignment_application_executor rclcpp)
   endif()
 
@@ -498,7 +574,7 @@ if(BUILD_TESTING)
   if(TARGET test_assignment_candidate_builder)
     target_compile_features(test_assignment_candidate_builder PUBLIC cxx_std_17)
     target_include_directories(test_assignment_candidate_builder PRIVATE include src/modules)
-    target_link_libraries(test_assignment_candidate_builder ${PROJECT_NAME}_modules)
+    target_link_libraries(test_assignment_candidate_builder ${PROJECT_NAME}_core)
     ament_target_dependencies(test_assignment_candidate_builder rclcpp)
   endif()
 
@@ -506,7 +582,7 @@ if(BUILD_TESTING)
   if(TARGET test_active_assignment_input_collector)
     target_compile_features(test_active_assignment_input_collector PUBLIC cxx_std_17)
     target_include_directories(test_active_assignment_input_collector PRIVATE include src/modules)
-    target_link_libraries(test_active_assignment_input_collector ${PROJECT_NAME}_modules)
+    target_link_libraries(test_active_assignment_input_collector ${PROJECT_NAME}_core)
     ament_target_dependencies(test_active_assignment_input_collector rclcpp)
   endif()
 
@@ -514,7 +590,7 @@ if(BUILD_TESTING)
   if(TARGET test_identity_runtime_store)
     target_compile_features(test_identity_runtime_store PUBLIC cxx_std_17)
     target_include_directories(test_identity_runtime_store PRIVATE include src/modules)
-    target_link_libraries(test_identity_runtime_store ${PROJECT_NAME}_modules)
+    target_link_libraries(test_identity_runtime_store ${PROJECT_NAME}_core)
     ament_target_dependencies(test_identity_runtime_store rclcpp)
   endif()
 
@@ -522,7 +598,7 @@ if(BUILD_TESTING)
   if(TARGET test_mot_tracker_config)
     target_compile_features(test_mot_tracker_config PUBLIC cxx_std_17)
     target_include_directories(test_mot_tracker_config PRIVATE include)
-    target_link_libraries(test_mot_tracker_config ${PROJECT_NAME}_modules)
+    target_link_libraries(test_mot_tracker_config ${PROJECT_NAME}_core)
     ament_target_dependencies(test_mot_tracker_config rclcpp)
   endif()
 
@@ -530,7 +606,7 @@ if(BUILD_TESTING)
   if(TARGET test_mot_tracker_observability)
     target_compile_features(test_mot_tracker_observability PUBLIC cxx_std_17)
     target_include_directories(test_mot_tracker_observability PRIVATE include src/modules)
-    target_link_libraries(test_mot_tracker_observability ${PROJECT_NAME}_modules)
+    target_link_libraries(test_mot_tracker_observability ${PROJECT_NAME}_core)
     ament_target_dependencies(test_mot_tracker_observability rclcpp)
   endif()
 
@@ -538,7 +614,7 @@ if(BUILD_TESTING)
   if(TARGET test_appearance_feature_service)
     target_compile_features(test_appearance_feature_service PUBLIC cxx_std_17)
     target_include_directories(test_appearance_feature_service PRIVATE include)
-    target_link_libraries(test_appearance_feature_service ${PROJECT_NAME}_modules)
+    target_link_libraries(test_appearance_feature_service ${PROJECT_NAME}_core)
     ament_target_dependencies(test_appearance_feature_service rclcpp)
   endif()
 
@@ -546,7 +622,7 @@ if(BUILD_TESTING)
   if(TARGET test_yolo26_output_contract)
     target_compile_features(test_yolo26_output_contract PUBLIC cxx_std_17)
     target_include_directories(test_yolo26_output_contract PRIVATE include)
-    target_link_libraries(test_yolo26_output_contract ${PROJECT_NAME}_modules)
+    target_link_libraries(test_yolo26_output_contract ${PROJECT_NAME}_core)
     ament_target_dependencies(test_yolo26_output_contract rclcpp)
   endif()
 
@@ -554,7 +630,7 @@ if(BUILD_TESTING)
   if(TARGET test_offline_eval_schema)
     target_compile_features(test_offline_eval_schema PUBLIC cxx_std_17)
     target_include_directories(test_offline_eval_schema PRIVATE include)
-    target_link_libraries(test_offline_eval_schema ${PROJECT_NAME}_modules)
+    target_link_libraries(test_offline_eval_schema ${PROJECT_NAME}_core)
     ament_target_dependencies(test_offline_eval_schema rclcpp)
   endif()
 
@@ -562,23 +638,25 @@ if(BUILD_TESTING)
   if(TARGET test_offline_eval_input)
     target_compile_features(test_offline_eval_input PUBLIC cxx_std_17)
     target_include_directories(test_offline_eval_input PRIVATE include)
-    target_link_libraries(test_offline_eval_input ${PROJECT_NAME}_modules)
+    target_link_libraries(test_offline_eval_input ${PROJECT_NAME}_core)
     ament_target_dependencies(test_offline_eval_input rclcpp)
   endif()
 
-  ament_add_gtest(test_offline_replay_run test/test_offline_replay_run.cpp)
-  if(TARGET test_offline_replay_run)
-    target_compile_features(test_offline_replay_run PUBLIC cxx_std_17)
-    target_include_directories(test_offline_replay_run PRIVATE include)
-    target_link_libraries(test_offline_replay_run ${PROJECT_NAME}_modules)
-    ament_target_dependencies(test_offline_replay_run rclcpp)
+  if(TRACKING_ENABLE_ORIN_RUNTIME)
+    ament_add_gtest(test_offline_replay_run test/test_offline_replay_run.cpp)
+    if(TARGET test_offline_replay_run)
+      target_compile_features(test_offline_replay_run PUBLIC cxx_std_17)
+      target_include_directories(test_offline_replay_run PRIVATE include)
+      target_link_libraries(test_offline_replay_run ${PROJECT_NAME}_offline_runtime)
+      ament_target_dependencies(test_offline_replay_run rclcpp)
+    endif()
   endif()
 
   ament_add_gtest(test_identity_offline_metrics test/test_identity_offline_metrics.cpp)
   if(TARGET test_identity_offline_metrics)
     target_compile_features(test_identity_offline_metrics PUBLIC cxx_std_17)
     target_include_directories(test_identity_offline_metrics PRIVATE include)
-    target_link_libraries(test_identity_offline_metrics ${PROJECT_NAME}_modules)
+    target_link_libraries(test_identity_offline_metrics ${PROJECT_NAME}_core)
     ament_target_dependencies(test_identity_offline_metrics rclcpp)
   endif()
 endif()
