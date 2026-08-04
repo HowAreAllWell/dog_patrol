@@ -29,10 +29,10 @@ trap cleanup EXIT
 ros2 pkg prefix dog_patrol_manager >/dev/null
 
 setsid ros2 run dog_patrol_manager mission_supervisor --ros-args \
-  -p state_topic:=/issue87/integration/mission/state \
-  -p event_topic:=/issue87/integration/mission/event \
+  -p state_topic:=/dog_patrol/integration/mission/state \
+  -p event_topic:=/dog_patrol/integration/mission/event \
   -p state_publish_rate:=20.0 \
-  -p initial_state_seq:=8700 \
+  -p initial_state_seq:=900 \
   >"${test_tmp}/mission_supervisor.log" 2>&1 &
 supervisor_pid=$!
 

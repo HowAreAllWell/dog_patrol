@@ -9,6 +9,8 @@
 - `navigation/`：只保留模块入口说明，导航实现尚未迁入。
 - `dog_patrol_perception_tracking`：已从视觉准备仓保留必要历史导入；普通环境构建
   portable tracking 核心和 ROS adapter，Orin runtime 由部署端显式开启。
+- tracking 公共 mission tracer 已接入同工作区安装后的真实 `mission_supervisor`，无资产路径纳入普通
+  CI，覆盖目标确认、fresh bbox、丢失/重获及无效状态输入门禁。
 - `dog_patrol_perception_orchestrator`：已实现纯 Python 授权编排；readiness、真实人脸和语音结果尚未接入。
 - 人脸实现尚未建立。
 - 目标公开远程：`https://github.com/HowAreAllWell/dog_patrol`

@@ -1,5 +1,14 @@
 # worklog
 
+## 2026-08-04 14:16 - 闭合 tracking 公共 mission 合同
+
+- 目标：完成 dog_patrol #9，在主仓同一工作区用真实 mission supervisor 验证 tracking 公共任务链路。
+- 完成：将导入的 lifecycle fixture 收口为本仓稳定 mission contract tracer；fixture 启动安装后的真实 `dog_patrol_manager mission_supervisor`，以 production primary/frame transaction/ROS adapter 跑通 READY、目标确认、fresh bbox、丢失阻塞、同 semantic 目标重获解阻、VERIFY 和下一目标选择；新增旧序列、等序列冲突、错误 target 和错误目标 evidence 的负向门禁，并显式断言 tracking 不发布授权结论；补齐 bbox 原图尺寸断言和稳定说明。
+- 关键结论：普通 CI 的最高公共 seam 为无资产 `test_mission_pipeline_integration`；它只使用主仓构建产物，不需要旧视觉 overlay、模型、录制或 Orin SDK。受控 Orin 环境仍可将真实 detector/tracker/identity observations 输入同一组断言，但不是普通 CI 前置条件。
+- 涉及文件：`README.md`、`worklog.md`、`docs/perception/tracking/mission_contract_integration.md`、`src/perception/dog_patrol_perception_tracking/README.md`、`src/perception/dog_patrol_perception_tracking/test/mission_pipeline_integration_driver.cpp`、`src/perception/dog_patrol_perception_tracking/test/test_mission_pipeline_integration.sh`。
+- 验证：portable 模式构建 interfaces、manager、tracking 三包成功；聚焦真实 supervisor lifecycle CTest 通过；全仓四包汇总 394 tests、0 errors/failures/skipped；`git diff --check` 和 integration shell `bash -n` 通过。
+- 后续：未运行显式 Orin/Hik/模型/录制 visual replay；该硬件路径沿用迁移前受控验收方式，不影响普通 CI 合同闭合。
+
 ## 2026-08-04 13:48 - 保留历史导入 tracking 并接入 CI
 
 - 目标：完成 dog_patrol #8，将准备完成的 tracking package 及必要历史正式导入主仓，并保证普通环境可独立构建测试。
