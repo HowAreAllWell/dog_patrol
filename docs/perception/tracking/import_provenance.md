@@ -13,10 +13,12 @@
 - 退役的 bearing、UDP、RTSP benchmark、`record_test_set` 和 legacy identity 路径从导入历史移除；
 - 私网端点、RTSP URL 和个人绝对路径在过滤后的历史中统一匿名化。
 
-过滤后来源 tip 为 `6faaed42bf0531239b0203885607a9ff318eedc7`。主仓通过 merge parent
-保留这 116 个非空相关提交；`git log --follow --
-src/perception/dog_patrol_perception_tracking/<path>` 可以追溯迁移前的实现演进。由于路径和内容
-过滤会重写对象标识，过滤前后的提交 SHA 不相同，原始 tip 和 tree 作为来源锚点保留在本文。
+过滤后来源 tip 为 `6faaed42bf0531239b0203885607a9ff318eedc7`。由于主仓只允许 squash
+merge，这 116 个非空相关提交固定在 annotated tag
+`tracking-import/vision-demo-ws-7878d70`；普通 clone 会获取该 tag。使用
+`git log --follow tracking-import/vision-demo-ws-7878d70 --
+src/perception/dog_patrol_perception_tracking/<path>` 可以追溯迁移前的实现演进。路径和内容过滤会
+重写对象标识，因此过滤前后的提交 SHA 不相同，原始 tip 和 tree 作为来源锚点保留在本文。
 
 源码 package 在来源仓即声明 Apache-2.0；主仓继续保持该声明，并在 `LICENSES/` 提供
 许可证全文和组件范围。导入后为路径、默认配置和仓库集成所作修改属于主仓修改。
