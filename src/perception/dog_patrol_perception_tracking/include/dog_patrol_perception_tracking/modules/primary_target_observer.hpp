@@ -22,6 +22,20 @@ struct PrimaryTargetObservation {
   cv::Mat target_image;
 };
 
+struct PrimaryTargetCropConfig {
+  // Fraction of the trusted target width/height added on every side before
+  // clamping to the source image. Zero preserves the detector/tracker bbox.
+  float padding_ratio{0.0F};
+};
+
+// Projects an already-selected trusted primary onto its source frame. This is
+// shared by mission and standalone runtimes and remains independent of ROS.
+std::optional<PrimaryTargetObservation> BuildPrimaryTargetObservation(
+    const PrimaryTargetResult &primary,
+    const SourceFrameMetadata &source,
+    const cv::Mat &source_image,
+    const PrimaryTargetCropConfig &crop_config = {});
+
 // In-process consumer boundary for standalone integrations. Receiving
 // std::nullopt explicitly clears the current-frame value, preventing a sink
 // from accidentally replaying a historical target.
@@ -54,6 +68,9 @@ class PrimaryTargetObserver {
   explicit PrimaryTargetObserver(PrimaryTargetManager::Config config);
   PrimaryTargetObserver(PrimaryTargetManager::Config config,
                         std::shared_ptr<PrimaryTargetObservationSink> sink);
+  PrimaryTargetObserver(PrimaryTargetManager::Config config,
+                        std::shared_ptr<PrimaryTargetObservationSink> sink,
+                        PrimaryTargetCropConfig crop_config);
 
   // Advances primary selection using current identity evidence and returns an
   // observation only when that same frame contains a representable, trusted
@@ -70,13 +87,9 @@ class PrimaryTargetObserver {
   PrimaryTargetResult CurrentPrimary() const;
 
  private:
-  static std::optional<PrimaryTargetObservation> BuildObservation(
-      const PrimaryTargetResult &primary,
-      const SourceFrameMetadata &source,
-      const cv::Mat &source_image);
-
   PrimaryTargetManager primary_manager_;
   std::shared_ptr<PrimaryTargetObservationSink> sink_;
+  PrimaryTargetCropConfig crop_config_;
 };
 
 }  // namespace dog_patrol_perception_tracking

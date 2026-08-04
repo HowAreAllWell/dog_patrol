@@ -76,7 +76,8 @@ target_compile_features(${PROJECT_NAME}_core PUBLIC cxx_std_17)
 target_link_libraries(${PROJECT_NAME}_core PUBLIC ${OpenCV_LIBS})
 
 add_library(${PROJECT_NAME}_ros_adapter
-  src/modules/mission_ros_adapter.cpp)
+  src/modules/mission_ros_adapter.cpp
+  src/modules/target_image_ros_adapter.cpp)
 target_include_directories(${PROJECT_NAME}_ros_adapter PUBLIC
   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
   $<INSTALL_INTERFACE:include>)
@@ -182,7 +183,8 @@ if(TRACKING_ENABLE_ORIN_RUNTIME)
 
   add_executable(dog_patrol_perception_tracking_node src/perception_tracking_node.cpp)
   target_compile_features(dog_patrol_perception_tracking_node PUBLIC cxx_std_17)
-  ament_target_dependencies(dog_patrol_perception_tracking_node rclcpp dog_patrol_interfaces)
+  ament_target_dependencies(dog_patrol_perception_tracking_node
+    rclcpp dog_patrol_interfaces dog_patrol_perception_interfaces)
   target_link_libraries(dog_patrol_perception_tracking_node
     ${PROJECT_NAME}_core
     ${PROJECT_NAME}_ros_adapter
@@ -228,7 +230,8 @@ if(TRACKING_ENABLE_ORIN_RUNTIME)
   install(DIRECTORY launch DESTINATION share/${PROJECT_NAME})
 endif()
 
-ament_export_dependencies(dog_patrol_interfaces)
+ament_export_dependencies(
+  dog_patrol_interfaces dog_patrol_perception_interfaces rclcpp)
 
 if(BUILD_TESTING)
   find_package(ament_cmake_gtest REQUIRED)
@@ -241,7 +244,7 @@ if(BUILD_TESTING)
       src/perception_tracking_node.cpp)
     target_compile_features(${PROJECT_NAME}_live_node_compile_check PUBLIC cxx_std_17)
     ament_target_dependencies(${PROJECT_NAME}_live_node_compile_check
-      rclcpp dog_patrol_interfaces)
+      rclcpp dog_patrol_interfaces dog_patrol_perception_interfaces)
     target_link_libraries(${PROJECT_NAME}_live_node_compile_check
       ${PROJECT_NAME}_core ${PROJECT_NAME}_ros_adapter)
   endif()
@@ -333,6 +336,31 @@ if(BUILD_TESTING)
     ament_target_dependencies(test_mission_ros_adapter
       rclcpp dog_patrol_interfaces dog_patrol_perception_interfaces)
   endif()
+
+  ament_add_gtest(test_target_image_ros_adapter test/test_target_image_ros_adapter.cpp)
+  if(TARGET test_target_image_ros_adapter)
+    target_compile_features(test_target_image_ros_adapter PUBLIC cxx_std_17)
+    target_include_directories(test_target_image_ros_adapter PRIVATE include)
+    target_link_libraries(test_target_image_ros_adapter ${PROJECT_NAME}_ros_adapter)
+    ament_target_dependencies(test_target_image_ros_adapter
+      rclcpp dog_patrol_perception_interfaces)
+  endif()
+
+  add_executable(test_target_image_ros_smoke_driver
+    test/target_image_ros_smoke.cpp)
+  target_compile_features(test_target_image_ros_smoke_driver PUBLIC cxx_std_17)
+  target_include_directories(test_target_image_ros_smoke_driver PRIVATE include)
+  target_link_libraries(test_target_image_ros_smoke_driver
+    ${PROJECT_NAME}_core ${PROJECT_NAME}_ros_adapter)
+  ament_target_dependencies(test_target_image_ros_smoke_driver
+    rclcpp dog_patrol_perception_interfaces)
+  add_test(
+    NAME test_target_image_ros_smoke
+    COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/test/test_target_image_ros_smoke.sh
+            $<TARGET_FILE:test_target_image_ros_smoke_driver>)
+  set_tests_properties(test_target_image_ros_smoke PROPERTIES
+    ENVIRONMENT "ROS_DOMAIN_ID=188;ROS_LOCALHOST_ONLY=1"
+    TIMEOUT 20)
 
   add_executable(test_mission_pipeline_integration_driver
     test/mission_pipeline_integration_driver.cpp)
