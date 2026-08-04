@@ -17,6 +17,10 @@
   standalone 均通过有界异步 ROS adapter 以 `TrackedTargetImage` 向独立人脸进程交付同帧 crop。
 - `dog_patrol_perception_orchestrator`：已实现授权编排和 capability readiness ROS 节点；真实人脸、语音 provider 尚未接入，因此生产环境不会提前发布感知 READY。
 - 感知域已提供整体部署 requirements 和统一 Orin 环境检查，显式区分 tracking、face、voice 和 orchestrator 当前状态。
+- tracking 已在当前感知 Orin 完成 full-runtime build/test、真实 Hik 30 FPS 和 standalone
+  隔离复验；当前现场仍无真人（最新画面已有照明），阻塞真实主目标 crop、离场停发和正常/慢消费者资源对照，因此
+  #14 尚未通过。状态与补验入口见
+  [`docs/perception/tracking/issue14_tracking_hardware_acceptance.md`](docs/perception/tracking/issue14_tracking_hardware_acceptance.md)。
 - 人脸实现尚未建立。
 - 目标公开远程：`https://github.com/HowAreAllWell/dog_patrol`
 

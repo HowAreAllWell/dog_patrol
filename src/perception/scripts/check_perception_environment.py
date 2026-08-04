@@ -241,6 +241,41 @@ def parameter_path(
     return path
 
 
+def check_runtime_asset_load(
+    reporter: Reporter,
+    validator: Optional[Path],
+    asset: Path,
+    missing_validator_message: str,
+    success_message: str,
+    failure_message: str,
+) -> None:
+    if validator is None or not os.access(validator, os.X_OK):
+        reporter.fail(missing_validator_message)
+        return
+    code, output = run([str(validator), str(asset)])
+    if code == 0:
+        reporter.pass_(success_message)
+        return
+    detail = output.splitlines()[-1] if output else "validator returned no detail"
+    reporter.fail(f"{failure_message} ({detail})")
+
+
+def normalize_reid_backend(backend: object) -> str:
+    """Mirror ReIdEmbedder::NormalizeBackend for deployment asset gating."""
+    if not isinstance(backend, str):
+        return "light" if backend is None else str(backend).lower()
+    normalized = backend.lower()
+    if normalized in {"onnx", "osnet", "osnet_onnx", "true_reid"}:
+        return "osnet_onnx"
+    if not normalized:
+        return "light"
+    if normalized in {"tracker", "light_tracker"}:
+        return "light_tracker"
+    if normalized in {"identity", "semantic", "light_identity"}:
+        return "light_identity"
+    return normalized
+
+
 def check_platform(reporter: Reporter, target: str) -> None:
     policy = TARGET_POLICIES[target]
     architecture = platform.machine()
@@ -326,6 +361,7 @@ def check_parameters_and_assets(
     reporter: Reporter,
     params_file: Path,
     tracker_config: Path,
+    engine_validator: Optional[Path],
     onnx_validator: Optional[Path],
 ) -> None:
     check_file(reporter, "deployment parameters", params_file)
@@ -362,33 +398,32 @@ def check_parameters_and_assets(
             reporter.fail(f"detector.runtime_path must point to a local .engine file: {engine}")
         else:
             check_file(reporter, "local TensorRT engine", engine, nonempty=True)
-            trtexec = shutil.which("trtexec")
-            if trtexec is None and Path("/usr/src/tensorrt/bin/trtexec").is_file():
-                trtexec = "/usr/src/tensorrt/bin/trtexec"
             if engine.is_file() and engine.stat().st_size > 0:
-                if trtexec is None:
-                    reporter.fail(
-                        "trtexec missing; install TensorRT samples/tools to validate "
-                        "the local engine"
-                    )
-                else:
-                    code, output = run(
-                        [trtexec, f"--loadEngine={engine}", "--skipInference", "--duration=0"]
-                    )
-                    if code == 0:
-                        reporter.pass_("local TensorRT engine loads on this Orin")
-                    else:
-                        detail = (
-                            output.splitlines()[-1]
-                            if output
-                            else "trtexec returned no detail"
-                        )
-                        reporter.fail(
-                            "local TensorRT engine cannot be loaded on this Orin; regenerate it "
-                            f"with the documented export script ({detail})"
-                        )
+                check_runtime_asset_load(
+                    reporter,
+                    engine_validator,
+                    engine,
+                    (
+                        "installed validate_tensorrt_engine tool missing; rebuild "
+                        "dog_patrol_perception_tracking with full Orin runtime"
+                    ),
+                    "local TensorRT engine loads with the production detector runtime",
+                    (
+                        "local TensorRT engine cannot be loaded on this Orin; regenerate it "
+                        "with the documented export script"
+                    ),
+                )
 
-    for name in ("tracker.reid_model_path", "sid.reid_model_path"):
+    reid_assets = (
+        ("tracker.reid_backend", "tracker.reid_model_path"),
+        ("sid.reid_backend", "sid.reid_model_path"),
+    )
+    for backend_name, name in reid_assets:
+        backend = normalize_reid_backend(parameters.get(backend_name))
+        reporter.pass_(f"deployment parameter {backend_name}={backend}")
+        if backend != "osnet_onnx":
+            reporter.info(f"{name} is not required by backend {backend}")
+            continue
         model = parameter_path(reporter, parameters, name)
         if model is not None:
             if model.suffix != ".onnx":
@@ -406,25 +441,17 @@ def check_parameters_and_assets(
                 else:
                     reporter.info(f"{name} has no sibling .onnx.data file")
                 if model.is_file() and model.stat().st_size > 0:
-                    if onnx_validator is None or not os.access(onnx_validator, os.X_OK):
-                        reporter.fail(
+                    check_runtime_asset_load(
+                        reporter,
+                        onnx_validator,
+                        model,
+                        (
                             "installed validate_reid_onnx tool missing; rebuild "
                             "dog_patrol_perception_tracking"
-                        )
-                    else:
-                        code, output = run([str(onnx_validator), str(model)])
-                        if code == 0:
-                            reporter.pass_(f"{name} loads with the tracking OpenCV runtime")
-                        else:
-                            detail = (
-                                output.splitlines()[-1]
-                                if output
-                                else "OpenCV returned no detail"
-                            )
-                            reporter.fail(
-                                f"{name} cannot be loaded; provide all ONNX external data "
-                                f"({detail})"
-                            )
+                        ),
+                        f"{name} loads with the tracking OpenCV runtime",
+                        f"{name} cannot be loaded; provide all ONNX external data",
+                    )
 
     check_file(reporter, "tracker configuration", tracker_config, nonempty=True)
 
@@ -561,10 +588,15 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         install_prefix,
         Path("lib/dog_patrol_perception_tracking/validate_reid_onnx"),
     )
+    engine_validator = find_install_artifact(
+        install_prefix,
+        Path("lib/dog_patrol_perception_tracking/validate_tensorrt_engine"),
+    )
     check_parameters_and_assets(
         reporter,
         args.params_file.resolve(),
         args.tracker_config.resolve(),
+        engine_validator,
         onnx_validator,
     )
     check_build(reporter, workspace, install_prefix, build_base)

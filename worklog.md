@@ -1,5 +1,14 @@
 # worklog
 
+## 2026-08-04 17:15 - 继续 tracking Orin 硬件验收（现场目标阻塞）
+
+- 目标：完成 #14 的迁入后 tracking 真实 Orin/Hik/semantic/crop 性能与稳定性验收。
+- 完成：继承并修正迁移后 Orin 脚本路径和 MVS aarch64 库探测；新增 production-path TensorRT engine validator，消除 trtexec 在加载无关插件时崩溃导致的统一检查误报；修复统一检查器无条件要求 ReID ONNX 的 #13 回归；full-runtime Release 构建、统一环境检查和 434 项测试通过；真实 Hik clean capture、默认 light 60 秒 standalone 暗场吞吐、standalone ROS graph 隔离及历史真人 Hik 录像的当前主仓 detector/tracker/semantic identity 回归均已留证；新增未完成验收文档。
+- 关键结论：当前感知 Orin 为 MAXN；18:24 默认 light 重跑时 CPU 为动态调频且当前账号不能免密执行 `jetson_clocks`，后续资源对照必须统一锁频状态。真实 Hik+TensorRT+默认 light ReID 稳态均值 30.023 FPS，最终 1,745 frames、0 acquisition failure、4 estimated drops、2 non-contiguous frames、0 MVS lost packet；baseline 时物理视场为无人暗场，18:15 复查已有照明但仍无人，不能触发真实 primary/crop。旧 60 秒日志的 effective config 为人为覆盖的 `osnet_onnx`，不再作为默认 production baseline；此前统一检查器无条件要求该路径是 #13 回归，已改为按 backend 条件门禁。#14 未关闭，不能把 deterministic transport tests 或历史录像冒充当前 live crop 验收。
+- 涉及文件：`README.md`、`docs/perception/tracking/issue14_tracking_hardware_acceptance.md`、`src/perception/requirements.md`、`src/perception/scripts/check_perception_environment.py`、`src/perception/test/test_check_perception_environment.py`、`src/perception/dog_patrol_perception_tracking/CMakeLists.txt`、`src/perception/dog_patrol_perception_tracking/src/tools/validate_tensorrt_engine.cpp`、`src/perception/dog_patrol_perception_tracking/scripts/bench_hik_mvs_camera.sh`、`src/perception/dog_patrol_perception_tracking/scripts/check_orin_env.sh`、`worklog.md`。
+- 验证：当前分支 full Orin Release build 通过；默认 light + 空模型路径的统一环境检查 PASS；检查器 13 项 Python 单测通过；五包 434 tests、0 errors/failures/skipped；真实 capture 61/61 frames，18:15 现场复查 capture 30/30 frames；默认 light 60 秒 live、60 个 tegrastats 样本、ROS graph snapshot和 539 帧历史 Hik 回归通过；Python `py_compile`、shell `bash -n` 和 `git diff --check` 通过。
+- 后续：18:15 重新采集的 30 帧显示已有照明但仍无真人；必须由现场人员让真人进入/离开相机视场，才能补齐 live `TrackedTargetImage` 字段/crop 内容/停止发布和正常/慢消费者资源与 queue-drop 对照；完成前不得提交通过结论、关闭 #14 或合并 PR。
+
 ## 2026-08-04 16:30 - 交付感知域部署检查
 
 - 目标：完成 dog_patrol #13，为感知 Orin 和最终导航 Orin 提供整个感知域的部署 requirements 与统一 PASS/FAIL 检查。
