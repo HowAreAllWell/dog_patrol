@@ -12,6 +12,7 @@ Dog patrol 的正式 perception tracking 模块，包含相机接入、检测、
 - `perception_config_materializer`：ROS 参数 / 离线 request 到 tracker、identity、visualizer
   运行态配置的统一 materialization 入口
 - `primary_target_manager`：`person`-only 主目标规则（首锁最大框 + continuity-first）
+- `primary_target_observer`：ROS-independent 当前主目标 observation seam；只在当前帧主目标可信时返回 semantic target ID、源帧元数据、clamped bbox 和自持有目标图像，不依赖 mission state/state sequence
 - `mission_coordinator`：ROS-independent 任务输出协调 seam；按任务状态 / semantic target / state sequence 只产生当前帧可信 bbox，并负责配置化同目标 loss/reacquire event 时序
 - `mission_frame_transaction`：ROS-independent 一帧任务事务；在 identity 输出后统一执行 primary 更新、PATROL 目标确认、fresh bbox、loss/reacquire，并返回本帧 primary 诊断
 - `perception_readiness`：ROS-independent READY 聚合 seam；以 required capability contribution 和 `STARTUP state_seq` 产生至多一次 aggregate READY action
@@ -53,6 +54,44 @@ SID 生效配置的镜像；`MotTracker` 的 `config/bot_sort.yaml` 解析仍由
 - `visualization.queue_capacity`（异步 overlay render/write queue；默认 `4`）
 - `recording.enable` / `recording.output_root` / `recording.path` / `recording.fps`（当前 live result 录制强制为 FFV1/MKV；`path` 必须位于可信 diagnostic output root，且 result root 不得与受保护的 clean `data/captures/` 重叠或经符号链接指向它）
 - `runtime.inference_timing_metrics`（默认 `true`，输出 inference p50/p95/p99）
+- `runtime.mode`（`mission` 或 `standalone`；默认 `mission`）
+
+## Standalone Orin tracking
+
+Orin 上可不启动 mission supervisor、导航或激光雷达，直接运行正式 standalone 入口：
+
+```bash
+source /opt/ros/humble/setup.bash
+source /path/to/dog_patrol/install/setup.bash
+ros2 launch dog_patrol_perception_tracking \
+  dog_patrol_perception_tracking_standalone.launch.py
+```
+
+该入口仍使用 live 节点的同一套 `CameraIngest → PreprocessInfer → DetFilter → MotTracker →
+IdentityManager → PrimaryTargetManager` 实现；区别仅在输出边界：不创建 `MissionRosAdapter`，因此不订阅
+`MissionState`，也不发布 mission event、导航状态、selected-target bbox 或 capability status。
+`PrimaryTargetObserver::Update` 每帧产生可选的 `PrimaryTargetObservation`，其 `target_image` 是当前源图
+clamped bbox 的深拷贝；当前帧无可信 `LOCKED` 主目标时返回空值，不回放历史 observation。
+
+预览和 FFV1 diagnostic overlay 录制可独立启用：
+
+```bash
+ros2 launch dog_patrol_perception_tracking \
+  dog_patrol_perception_tracking_standalone.launch.py \
+  preview:=true record:=true
+```
+
+相机型号、序列号、TensorRT engine、录制路径和既有 diagnostics 参数继续使用
+`config/perception_tracking_params.yaml`；部署专用参数文件可通过
+`params_file:=/absolute/path/to/orin_tracking.yaml` 传入，tracker YAML 可通过
+`tracker_config:=/absolute/path/to/bot_sort.yaml` 覆盖。当前 Orin 真实相机基线为 Hikrobot
+MVS `MV-CU013-A0UC`、`1280x1024@30 FPS`、`balanced` Bayer interpolation；部署前需安装 MVS SDK、
+CUDA/TensorRT 和 FFmpeg，并为 `detector.runtime_path` 配置本机 engine。环境检查和相机性能诊断仍可独立运行：
+
+```bash
+src/perception/dog_patrol_perception_tracking/scripts/check_orin_env.sh
+src/perception/dog_patrol_perception_tracking/scripts/bench_hik_mvs_camera.sh
+```
 
 `MissionCoordinator::Config` 当前提供 `lost_event_timeout=0.5s` 和
 `reacquire_retention=6s`，两者必须为正且前者更短。它只使用注入的单调

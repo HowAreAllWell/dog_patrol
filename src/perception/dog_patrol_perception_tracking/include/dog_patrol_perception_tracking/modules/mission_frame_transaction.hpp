@@ -1,27 +1,14 @@
 #pragma once
 
-#include <cstdint>
 #include <optional>
 #include <string>
 #include <vector>
 
 #include "dog_patrol_perception_tracking/modules/mission_coordinator.hpp"
 #include "dog_patrol_perception_tracking/modules/primary_target_manager.hpp"
+#include "dog_patrol_perception_tracking/source_frame_metadata.hpp"
 
 namespace dog_patrol_perception_tracking {
-
-// Metadata carried alongside each processed camera frame. The patrol
-// interface has no camera-frame-number field, so the number remains runtime
-// diagnostic metadata while timestamp, optical frame, and source dimensions
-// are represented by TargetBoundingBox's Header and fields.
-struct SourceFrameMetadata {
-  std::uint64_t source_timestamp_ns{0};
-  std::uint32_t camera_frame_number{0};
-  bool camera_frame_number_available{false};
-  int image_width{0};
-  int image_height{0};
-  std::string optical_frame_id;
-};
 
 class MissionFrameTransaction {
  public:

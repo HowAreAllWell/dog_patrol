@@ -24,6 +24,7 @@
 #include "dog_patrol_perception_tracking/modules/perception_readiness.hpp"
 #include "dog_patrol_perception_tracking/modules/preprocess_infer.hpp"
 #include "dog_patrol_perception_tracking/modules/primary_target_manager.hpp"
+#include "dog_patrol_perception_tracking/modules/primary_target_observer.hpp"
 #include "dog_patrol_perception_tracking/modules/runtime_monitor.hpp"
 #include "dog_patrol_perception_tracking/modules/visualizer_recorder.hpp"
 
@@ -44,13 +45,17 @@ class PerceptionTrackingNode : public rclcpp::Node {
     RejectRetiredCameraParameterOverrides();
     DeclareParameters();
     const auto target_cfg = LoadPrimaryTargetConfig();
-    InitializeMissionRosAdapter(target_cfg);
+    InitializeRuntimeMode(target_cfg);
     try {
       LoadConfigAndInitialize(target_cfg);
       runtime_operational_ = true;
     } catch (const std::exception &exception) {
-      mission_ros_adapter_->ReportDetectionTrackingRuntimeStatus(
+      ReportDetectionTrackingRuntimeStatus(
           {false, false, "tracking initialization failed: " + std::string(exception.what())});
+      if (standalone_mode_) {
+        RCLCPP_ERROR(get_logger(), "standalone tracking initialization failed: %s", exception.what());
+        throw;
+      }
       RCLCPP_ERROR(get_logger(),
                    "tracking initialization failed; node remains alive to report capability ERROR: %s",
                    exception.what());
@@ -60,7 +65,8 @@ class PerceptionTrackingNode : public rclcpp::Node {
     timer_ = this->create_wall_timer(std::chrono::milliseconds(timer_ms),
                                      std::bind(&PerceptionTrackingNode::Tick, this));
     if (runtime_operational_) {
-      RCLCPP_INFO(get_logger(), "dog_patrol_perception_tracking_node started.");
+      RCLCPP_INFO(get_logger(), "dog_patrol_perception_tracking_node started in %s mode.",
+                  standalone_mode_ ? "standalone" : "mission");
     } else {
       RCLCPP_WARN(get_logger(),
                   "dog_patrol_perception_tracking_node started in capability-error reporting mode.");
@@ -190,7 +196,29 @@ class PerceptionTrackingNode : public rclcpp::Node {
     this->declare_parameter<double>("recording.fps", visualizer_defaults.recording_fps);
     this->declare_parameter<bool>("runtime.inference_timing_metrics", true);
 
+    this->declare_parameter<std::string>("runtime.mode", "mission");
     this->declare_parameter<int>("runtime.tick_ms", 33);
+  }
+
+  void InitializeRuntimeMode(
+      const dog_patrol_perception_tracking::PrimaryTargetManager::Config &target_cfg) {
+    camera_optical_frame_id_ = this->get_parameter("perception.camera_optical_frame_id").as_string();
+    if (camera_optical_frame_id_.empty()) {
+      throw std::runtime_error("perception.camera_optical_frame_id must not be empty");
+    }
+
+    const std::string mode = this->get_parameter("runtime.mode").as_string();
+    if (mode == "mission") {
+      InitializeMissionRosAdapter(target_cfg);
+      return;
+    }
+    if (mode == "standalone") {
+      standalone_mode_ = true;
+      primary_target_observer_ =
+          std::make_unique<dog_patrol_perception_tracking::PrimaryTargetObserver>(target_cfg);
+      return;
+    }
+    throw std::runtime_error("runtime.mode must be 'mission' or 'standalone'");
   }
 
   dog_patrol_perception_tracking::PrimaryTargetManager::Config LoadPrimaryTargetConfig() {
@@ -246,12 +274,26 @@ class PerceptionTrackingNode : public rclcpp::Node {
     mission_config.coordinator.reacquire_retention = std::chrono::duration_cast<
         dog_patrol_perception_tracking::MissionCoordinator::Duration>(
         std::chrono::duration<double>(reacquire_retention_sec));
-    camera_optical_frame_id_ = this->get_parameter("perception.camera_optical_frame_id").as_string();
-    if (camera_optical_frame_id_.empty()) {
-      throw std::runtime_error("perception.camera_optical_frame_id must not be empty");
-    }
     mission_ros_adapter_ =
         std::make_unique<dog_patrol_perception_tracking::MissionRosAdapter>(*this, std::move(mission_config));
+  }
+
+  void ReportDetectionTrackingRuntimeStatus(
+      dog_patrol_perception_tracking::DetectionTrackingReadiness::RuntimeStatus status) {
+    if (mission_ros_adapter_ != nullptr) {
+      mission_ros_adapter_->ReportDetectionTrackingRuntimeStatus(std::move(status));
+    }
+  }
+
+  void PublishCapabilityStatus() {
+    if (mission_ros_adapter_ != nullptr) {
+      mission_ros_adapter_->PublishCapabilityStatus();
+    }
+  }
+
+  dog_patrol_perception_tracking::PrimaryTargetResult CurrentPrimary() const {
+    return standalone_mode_ ? primary_target_observer_->CurrentPrimary()
+                            : mission_ros_adapter_->CurrentPrimary();
   }
 
   void LoadConfigAndInitialize(const dog_patrol_perception_tracking::PrimaryTargetManager::Config &target_cfg) {
@@ -273,7 +315,7 @@ class PerceptionTrackingNode : public rclcpp::Node {
         this->get_parameter("camera.bayer_smoothing").as_bool();
 
     if (!camera_.Open(camera_cfg, &error)) {
-      mission_ros_adapter_->ReportDetectionTrackingRuntimeStatus(
+      ReportDetectionTrackingRuntimeStatus(
           {false, false, "camera input initialization failed: " + error});
       throw std::runtime_error("camera_ingest init failed: " + error);
     }
@@ -288,11 +330,11 @@ class PerceptionTrackingNode : public rclcpp::Node {
     infer_cfg.enable_timing_metrics = this->get_parameter("runtime.inference_timing_metrics").as_bool();
     infer_ = dog_patrol_perception_tracking::PreprocessInfer(infer_cfg);
     if (!infer_.Initialize(&error)) {
-      mission_ros_adapter_->ReportDetectionTrackingRuntimeStatus(
+      ReportDetectionTrackingRuntimeStatus(
           {false, false, "detector initialization failed: " + error});
       throw std::runtime_error("preprocess_infer init failed: " + error);
     }
-    mission_ros_adapter_->ReportDetectionTrackingRuntimeStatus({true, false, {}});
+    ReportDetectionTrackingRuntimeStatus({true, false, {}});
 
     dog_patrol_perception_tracking::DetFilter::Config filter_cfg;
     filter_cfg.person_conf_threshold =
@@ -339,11 +381,11 @@ class PerceptionTrackingNode : public rclcpp::Node {
     }
     tracker_ = dog_patrol_perception_tracking::MotTracker(tracker_cfg);
     if (!tracker_.Initialize(&error)) {
-      mission_ros_adapter_->ReportDetectionTrackingRuntimeStatus(
+      ReportDetectionTrackingRuntimeStatus(
           {true, false, "tracker initialization failed: " + error});
       throw std::runtime_error("mot_tracker init failed: " + error);
     }
-    mission_ros_adapter_->ReportDetectionTrackingRuntimeStatus({true, true, {}});
+    ReportDetectionTrackingRuntimeStatus({true, true, {}});
 
     dog_patrol_perception_tracking::PerceptionConfigMaterializer::IdentityInput sid_input;
     sid_input.target_lost_threshold_frames = target_cfg.lost_threshold_frames;
@@ -398,7 +440,7 @@ class PerceptionTrackingNode : public rclcpp::Node {
 
     dog_patrol_perception_tracking::CameraIngest::AcquiredFrame acquired_frame;
     if (!camera_.Read(&acquired_frame, &error)) {
-      mission_ros_adapter_->ReportDetectionTrackingRuntimeStatus(
+      ReportDetectionTrackingRuntimeStatus(
           {true, true, "initial detection/tracking source frame failed: " + error});
       throw std::runtime_error("camera_ingest initial frame failed: " + error);
     }
@@ -548,7 +590,7 @@ class PerceptionTrackingNode : public rclcpp::Node {
     // the complete camera/detector/tracker/identity/coordinator chain stays
     // serialized here.
     std::lock_guard<std::mutex> pipeline_lock(pipeline_mutex_);
-    mission_ros_adapter_->PublishCapabilityStatus();
+    PublishCapabilityStatus();
     if (!runtime_operational_) {
       return;
     }
@@ -556,9 +598,9 @@ class PerceptionTrackingNode : public rclcpp::Node {
     std::string error;
     dog_patrol_perception_tracking::CameraIngest::AcquiredFrame acquired_frame;
     if (!camera_.Read(&acquired_frame, &error)) {
-      mission_ros_adapter_->ReportDetectionTrackingRuntimeStatus(
+      ReportDetectionTrackingRuntimeStatus(
           {true, true, "detection/tracking source frame failed: " + error});
-      mission_ros_adapter_->PublishCapabilityStatus();
+      PublishCapabilityStatus();
       RCLCPP_WARN_THROTTLE(get_logger(), *this->get_clock(), 2000, "camera_ingest read failed: %s",
                            error.c_str());
       return;
@@ -573,32 +615,48 @@ class PerceptionTrackingNode : public rclcpp::Node {
       filtered = det_filter_.Filter(detections);
       tracks = tracker_.Update(filtered, frame);
     } catch (const std::exception &exception) {
-      mission_ros_adapter_->ReportDetectionTrackingRuntimeStatus(
+      ReportDetectionTrackingRuntimeStatus(
           {true, true, "detection/tracking frame processing failed: " + std::string(exception.what())});
-      mission_ros_adapter_->PublishCapabilityStatus();
+      PublishCapabilityStatus();
       RCLCPP_ERROR_THROTTLE(get_logger(), *this->get_clock(), 2000,
                             "detection/tracking frame processing failed: %s", exception.what());
       return;
     }
-    mission_ros_adapter_->ReportDetectionTrackingRuntimeStatus({true, true, {}});
+    ReportDetectionTrackingRuntimeStatus({true, true, {}});
 
-    const auto source_time = MonotonicSourceTime();
-    const auto primary_prev = mission_ros_adapter_->CurrentPrimary();
+    const auto primary_prev = CurrentPrimary();
     auto identity_result = identity_manager_.Update(
         dog_patrol_perception_tracking::TrackletObservationsFromTracks(tracks), tracker_.LastTrackletHypotheses(), primary_prev,
         &frame);
     const auto source_metadata = SourceMetadata(acquired_frame);
-    auto mission_frame = mission_ros_adapter_->ProcessFrame(
-        identity_result.identities, source_time, source_metadata);
-    auto primary = mission_frame.primary;
+    dog_patrol_perception_tracking::PrimaryTargetResult primary;
+    std::optional<dog_patrol_perception_tracking::PrimaryTargetObservation> observation;
+    std::string primary_decision_reason;
+    std::string primary_reject_reason;
+    if (standalone_mode_) {
+      auto standalone_frame = primary_target_observer_->Update(
+          identity_result.identities, source_metadata, frame);
+      primary = std::move(standalone_frame.primary);
+      observation = std::move(standalone_frame.observation);
+      primary_decision_reason = std::move(standalone_frame.primary_decision_reason);
+      primary_reject_reason = std::move(standalone_frame.primary_reject_reason);
+    } else {
+      auto mission_frame = mission_ros_adapter_->ProcessFrame(
+          identity_result.identities, MonotonicSourceTime(), source_metadata);
+      primary = std::move(mission_frame.primary);
+      primary_decision_reason = std::move(mission_frame.primary_decision_reason);
+      primary_reject_reason = std::move(mission_frame.primary_reject_reason);
+    }
 
     if (monitor_.ShouldReport()) {
       const int primary_id = primary.primary_target_id;
       const auto camera_metrics = camera_.Metrics();
       RCLCPP_INFO(get_logger(),
-                  "runtime_monitor fps=%.2f state=%s primary_id=%d raw_track_id=%d det=%zu filtered=%zu tracks=%zu",
+                  "runtime_monitor mode=%s fps=%.2f state=%s primary_id=%d raw_track_id=%d observation_current=%s det=%zu filtered=%zu tracks=%zu",
+                  standalone_mode_ ? "standalone" : "mission",
                   monitor_.CurrentFps(), dog_patrol_perception_tracking::PrimaryStateToString(primary.state).c_str(),
-                  primary_id, primary.raw_track_id, detections.size(), filtered.size(), tracks.size());
+                  primary_id, primary.raw_track_id, BoolStr(observation.has_value()),
+                  detections.size(), filtered.size(), tracks.size());
       RCLCPP_INFO(
           get_logger(),
           "camera_metrics frames=%llu acquisition_failures=%llu dropped_frames=%llu non_contiguous_frames=%llu camera_lost_packets=%llu acquisition_ms_p50_p95_p99=%.3f/%.3f/%.3f conversion_ms_p50_p95_p99=%.3f/%.3f/%.3f copy_ms_p50_p95_p99=%.3f/%.3f/%.3f samples=%zu",
@@ -626,8 +684,8 @@ class PerceptionTrackingNode : public rclcpp::Node {
     if (visualizer_ != nullptr) {
       visualizer_->Submit(std::move(acquired_frame.bgr8), std::move(tracks), std::move(primary),
                           std::move(identity_result),
-                          std::move(mission_frame.primary_decision_reason),
-                          std::move(mission_frame.primary_reject_reason));
+                          std::move(primary_decision_reason),
+                          std::move(primary_reject_reason));
     }
   }
 
@@ -638,12 +696,14 @@ class PerceptionTrackingNode : public rclcpp::Node {
   dog_patrol_perception_tracking::DetFilter det_filter_;
   dog_patrol_perception_tracking::MotTracker tracker_;
   std::unique_ptr<dog_patrol_perception_tracking::MissionRosAdapter> mission_ros_adapter_;
+  std::unique_ptr<dog_patrol_perception_tracking::PrimaryTargetObserver> primary_target_observer_;
   rclcpp::CallbackGroup::SharedPtr mission_state_callback_group_;
   std::string camera_optical_frame_id_;
   std::mutex pipeline_mutex_;
   dog_patrol_perception_tracking::IdentityManager identity_manager_;
   std::unique_ptr<dog_patrol_perception_tracking::VisualizerRecorder> visualizer_;
   dog_patrol_perception_tracking::RuntimeMonitor monitor_;
+  bool standalone_mode_{false};
   bool runtime_operational_{false};
 };
 
