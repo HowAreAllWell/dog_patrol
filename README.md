@@ -7,7 +7,7 @@
 - `dog_patrol_interfaces`：已实现，保存主状态机、任务事件、目标框和导航状态消息。
 - `dog_patrol_manager`：已实现，包含 ROS-independent 状态机和 `mission_supervisor` ROS 2 节点。
 - `navigation/`：只保留模块入口说明，导航实现尚未迁入。
-- `dog_patrol_perception`：已实现 Fake 感知和纯 Python 授权编排，具体算法尚未接入。
+- `dog_patrol_perception_orchestrator`：已实现纯 Python 授权编排；readiness、真实人脸和语音结果尚未接入。
 - 现有 `vision_demo_ws` 尚未迁入；tracking 迁移候选已冻结在远端分支
   `deploy/dog_patrol-integration` 的提交
   `380b44582c0c55e5e46d2eb862da7700f05349b3`，迁入/排除、历史敏感信息和许可证审计见
@@ -21,7 +21,7 @@
 src/contracts/dog_patrol_interfaces/       # 两团队共同维护的 ROS 2 合同
 src/orchestration/dog_patrol_manager/      # 主状态机和 supervisor
 src/navigation/                            # 导航模块预留位置
-src/perception/                            # 感知编排与 Fake 联调实现
+src/perception/                            # 感知业务编排入口
 docs/contracts/                             # 可评审的接口协议
 docs/workflows/                             # 业务流程参考文档
 ```
@@ -33,10 +33,12 @@ ROS 2 package 名称保持 `dog_patrol_` 前缀；上层目录是所有权和代
 ```bash
 source /opt/ros/humble/setup.bash
 colcon build --packages-select \
-  dog_patrol_interfaces dog_patrol_manager dog_patrol_perception
+  dog_patrol_interfaces dog_patrol_manager \
+  dog_patrol_perception_orchestrator
 source install/setup.bash
 colcon test --packages-select \
-  dog_patrol_interfaces dog_patrol_manager dog_patrol_perception \
+  dog_patrol_interfaces dog_patrol_manager \
+  dog_patrol_perception_orchestrator \
   --event-handlers console_direct+
 colcon test-result --verbose
 ```
@@ -53,7 +55,7 @@ colcon test-result --verbose
 
 详细合同见 [`docs/contracts/perception_navigation_interface.md`](docs/contracts/perception_navigation_interface.md)，业务流程见 [`docs/workflows/机器狗巡逻与可疑目标处置流程（更新后）.docx`](docs/workflows/机器狗巡逻与可疑目标处置流程（更新后）.docx)。
 
-Fake 感知的启动和联调方法见 [`src/perception/README.md`](src/perception/README.md)。
+感知编排模块说明见 [`src/perception/README.md`](src/perception/README.md)。
 
 ## 协作方式
 
