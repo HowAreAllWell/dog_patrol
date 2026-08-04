@@ -4,6 +4,11 @@
 # 导航负责人是导航 owner；主仓 owner 保留交叉审查和维护能力。
 /src/navigation/ @HowAreAllWell @AugetyVolta
 
+# 感知实现、内部接口、部署入口和验收证据由感知 owner 审查。
+/src/perception/ @HowAreAllWell
+/docs/perception/ @HowAreAllWell
+/assets/models/manifests/ @HowAreAllWell
+
 # 双方均为跨团队 ROS 2 合同及协议的 owner。
 /src/contracts/ @HowAreAllWell @AugetyVolta
 /docs/contracts/ @HowAreAllWell @AugetyVolta
