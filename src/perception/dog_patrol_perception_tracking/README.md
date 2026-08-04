@@ -134,6 +134,7 @@ source `/path/to/dog_patrol/install/setup.bash`；fixture 使用独立 ROS domai
 `--visual-video`、`--detector-engine`、`--tracker-config`，使 historical Hik migration 录制先经过实际
 `PreprocessInfer → DetFilter → MotTracker → IdentityManager`，再用其 observations 执行同一 mission
 lifecycle。该模式不是 active H.264 runtime 入口。命令、资产哈希、帧号和 DDS echo/info/hz 证据见
+`../../../docs/perception/tracking/mission_contract_integration.md`；迁移前的 Orin/Hik 现场证据仍保留在
 `../../../docs/perception/tracking/issue87_integrated_acceptance.md`。
 
 建议 engine 路径：

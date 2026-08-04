@@ -15,6 +15,7 @@
 #include <opencv2/opencv.hpp>
 
 #include <dog_patrol_interfaces/msg/mission_event.hpp>
+#include <dog_patrol_interfaces/msg/mission_state.hpp>
 #include <dog_patrol_interfaces/msg/target_bounding_box.hpp>
 #include <rclcpp/executors/single_threaded_executor.hpp>
 #include <rclcpp/rclcpp.hpp>
@@ -46,6 +47,7 @@ using dog_patrol_perception_tracking::PrimaryTargetManager;
 using dog_patrol_perception_tracking::SourceFrameMetadata;
 
 using MissionEventMessage = dog_patrol_interfaces::msg::MissionEvent;
+using MissionStateMessage = dog_patrol_interfaces::msg::MissionState;
 using TargetBoundingBoxMessage = dog_patrol_interfaces::msg::TargetBoundingBox;
 
 constexpr int kFirstSemanticId = 42;
@@ -406,19 +408,19 @@ bool ParseVisualReplayConfig(const int argc, char *argv[],
 class MissionPipelineIntegrationDriver final : public rclcpp::Node {
  public:
   explicit MissionPipelineIntegrationDriver(MissionEvidence evidence)
-      : Node("issue87_mission_pipeline_integration"),
+      : Node("mission_contract_integration"),
         evidence_(std::move(evidence)) {
     MissionRosAdapter::Config config;
-    config.mission_state_topic = "/issue87/integration/mission/state";
-    config.mission_event_topic = "/issue87/integration/mission/event";
-    config.target_bbox_topic = "/issue87/integration/perception/selected_target_bbox";
+    config.mission_state_topic = "/dog_patrol/integration/mission/state";
+    config.mission_event_topic = "/dog_patrol/integration/mission/event";
+    config.target_bbox_topic = "/dog_patrol/integration/perception/selected_target_bbox";
     config.primary = PrimaryConfig();
     adapter_ = std::make_unique<MissionRosAdapter>(*this, config);
     adapter_->detection_tracking_readiness().ReportRuntimeStatus({true, true, {}});
     if (!adapter_->ReplaceRequiredReadinessContributor(
             "authorization", std::make_unique<MutableReadinessContributor>(
                                  "authorization", PerceptionReadiness::kReady,
-                                 "issue #87 integration authorization provider"))) {
+                                 "mission contract integration authorization provider"))) {
       throw std::runtime_error("failed to replace authorization readiness contributor");
     }
 
@@ -431,7 +433,7 @@ class MissionPipelineIntegrationDriver final : public rclcpp::Node {
         config.target_bbox_topic, MissionRosAdapter::TargetBoundingBoxQos(),
         [this](const TargetBoundingBoxMessage::SharedPtr message) { boxes_.push_back(*message); });
     stage_entered_at_ = std::chrono::steady_clock::now();
-    std::cout << "issue #87 evidence source=" << evidence_.source_description
+    std::cout << "mission contract evidence source=" << evidence_.source_description
               << " target=" << evidence_.first_semantic_id << " raw=" << evidence_.first_raw_id
               << "->" << evidence_.recovered_raw_id
               << " next_target=" << evidence_.next_semantic_id << std::endl;
@@ -607,8 +609,10 @@ class MissionPipelineIntegrationDriver final : public rclcpp::Node {
     return box.target_id == static_cast<std::uint32_t>(evidence_.first_semantic_id) &&
            box.header.frame_id == metadata.optical_frame_id &&
            box.header.stamp.sec == expected_seconds &&
-           box.header.stamp.nanosec == expected_nanoseconds && box.x_min == x_min &&
-           box.y_min == y_min && box.x_max == x_max && box.y_max == y_max;
+           box.header.stamp.nanosec == expected_nanoseconds &&
+           box.image_width == static_cast<std::uint32_t>(metadata.image_width) &&
+           box.image_height == static_cast<std::uint32_t>(metadata.image_height) &&
+           box.x_min == x_min && box.y_min == y_min && box.x_max == x_max && box.y_max == y_max;
   }
 
   MissionFrameTransaction::Output ProcessFrame(
@@ -626,7 +630,7 @@ class MissionPipelineIntegrationDriver final : public rclcpp::Node {
     message.target_id = target_id > 0 ? static_cast<std::uint32_t>(target_id) : 0U;
     message.source = source;
     message.event = event;
-    message.detail = "issue #87 integrated lifecycle driver";
+    message.detail = "mission contract integration external event owner";
     external_event_publisher_->publish(message);
   }
 
@@ -716,6 +720,57 @@ class MissionPipelineIntegrationDriver final : public rclcpp::Node {
         !Require(boxes_.empty(), "PATROL published a target bounding box")) {
       return;
     }
+
+    // Exercise the adapter's public state seam before accepting another frame. These
+    // inputs model late DDS delivery, a same-sequence split-brain publisher, and a
+    // same-sequence target mismatch. None may replace the real supervisor snapshot.
+    MissionStateMessage stale;
+    stale.state_seq = mission.state_seq - 1U;
+    stale.state = MissionStateMessage::PATROL;
+    stale.target_id = 0U;
+    stale.blocked = false;
+    stale.block_cause = MissionStateMessage::BLOCK_NONE;
+
+    MissionStateMessage conflicting;
+    conflicting.state_seq = mission.state_seq;
+    conflicting.state = MissionStateMessage::APPROACH_TARGET;
+    conflicting.target_id = static_cast<std::uint32_t>(evidence_.first_semantic_id);
+    conflicting.blocked = false;
+    conflicting.block_cause = MissionStateMessage::BLOCK_NONE;
+
+    MissionStateMessage wrong_target = conflicting;
+    wrong_target.state = MissionStateMessage::CONFIRM_TARGET;
+    wrong_target.target_id = static_cast<std::uint32_t>(evidence_.next_semantic_id);
+
+    if (!Require(!adapter_->StoreMissionState(stale),
+                 "stale state_seq replaced the authoritative supervisor state") ||
+        !Require(!adapter_->StoreMissionState(conflicting),
+                 "conflicting same-sequence state replaced the authoritative supervisor state") ||
+        !Require(!adapter_->StoreMissionState(wrong_target),
+                 "wrong target_id replaced the authoritative supervisor state")) {
+      return;
+    }
+    const auto retained = adapter_->CurrentMission();
+    if (!Require(retained.has_value() && retained->state_seq == mission.state_seq &&
+                     retained->phase == mission.phase && retained->target_id == mission.target_id,
+                 "a rejected state input changed the authoritative mission snapshot")) {
+      return;
+    }
+
+    const auto &frame = Frame(EvidenceSlot::kConfirmation);
+    std::vector<IdentityObservation> wrong_target_only;
+    for (const auto &identity : frame.identities) {
+      if (identity.semantic_id == evidence_.next_semantic_id) {
+        wrong_target_only.push_back(identity);
+      }
+    }
+    const auto rejected_output = adapter_->ProcessFrame(
+        wrong_target_only, source_origin_ + 50ms, frame.metadata);
+    if (!Require(rejected_output.events.empty() && !rejected_output.target_box.has_value(),
+                 "wrong target evidence produced a public event or cached bbox")) {
+      return;
+    }
+
     (void)ProcessFrame(source_origin_ + 100ms, EvidenceSlot::kConfirmation);
     Advance(Stage::kWaitConfirmBox);
   }
@@ -848,7 +903,12 @@ class MissionPipelineIntegrationDriver final : public rclcpp::Node {
     if (!Require(boxes_.size() == 4U &&
                      boxes_.back().target_id ==
                          static_cast<std::uint32_t>(evidence_.first_semantic_id),
-                 "VERIFY_IDENTITY did not retain the current fresh target bbox")) {
+                 "VERIFY_IDENTITY did not retain the current fresh target bbox") ||
+        !Require(EventCount(MissionEventMessage::AUTHORIZED,
+                            evidence_.first_semantic_id) == 0U &&
+                     EventCount(MissionEventMessage::UNAUTHORIZED,
+                                evidence_.first_semantic_id) == 0U,
+                 "tracking published an authorization result")) {
       return;
     }
     PublishExternalEvent(mission, MissionEventMessage::SOURCE_PERCEPTION,
@@ -924,7 +984,7 @@ int main(int argc, char *argv[]) {
   std::optional<VisualReplayConfig> visual_config;
   std::string error;
   if (!ParseVisualReplayConfig(argc, argv, &visual_config, &error)) {
-    std::cerr << "issue #87 integration argument error: " << error << std::endl;
+    std::cerr << "mission contract integration argument error: " << error << std::endl;
     return 2;
   }
 
@@ -932,11 +992,11 @@ int main(int argc, char *argv[]) {
   if (visual_config.has_value()) {
     auto visual_evidence = BuildVisualEvidence(visual_config.value(), &error);
     if (!visual_evidence.has_value()) {
-      std::cerr << "issue #87 visual evidence failed: " << error << std::endl;
+      std::cerr << "mission contract visual evidence failed: " << error << std::endl;
       return 1;
     }
     evidence = std::move(visual_evidence.value());
-    std::cout << "issue #87 visual pipeline decoded=" << evidence.decoded_frames
+    std::cout << "mission contract visual pipeline decoded=" << evidence.decoded_frames
               << " detection_positive=" << evidence.detection_positive_frames
               << " track_positive=" << evidence.track_positive_frames
               << " selection_frame="
@@ -970,14 +1030,14 @@ int main(int argc, char *argv[]) {
     executor.spin_some();
     executor.remove_node(driver);
     if (driver->success()) {
-      std::cout << "issue #87 integrated mission lifecycle passed" << std::endl;
+      std::cout << "integrated mission contract lifecycle passed" << std::endl;
       exit_code = 0;
     } else {
-      std::cerr << "issue #87 integrated mission lifecycle failed: " << driver->failure()
+      std::cerr << "integrated mission contract lifecycle failed: " << driver->failure()
                 << std::endl;
     }
   } catch (const std::exception &exception) {
-    std::cerr << "issue #87 integration exception: " << exception.what() << std::endl;
+    std::cerr << "mission contract integration exception: " << exception.what() << std::endl;
   }
   rclcpp::shutdown();
   return exit_code;
