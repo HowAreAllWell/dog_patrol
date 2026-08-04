@@ -46,6 +46,12 @@ PrimaryTargetResult PrimaryTargetObserver::CurrentPrimary() const {
   return primary_manager_.GetState();
 }
 
+void PrimaryTargetObserver::InvalidateCurrentObservation() {
+  if (sink_ != nullptr) {
+    sink_->Consume(std::nullopt);
+  }
+}
+
 std::optional<PrimaryTargetObservation> PrimaryTargetObserver::BuildObservation(
     const PrimaryTargetResult &primary,
     const SourceFrameMetadata &source,

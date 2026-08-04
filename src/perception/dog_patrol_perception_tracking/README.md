@@ -74,7 +74,8 @@ IdentityManager → PrimaryTargetManager` 实现；区别仅在输出边界：�
 `MissionState`，也不发布 mission event、导航状态、selected-target bbox 或 capability status。
 `PrimaryTargetObserver::Update` 每帧产生可选的 `PrimaryTargetObservation` 并交给 ROS-independent sink，
 其 `target_image` 是当前源图 clamped bbox 的深拷贝；当前帧无可信 `LOCKED` 主目标或 semantic ID 尚未分配时
-返回空值并清空 sink，不回放历史 observation。
+返回空值并清空 sink，不回放历史 observation。每个 live tick 会在相机采集前先失效旧值，因此取帧、
+detector 或 tracker 失败也不会让 sink 暴露上一帧目标。
 
 预览和 FFV1 diagnostic overlay 录制可独立启用：
 

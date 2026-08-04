@@ -97,6 +97,21 @@ TEST(PrimaryTargetObserverTest, UnassignedSemanticIdentityCannotBecomeAnObservat
   EXPECT_FALSE(output.observation.has_value());
 }
 
+TEST(PrimaryTargetObserverTest, FailedFrameCycleInvalidatesPreviouslyConsumedObservation) {
+  PrimaryTargetManager::Config config;
+  config.min_person_area_px = 1.0F;
+  auto sink = std::make_shared<LatestPrimaryTargetObservation>();
+  PrimaryTargetObserver observer(config, sink);
+  cv::Mat frame(4, 5, CV_8UC3, cv::Scalar{10, 20, 30});
+  ASSERT_TRUE(observer.Update({TrustedPerson()}, Metadata(frame), frame).observation.has_value());
+  ASSERT_TRUE(sink->Current().has_value());
+
+  observer.InvalidateCurrentObservation();
+
+  EXPECT_FALSE(sink->Current().has_value());
+  EXPECT_EQ(observer.CurrentPrimary().state, PrimaryState::kLocked);
+}
+
 TEST(PrimaryTargetObserverTest, RejectsUnrepresentableCurrentFrameInsteadOfFabricatingObservation) {
   auto observer = Observer();
   cv::Mat frame(4, 5, CV_8UC3, cv::Scalar{10, 20, 30});

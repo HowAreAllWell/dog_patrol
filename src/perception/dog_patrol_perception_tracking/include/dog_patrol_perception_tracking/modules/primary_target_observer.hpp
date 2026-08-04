@@ -62,6 +62,11 @@ class PrimaryTargetObserver {
                 const SourceFrameMetadata &source,
                 const cv::Mat &source_image);
 
+  // Call before acquiring/processing a new live frame. If that cycle fails
+  // before Update, consumers still observe no current target rather than the
+  // previous frame's value.
+  void InvalidateCurrentObservation();
+
   PrimaryTargetResult CurrentPrimary() const;
 
  private:

@@ -672,7 +672,8 @@ class MissionPipelineIntegrationDriver final : public rclcpp::Node {
     }
     const auto observer_grace = evidence_.visual_pipeline ? 3s : 500ms;
     if (std::chrono::steady_clock::now() - startup_observed_at_.value() < observer_grace ||
-        external_event_publisher_->get_subscription_count() < 1U) {
+        external_event_publisher_->get_subscription_count() < 1U ||
+        capability_status_publisher_->get_subscription_count() < 1U) {
       return;
     }
     adapter_->PublishCapabilityStatus();

@@ -77,7 +77,7 @@ class PerceptionTrackingNode : public rclcpp::Node {
     } catch (const std::exception &exception) {
       ReportDetectionTrackingRuntimeStatus(
           {false, false, "tracking initialization failed: " + std::string(exception.what())});
-      if (runtime_mode_ == RuntimeMode::kStandalone) {
+      if (primary_target_observer_ != nullptr) {
         RCLCPP_ERROR(get_logger(), "standalone tracking initialization failed: %s", exception.what());
         throw;
       }
@@ -315,7 +315,7 @@ class PerceptionTrackingNode : public rclcpp::Node {
   }
 
   dog_patrol_perception_tracking::PrimaryTargetResult CurrentPrimary() const {
-    return runtime_mode_ == RuntimeMode::kStandalone
+    return primary_target_observer_ != nullptr
                ? primary_target_observer_->CurrentPrimary()
                : mission_ros_adapter_->CurrentPrimary();
   }
@@ -613,7 +613,7 @@ class PerceptionTrackingNode : public rclcpp::Node {
       const dog_patrol_perception_tracking::SourceFrameMetadata &source_metadata,
       const cv::Mat &frame) {
     RuntimeFrameOutput output;
-    if (runtime_mode_ == RuntimeMode::kStandalone) {
+    if (primary_target_observer_ != nullptr) {
       auto standalone_frame = primary_target_observer_->Update(identities, source_metadata, frame);
       output.primary = std::move(standalone_frame.primary);
       output.primary_decision_reason = std::move(standalone_frame.primary_decision_reason);
@@ -635,6 +635,9 @@ class PerceptionTrackingNode : public rclcpp::Node {
     // the complete camera/detector/tracker/identity/coordinator chain stays
     // serialized here.
     std::lock_guard<std::mutex> pipeline_lock(pipeline_mutex_);
+    if (primary_target_observer_ != nullptr) {
+      primary_target_observer_->InvalidateCurrentObservation();
+    }
     PublishCapabilityStatus();
     if (!runtime_operational_) {
       return;
