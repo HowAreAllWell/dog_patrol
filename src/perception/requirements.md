@@ -11,7 +11,7 @@
 
 | 模块 | 状态 | 平台与部署输入 | 验收边界 |
 | --- | --- | --- | --- |
-| tracking | `implemented` | Jetson Orin；CUDA/TensorRT、Hikrobot MVS SDK、相机、本机 engine、ReID ONNX、ROS 参数 | 完整 Orin build/test；相机可枚举；live 节点加载 engine 并稳定输出 tracking 指标 |
+| tracking | `implemented` | Jetson Orin；CUDA/TensorRT、Hikrobot MVS SDK、相机、本机 engine、ROS 参数；仅 `osnet_onnx` 后端需要 ReID ONNX | 完整 Orin build/test；相机可枚举；live 节点加载 engine 并稳定输出 tracking 指标 |
 | face | `not-integrated` | 预期从 `TrackedTargetImage` 消费同帧主目标 crop；实现、模型和白名单尚未进入本仓 | 当前只验证 crop transport；不得把测试 provider 当作生产 readiness |
 | voice | `not-integrated` | 实现、语音 SDK/模型、音频设备和生产 provider 尚未进入本仓 | 当前不能发布生产 `voice` READY |
 | orchestrator | `integrating` | ROS 2 Humble；已有 readiness 聚合和 ROS-independent 授权规则 | tracking/face/voice 对当前 STARTUP sequence 都 ready 才能发布感知整体 READY；真实 face/voice 结果 adapter 尚未接入 |
@@ -40,8 +40,10 @@ ID `2bdf:0001`）。已验收模式为 `BayerGB8` (`0x0108000a`)、`1280x1024@30
 - `detector.runtime_path`：YOLO26n FP16 TensorRT `.engine`。engine 必须在目标 Orin 上用
   `dog_patrol_perception_tracking/scripts/export_yolo26n_engine_orin_jp621.sh` 生成；不跨设备、
   JetPack 或 TensorRT 版本复用。
-- `tracker.reid_model_path` 和 `sid.reid_model_path`：已批准的 ReID ONNX 资产；如该
-  ONNX 使用 external data，对应 `.onnx.data` 必须同时存在。
+- `tracker.reid_backend` 和 `sid.reid_backend` 默认均为 `light`，此时模型路径应留空且不需要
+  ReID ONNX。仅对应 backend 为 `osnet_onnx`（也包括 runtime 规范化到它的 `onnx`、`osnet`
+  和 `true_reid` 别名）时，`tracker.reid_model_path` 或 `sid.reid_model_path` 才必须指向已批准的
+  ReID ONNX；如该 ONNX 使用 external data，对应 `.onnx.data` 必须同时存在。
 - `camera.mvs_serial`：实际相机序列号；`camera.mvs_model` 必须为上述已支持型号。
 - 部署专用 ROS 参数文件和 tracker YAML。参数文件不得携带 RTSP userinfo、凭据、白名单、
   特征向量、录像或本机临时目录。
@@ -63,10 +65,24 @@ python3 src/perception/scripts/check_perception_environment.py \
 ```
 
 最终导航 Orin 将 `--target` 改为 `navigation-orin`。命令统一检查架构/L4T、CUDA、
-TensorRT、ROS 2、MVS SDK、USB 相机枚举、detector/ReID 资产（包括用 `trtexec` 实际加载 engine，以及用 tracking package 中与 production core 链接同一 OpenCV 的 `validate_reid_onnx` 实际加载 ONNX/external data）、必需参数、tracker YAML、
-colcon 安装结果、完整 Orin runtime 构建开关、测试结果和上表模块状态。全部关键检查通过时最后一行为
+TensorRT、ROS 2、MVS SDK、USB 相机枚举、detector/ReID 资产、必需参数、tracker YAML、
+colcon 安装结果、完整 Orin runtime 构建开关、测试结果和上表模块状态。engine 由安装后的
+`validate_tensorrt_engine` 使用 production detector 的同一 TensorRT 反序列化、binding 校验和 CUDA
+分配路径实际加载；只有配置选择 `osnet_onnx` 后端时，ReID ONNX 才由同一 OpenCV C++ runtime
+实际加载。默认 `light` 后端和空模型路径应通过 ReID 资产门禁。全部关键检查通过时最后一行为
 `PERCEPTION ENVIRONMENT: PASS`；任一关键依赖缺失时输出可操作的 `[FAIL]` 说明，最终为
 `PERCEPTION ENVIRONMENT: FAIL` 并返回非零状态。
 
 对 `navigation-orin` 的第一次成功检查只证明落在已支持系列；还需将输出中的精确版本
 回填到本文档，经现场验收后才能从“待核验”改为“已核验”。
+
+## Tracking verified baseline
+
+2026-08-04，当前感知 AGX Orin 已在 MAXN、CPU 2.2016 GHz 和 GPU 1.3005 GHz 锁频下完成
+tracking 硬件验收：production 默认 tracker/SID `light` backend，真实 Hik
+`BayerGB8` 1280×1024@30 FPS，真人 detector/tracker/semantic primary 和 standalone
+`TrackedTargetImage` 字段、同人 crop、离场停发均通过。无业务消费者、正常消费者和 500 ms
+慢消费者三轮各 60 秒的 tracking 稳态均值分别为 30.012、30.011 和 29.992 FPS；慢消费者未反压
+tracking。三轮 acquisition failure/MVS lost packet 均为 0，估计 drop/non-contiguous 均为 2/2
+且仅见于启动阶段。完整阶段分位数、资源、topic 和 queue-drop 基线见
+[`../../docs/perception/tracking/issue14_tracking_hardware_acceptance.md`](../../docs/perception/tracking/issue14_tracking_hardware_acceptance.md)。

@@ -62,6 +62,10 @@ class EnvironmentCheckTest(unittest.TestCase):
         parsed = MODULE.parse_ros_parameters(path)
         self.assertEqual(parsed["camera.mvs_model"], "MV-CU013-A0UC")
         self.assertEqual(parsed["target_image.max_publish_hz"], 10.0)
+        self.assertEqual(parsed["tracker.reid_backend"], "light")
+        self.assertEqual(parsed["tracker.reid_model_path"], "")
+        self.assertEqual(parsed["sid.reid_backend"], "light")
+        self.assertEqual(parsed["sid.reid_model_path"], "")
 
     def test_requirements_are_module_status_source_of_truth(self):
         path = Path(__file__).parents[1] / "requirements.md"
@@ -103,8 +107,10 @@ class EnvironmentCheckTest(unittest.TestCase):
     detector:
       runtime_path: "{engine}"
     tracker:
+      reid_backend: "osnet_onnx"
       reid_model_path: "{reid}"
     sid:
+      reid_backend: "osnet_onnx"
       reid_model_path: "{reid}"
 """,
                 encoding="utf-8",
@@ -115,7 +121,9 @@ class EnvironmentCheckTest(unittest.TestCase):
                 mock.patch.object(MODULE, "run", return_value=(0, "engine loaded")),
                 redirect_stdout(io.StringIO()),
             ):
-                MODULE.check_parameters_and_assets(reporter, params, tracker, Path("/bin/true"))
+                MODULE.check_parameters_and_assets(
+                    reporter, params, tracker, Path("/bin/true"), Path("/bin/true")
+                )
         self.assertEqual(reporter.failures, 0)
 
     def test_onnx_runtime_load_failure_is_critical(self):
@@ -139,15 +147,17 @@ class EnvironmentCheckTest(unittest.TestCase):
     detector:
       runtime_path: "{engine}"
     tracker:
+      reid_backend: "onnx"
       reid_model_path: "{reid}"
     sid:
+      reid_backend: "true_reid"
       reid_model_path: "{reid}"
 """,
                 encoding="utf-8",
             )
 
             def runtime_load(command):
-                if "--skipInference" in command:
+                if command[-1].endswith("detector.engine"):
                     return 0, "engine loaded"
                 return 1, "missing data"
 
@@ -157,8 +167,88 @@ class EnvironmentCheckTest(unittest.TestCase):
                 mock.patch.object(MODULE, "run", side_effect=runtime_load),
                 redirect_stdout(io.StringIO()),
             ):
-                MODULE.check_parameters_and_assets(reporter, params, tracker, Path("/bin/true"))
+                MODULE.check_parameters_and_assets(
+                    reporter, params, tracker, Path("/bin/true"), Path("/bin/true")
+                )
         self.assertEqual(reporter.failures, 2)
+
+    def test_default_light_backends_do_not_require_or_load_onnx(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            engine = root / "detector.engine"
+            tracker = root / "bot_sort.yaml"
+            engine.write_bytes(b"fixture")
+            tracker.write_bytes(b"fixture")
+            params = root / "params.yaml"
+            params.write_text(
+                f"""node:
+  ros__parameters:
+    camera:
+      mvs_model: "MV-CU013-A0UC"
+      mvs_serial: "SERIAL"
+      width: 1280
+      height: 1024
+      fps: 30.0
+    detector:
+      runtime_path: "{engine}"
+    tracker:
+      reid_backend: "light"
+      reid_model_path: ""
+    sid:
+      reid_backend: ""
+      reid_model_path: ""
+""",
+                encoding="utf-8",
+            )
+            reporter = MODULE.Reporter()
+            with (
+                mock.patch.object(MODULE, "run", return_value=(0, "engine loaded")) as run,
+                redirect_stdout(io.StringIO()),
+            ):
+                MODULE.check_parameters_and_assets(
+                    reporter, params, tracker, Path("/bin/true"), None
+                )
+        self.assertEqual(reporter.failures, 0)
+        self.assertEqual(run.call_args_list, [mock.call(["/bin/true", str(engine)])])
+
+    def test_all_onnx_backend_aliases_require_model_path(self):
+        for alias in ("onnx", "osnet", "osnet_onnx", "true_reid", "OSNET"):
+            with self.subTest(alias=alias), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                engine = root / "detector.engine"
+                tracker = root / "bot_sort.yaml"
+                engine.write_bytes(b"fixture")
+                tracker.write_bytes(b"fixture")
+                params = root / "params.yaml"
+                params.write_text(
+                    f"""node:
+  ros__parameters:
+    camera:
+      mvs_model: "MV-CU013-A0UC"
+      mvs_serial: "SERIAL"
+      width: 1280
+      height: 1024
+      fps: 30.0
+    detector:
+      runtime_path: "{engine}"
+    tracker:
+      reid_backend: "{alias}"
+      reid_model_path: ""
+    sid:
+      reid_backend: "light"
+      reid_model_path: ""
+""",
+                    encoding="utf-8",
+                )
+                reporter = MODULE.Reporter()
+                with (
+                    mock.patch.object(MODULE, "run", return_value=(0, "engine loaded")),
+                    redirect_stdout(io.StringIO()),
+                ):
+                    MODULE.check_parameters_and_assets(
+                        reporter, params, tracker, Path("/bin/true"), Path("/bin/true")
+                    )
+                self.assertEqual(reporter.failures, 1)
 
     def test_navigation_policy_matches_documented_jetpack_compatibility_line(self):
         versions = MODULE.TARGET_POLICIES["navigation-orin"].versions

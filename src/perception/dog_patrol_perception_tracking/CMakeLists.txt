@@ -199,6 +199,13 @@ if(TRACKING_ENABLE_ORIN_RUNTIME)
     ${PROJECT_NAME}_orin_runtime
     ${PROJECT_NAME}_recording)
 
+  # Deployment preflight must exercise the same TensorRT deserializer, binding
+  # validation, and CUDA allocation path as the production detector.  trtexec
+  # initializes unrelated standard plugins and can fail before reading a plan.
+  add_executable(validate_tensorrt_engine src/tools/validate_tensorrt_engine.cpp)
+  target_compile_features(validate_tensorrt_engine PUBLIC cxx_std_17)
+  target_link_libraries(validate_tensorrt_engine ${PROJECT_NAME}_orin_runtime)
+
   add_executable(capture_ffv1 src/tools/capture_ffv1.cpp)
   target_compile_features(capture_ffv1 PUBLIC cxx_std_17)
   target_link_libraries(capture_ffv1 ${PROJECT_NAME}_recording)
@@ -219,6 +226,7 @@ if(TRACKING_ENABLE_ORIN_RUNTIME)
     ${PROJECT_NAME}_recording
     ${PROJECT_NAME}_offline_runtime
     dog_patrol_perception_tracking_node
+    validate_tensorrt_engine
     capture_ffv1
     offline_eval_recordings
     benchmark_bayer_input)

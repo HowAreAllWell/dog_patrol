@@ -2,7 +2,7 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-WS_DIR="${WS_DIR:-$(cd "${SCRIPT_DIR}/../../.." && pwd)}"
+WS_DIR="${WS_DIR:-$(cd "${SCRIPT_DIR}/../../../.." && pwd)}"
 ENGINE_PATH="${ENGINE_PATH:-${WS_DIR}/assets/models/engines/orin_jp621_trt_local/yolo26n_fp16_640.engine}"
 REID_DIR="${REID_DIR:-${WS_DIR}/assets/models/reid}"
 
@@ -72,13 +72,13 @@ else
   warn "nvcc not found in PATH; CUDAToolkit may still be discoverable by CMake"
 fi
 
-if ldconfig -p 2>/dev/null | grep -q 'libnvinfer'; then
+if grep -F 'libnvinfer' < <(ldconfig -p 2>/dev/null) >/dev/null; then
   pass "TensorRT runtime library found by ldconfig"
 else
   fail "TensorRT runtime library not found by ldconfig"
 fi
 
-if find /usr /usr/local -name NvInfer.h -print -quit 2>/dev/null | grep -q .; then
+if grep -F 'NvInfer.h' < <(find /usr /usr/local -name NvInfer.h -print -quit 2>/dev/null) >/dev/null; then
   pass "TensorRT header NvInfer.h found"
 else
   fail "TensorRT header NvInfer.h not found"
@@ -96,10 +96,19 @@ else
   fail "Hikrobot MVS header missing: /opt/MVS/include/MvCameraControl.h"
 fi
 
-if [[ -f /opt/MVS/lib/64/libMvCameraControl.so ]]; then
-  pass "Hikrobot MVS library found"
+MVS_LIBRARY=""
+for candidate in \
+  /opt/MVS/lib/aarch64/libMvCameraControl.so \
+  /opt/MVS/lib/64/libMvCameraControl.so; do
+  if [[ -f "$candidate" ]]; then
+    MVS_LIBRARY="$candidate"
+    break
+  fi
+done
+if [[ -n "$MVS_LIBRARY" ]]; then
+  pass "Hikrobot MVS library found: $MVS_LIBRARY"
 else
-  fail "Hikrobot MVS library missing: /opt/MVS/lib/64/libMvCameraControl.so"
+  fail "Hikrobot MVS library missing under /opt/MVS/lib/{aarch64,64}"
 fi
 
 if [[ -d /opt/MVS ]]; then
@@ -119,7 +128,7 @@ fi
 if [[ -f "$ENGINE_PATH" ]]; then
   pass "Orin TensorRT engine exists: $ENGINE_PATH"
 else
-  warn "Orin TensorRT engine missing; run src/dog_patrol_perception_tracking/scripts/export_yolo26n_engine_orin_jp621.sh on Orin"
+  warn "Orin TensorRT engine missing; run src/perception/dog_patrol_perception_tracking/scripts/export_yolo26n_engine_orin_jp621.sh on Orin"
 fi
 
 if [[ -f "${REID_DIR}/osnet_x1_0_market1501_256x128.onnx" ]]; then
