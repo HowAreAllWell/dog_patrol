@@ -3,7 +3,7 @@
 ## 结论和边界
 
 `HowAreAllWell/dog_patrol` 是 tracking 后续开发、构建、测试和部署的唯一权威仓库。
-旧私有仓库 `HowAreAllWell/vision_demo_ws` 将在本页门禁全部通过后设为只读归档，仅保留迁移前
+旧私有仓库 `HowAreAllWell/vision_demo_ws` 已于 2026-08-04 设为 GitHub 只读归档，仅保留迁移前
 历史和紧急回退依据；主仓的构建、测试、standalone 或部署入口均不依赖旧仓 checkout、overlay
 或资产目录。
 
@@ -58,3 +58,16 @@ git log --follow tracking-import/vision-demo-ws-7878d70 -- \
 
 归档只改变 GitHub 仓库的写入状态，不删除旧仓历史，也不触碰本机 ignored 的模型、engine、录像、
 日志或部署参数。
+
+## 最终验证
+
+- 主仓 PR #25 和 follow-up PR #26 均通过 CI 并 squash merge；执行归档门禁时的 merged-main
+  验收 SHA 为 `c60ea3e028fd4abbeb83e21e14360d7041834385`。
+- 从远端最终 `main` 全新 clone 后，portable 五包构建通过，测试汇总为 399 tests、0 errors、
+  0 failures、0 skipped，clone 工作树保持干净。
+- `vision_demo_ws` 的 GitHub `isArchived=true`；归档后仍可读取默认分支
+  `599bdfca1bf1f32602a2dbafbac6b19aa83cffe6` 和冻结分支
+  `4f3df1505a05e8b4bd3d1498cec22caa5b769c10`。
+- 旧仓本地停留在同步且干净的 `deploy/dog_patrol-integration`；ignored 的 MVS 日志、模型、
+  engine、ReID 和录像/数据目录仍在，未删除或纳入 Git。
+- face、voice 和导航整机验收继续保留为后续；父 Spec #3 保持开放。
