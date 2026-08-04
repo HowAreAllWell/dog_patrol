@@ -43,6 +43,12 @@ class LatestPrimaryTargetObservation final : public PrimaryTargetObservationSink
 
 class PrimaryTargetObserver {
  public:
+  struct CropConfig {
+    // Fraction of the trusted target width/height added on every side before
+    // clamping to the source image. Zero preserves the detector/tracker bbox.
+    float padding_ratio{0.0F};
+  };
+
   struct Output {
     PrimaryTargetResult primary;
     std::optional<PrimaryTargetObservation> observation;
@@ -54,6 +60,9 @@ class PrimaryTargetObserver {
   explicit PrimaryTargetObserver(PrimaryTargetManager::Config config);
   PrimaryTargetObserver(PrimaryTargetManager::Config config,
                         std::shared_ptr<PrimaryTargetObservationSink> sink);
+  PrimaryTargetObserver(PrimaryTargetManager::Config config,
+                        std::shared_ptr<PrimaryTargetObservationSink> sink,
+                        CropConfig crop_config);
 
   // Advances primary selection using current identity evidence and returns an
   // observation only when that same frame contains a representable, trusted
@@ -73,10 +82,12 @@ class PrimaryTargetObserver {
   static std::optional<PrimaryTargetObservation> BuildObservation(
       const PrimaryTargetResult &primary,
       const SourceFrameMetadata &source,
-      const cv::Mat &source_image);
+      const cv::Mat &source_image,
+      const CropConfig &crop_config);
 
   PrimaryTargetManager primary_manager_;
   std::shared_ptr<PrimaryTargetObservationSink> sink_;
+  CropConfig crop_config_;
 };
 
 }  // namespace dog_patrol_perception_tracking

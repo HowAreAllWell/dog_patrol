@@ -12,8 +12,8 @@ Dog patrol 的正式 perception tracking 模块，包含相机接入、检测、
 - `perception_config_materializer`：ROS 参数 / 离线 request 到 tracker、identity、visualizer
   运行态配置的统一 materialization 入口
 - `primary_target_manager`：`person`-only 主目标规则（首锁最大框 + continuity-first）
-- `primary_target_observer`：ROS-independent 当前主目标 observation seam；只在当前帧主目标可信时返回 semantic target ID、源帧元数据、clamped bbox 和自持有目标图像，不依赖 mission state/state sequence；可注入 `PrimaryTargetObservationSink`，standalone live 默认使用线程安全的
-  `LatestPrimaryTargetObservation` 消费并在无可信当前目标时显式清空
+- `primary_target_observer`：ROS-independent 当前主目标 observation seam；只在当前帧主目标可信时返回 semantic target ID、源帧元数据、clamped bbox 和自持有目标图像，不依赖 mission state/state sequence；可注入 `PrimaryTargetObservationSink`
+- `target_image_ros_adapter`：standalone 的 ROS transport seam；以有界异步丢旧队列向独立人脸进程发布当前 crop，并在无可信当前目标时显式清空待发布旧值
 - `mission_coordinator`：ROS-independent 任务输出协调 seam；按任务状态 / semantic target / state sequence 只产生当前帧可信 bbox，并负责配置化同目标 loss/reacquire event 时序
 - `mission_frame_transaction`：ROS-independent 一帧任务事务；在 identity 输出后统一执行 primary 更新、PATROL 目标确认、fresh bbox、loss/reacquire，并返回本帧 primary 诊断
 - `perception_readiness`：ROS-independent READY 聚合 seam；以 required capability contribution 和 `STARTUP state_seq` 产生至多一次 aggregate READY action
@@ -76,6 +76,21 @@ standalone strategy 不创建 `MissionRosAdapter`，因此不订阅
 其 `target_image` 是当前源图 clamped bbox 的深拷贝；当前帧无可信 `LOCKED` 主目标或 semantic ID 尚未分配时
 返回空值并清空 sink，不回放历史 observation。每个 live tick 会在相机采集前先失效旧值，因此取帧、
 detector 或 tracker 失败也不会让 sink 暴露上一帧目标。
+
+standalone 将该 observation 发布为
+`dog_patrol_perception_interfaces/msg/TrackedTargetImage`（默认 topic
+`/perception/tracked_target_image`）。消息携带 semantic target、源相机时间/帧号、原图尺寸与 bbox，
+以及自持有 `bgr8` crop；不携带 mission `state_seq`，也不发送完整相机帧。传输使用 best-effort、
+volatile、keep-last(1) QoS；tracking 帧线程只向专用有界队列提交，拥塞时丢旧保新。
+
+相关参数为 `target_image.topic`、`target_image.crop_padding_ratio`（bbox 每侧按宽/高比例外扩，默认
+`0.10`）、`target_image.max_publish_hz`（默认 `10.0`）和 `target_image.queue_capacity`（默认 `2`）。
+
+Orin 性能测量入口：运行 standalone 后执行
+`ros2 topic hz /perception/tracked_target_image` 与
+`ros2 topic bw /perception/tracked_target_image`，并保存节点 `runtime_monitor` 的 tracking FPS、camera
+和 inference 指标。在人脸消费者正常速度与故意降速两种条件下对比 tracking FPS；若 FPS 明显下降，
+或 crop 带宽/序列化成本超出部署预算，则以这些记录作为切换共享内存 adapter 的基线证据。
 
 预览和 FFV1 diagnostic overlay 录制可独立启用：
 

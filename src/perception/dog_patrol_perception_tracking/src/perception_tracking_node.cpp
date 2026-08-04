@@ -26,6 +26,7 @@
 #include "dog_patrol_perception_tracking/modules/primary_target_manager.hpp"
 #include "dog_patrol_perception_tracking/modules/primary_target_observer.hpp"
 #include "dog_patrol_perception_tracking/modules/runtime_monitor.hpp"
+#include "dog_patrol_perception_tracking/modules/target_image_ros_adapter.hpp"
 #include "dog_patrol_perception_tracking/modules/visualizer_recorder.hpp"
 
 namespace {
@@ -78,6 +79,7 @@ class ObservationLifecycle {
   virtual ~ObservationLifecycle() = default;
   virtual void BeforeFrame() = 0;
   virtual bool Current() const = 0;
+  virtual dog_patrol_perception_tracking::TargetImageRosAdapter::Metrics Metrics() const = 0;
 };
 
 class MissionTrackingRuntime final : public TrackingRuntime,
@@ -115,10 +117,11 @@ class StandaloneTrackingRuntime final : public TrackingRuntime,
                                         public ObservationLifecycle {
  public:
   explicit StandaloneTrackingRuntime(
-      dog_patrol_perception_tracking::PrimaryTargetManager::Config config)
-      : latest_(std::make_shared<
-                dog_patrol_perception_tracking::LatestPrimaryTargetObservation>()),
-        observer_(std::move(config), latest_) {}
+      dog_patrol_perception_tracking::PrimaryTargetManager::Config config,
+      std::shared_ptr<dog_patrol_perception_tracking::TargetImageRosAdapter> image_adapter,
+      dog_patrol_perception_tracking::PrimaryTargetObserver::CropConfig crop_config)
+      : image_adapter_(std::move(image_adapter)),
+        observer_(std::move(config), image_adapter_, crop_config) {}
 
   const char *Name() const override { return "standalone"; }
   bool FailFastOnInitializationError() const override { return true; }
@@ -134,10 +137,13 @@ class StandaloneTrackingRuntime final : public TrackingRuntime,
     return {std::move(output.primary), std::move(output.primary_decision_reason),
             std::move(output.primary_reject_reason)};
   }
-  bool Current() const override { return latest_->Current().has_value(); }
+  bool Current() const override { return image_adapter_->HasCurrentObservation(); }
+  dog_patrol_perception_tracking::TargetImageRosAdapter::Metrics Metrics() const override {
+    return image_adapter_->GetMetrics();
+  }
 
  private:
-  std::shared_ptr<dog_patrol_perception_tracking::LatestPrimaryTargetObservation> latest_;
+  std::shared_ptr<dog_patrol_perception_tracking::TargetImageRosAdapter> image_adapter_;
   dog_patrol_perception_tracking::PrimaryTargetObserver observer_;
 };
 
@@ -264,6 +270,11 @@ class PerceptionTrackingNode : public rclcpp::Node {
                                          "/perception/capability_status");
     this->declare_parameter<std::string>("perception.camera_optical_frame_id",
                                          "hik_camera_optical_frame");
+    this->declare_parameter<std::string>("target_image.topic",
+                                         "/perception/tracked_target_image");
+    this->declare_parameter<double>("target_image.crop_padding_ratio", 0.10);
+    this->declare_parameter<double>("target_image.max_publish_hz", 10.0);
+    this->declare_parameter<int>("target_image.queue_capacity", 2);
 
     this->declare_parameter<int>("sid.feat_bank_size", identity_defaults.feat_bank_size);
     this->declare_parameter<double>("sid.recover_sim_thresh_strict", identity_defaults.recover_sim_thresh_strict);
@@ -324,7 +335,22 @@ class PerceptionTrackingNode : public rclcpp::Node {
       runtime_ = std::move(runtime);
       return;
     }
-    auto runtime = std::make_unique<StandaloneTrackingRuntime>(target_cfg);
+    dog_patrol_perception_tracking::TargetImageRosAdapter::Config adapter_config;
+    adapter_config.topic = this->get_parameter("target_image.topic").as_string();
+    const auto queue_capacity = this->get_parameter("target_image.queue_capacity").as_int();
+    if (queue_capacity <= 0) {
+      throw std::runtime_error("target_image.queue_capacity must be positive");
+    }
+    adapter_config.queue_capacity = static_cast<std::size_t>(queue_capacity);
+    adapter_config.max_publish_hz =
+        this->get_parameter("target_image.max_publish_hz").as_double();
+    auto image_adapter = std::make_shared<
+        dog_patrol_perception_tracking::TargetImageRosAdapter>(*this, adapter_config);
+    dog_patrol_perception_tracking::PrimaryTargetObserver::CropConfig crop_config;
+    crop_config.padding_ratio = static_cast<float>(
+        this->get_parameter("target_image.crop_padding_ratio").as_double());
+    auto runtime = std::make_unique<StandaloneTrackingRuntime>(
+        target_cfg, std::move(image_adapter), crop_config);
     observation_lifecycle_ = runtime.get();
     runtime_ = std::move(runtime);
   }
@@ -771,6 +797,16 @@ class PerceptionTrackingNode : public rclcpp::Node {
           "inference_metrics total_ms_p50_p95_p99=%.3f/%.3f/%.3f samples=%zu",
           inference_metrics.total.p50_ms, inference_metrics.total.p95_ms,
           inference_metrics.total.p99_ms, inference_metrics.total.samples);
+      if (observation_lifecycle_ != nullptr) {
+        const auto image_metrics = observation_lifecycle_->Metrics();
+        RCLCPP_INFO(
+            get_logger(),
+            "target_image_metrics submitted=%llu published=%llu queue_drops=%llu rate_limited=%llu",
+            static_cast<unsigned long long>(image_metrics.submitted),
+            static_cast<unsigned long long>(image_metrics.published),
+            static_cast<unsigned long long>(image_metrics.queue_dropped),
+            static_cast<unsigned long long>(image_metrics.rate_limited));
+      }
       if (visualizer_ != nullptr) {
         LogOverlayMetrics(visualizer_->Metrics(), "runtime");
       }

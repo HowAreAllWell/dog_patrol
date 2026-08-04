@@ -1,0 +1,119 @@
+#include <atomic>
+#include <chrono>
+#include <condition_variable>
+#include <cstdint>
+#include <mutex>
+#include <thread>
+
+#include <gtest/gtest.h>
+#include <opencv2/core.hpp>
+
+#include "dog_patrol_perception_tracking/modules/target_image_ros_adapter.hpp"
+
+namespace {
+
+using dog_patrol_perception_tracking::PrimaryTargetObservation;
+using dog_patrol_perception_tracking::TargetImageRosAdapter;
+
+PrimaryTargetObservation Observation(std::uint64_t timestamp_ns, int target_id = 42) {
+  PrimaryTargetObservation observation;
+  observation.target_id = target_id;
+  observation.confidence = 0.91F;
+  observation.source.source_timestamp_ns = timestamp_ns;
+  observation.source.camera_frame_number = 7U;
+  observation.source.camera_frame_number_available = true;
+  observation.source.image_width = 8;
+  observation.source.image_height = 6;
+  observation.source.optical_frame_id = "hik_camera_optical_frame";
+  observation.bbox = cv::Rect{2, 1, 3, 4};
+  observation.target_image = cv::Mat(4, 3, CV_8UC3, cv::Scalar{10, 20, 30}).clone();
+  return observation;
+}
+
+TEST(TargetImageRosAdapterTest, ConvertsOwnedBgrCropAndSourceCoordinates) {
+  auto message = TargetImageRosAdapter::ToMessage(Observation(1710000000123456789ULL));
+
+  EXPECT_EQ(message->source_stamp.sec, 1710000000);
+  EXPECT_EQ(message->source_stamp.nanosec, 123456789U);
+  EXPECT_EQ(message->source_frame_id, "hik_camera_optical_frame");
+  EXPECT_EQ(message->target_id, 42);
+  EXPECT_EQ(message->source_image_width, 8U);
+  EXPECT_EQ(message->bbox_x, 2);
+  EXPECT_EQ(message->bbox_height, 4U);
+  EXPECT_EQ(message->encoding, "bgr8");
+  EXPECT_EQ(message->crop_width, 3U);
+  EXPECT_EQ(message->crop_height, 4U);
+  EXPECT_EQ(message->crop_step, 9U);
+  ASSERT_EQ(message->crop_data.size(), 36U);
+  EXPECT_EQ(message->crop_data[0], 10U);
+  EXPECT_EQ(message->crop_data[1], 20U);
+  EXPECT_EQ(message->crop_data[2], 30U);
+}
+
+TEST(TargetImageRosAdapterTest, SlowPublisherDropsOldCropsWithoutBlockingProducer) {
+  std::mutex mutex;
+  std::condition_variable first_publish_started;
+  bool started = false;
+  std::atomic<int> published{0};
+  TargetImageRosAdapter::Config config;
+  config.queue_capacity = 2U;
+  config.max_publish_hz = 1000.0;
+  TargetImageRosAdapter adapter(config, [&](TargetImageRosAdapter::Message::UniquePtr) {
+    {
+      std::lock_guard<std::mutex> lock(mutex);
+      started = true;
+    }
+    first_publish_started.notify_one();
+    ++published;
+    std::this_thread::sleep_for(std::chrono::milliseconds(80));
+  });
+
+  adapter.Consume(Observation(1000000000ULL));
+  {
+    std::unique_lock<std::mutex> lock(mutex);
+    ASSERT_TRUE(first_publish_started.wait_for(
+        lock, std::chrono::seconds(1), [&] { return started; }));
+  }
+  const auto before = std::chrono::steady_clock::now();
+  for (int index = 1; index <= 20; ++index) {
+    adapter.Consume(Observation(1000000000ULL + static_cast<std::uint64_t>(index) * 2000000ULL));
+  }
+  const auto producer_elapsed = std::chrono::steady_clock::now() - before;
+
+  EXPECT_LT(producer_elapsed, std::chrono::milliseconds(20));
+  std::this_thread::sleep_for(std::chrono::milliseconds(180));
+  const auto metrics = adapter.GetMetrics();
+  EXPECT_EQ(metrics.submitted, 21U);
+  EXPECT_GT(metrics.queue_dropped, 0U);
+  EXPECT_LT(published.load(), 21);
+}
+
+TEST(TargetImageRosAdapterTest, InvalidatingTargetClearsPendingHistoricalCrop) {
+  std::mutex mutex;
+  std::condition_variable started_cv;
+  bool started = false;
+  TargetImageRosAdapter::Config config;
+  config.queue_capacity = 2U;
+  config.max_publish_hz = 1000.0;
+  TargetImageRosAdapter adapter(config, [&](TargetImageRosAdapter::Message::UniquePtr) {
+    {
+      std::lock_guard<std::mutex> lock(mutex);
+      started = true;
+    }
+    started_cv.notify_one();
+    std::this_thread::sleep_for(std::chrono::milliseconds(60));
+  });
+  adapter.Consume(Observation(1000000000ULL));
+  {
+    std::unique_lock<std::mutex> lock(mutex);
+    ASSERT_TRUE(started_cv.wait_for(lock, std::chrono::seconds(1), [&] { return started; }));
+  }
+  adapter.Consume(Observation(1002000000ULL));
+  adapter.Consume(std::nullopt);
+
+  EXPECT_FALSE(adapter.HasCurrentObservation());
+  std::this_thread::sleep_for(std::chrono::milliseconds(100));
+  EXPECT_EQ(adapter.GetMetrics().published, 1U);
+}
+
+}  // namespace

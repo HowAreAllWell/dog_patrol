@@ -67,6 +67,22 @@ TEST(PrimaryTargetObserverTest, ReturnsCurrentSemanticTargetWithOwnedImageAndSou
   EXPECT_EQ(output.observation->target_image.at<cv::Vec3b>(0, 0), cv::Vec3b(10, 20, 30));
 }
 
+TEST(PrimaryTargetObserverTest, ConfiguredPaddingExpandsCropAndClampsToSourceFrame) {
+  PrimaryTargetManager::Config primary_config;
+  primary_config.min_person_area_px = 1.0F;
+  PrimaryTargetObserver::CropConfig crop_config;
+  crop_config.padding_ratio = 0.5F;
+  PrimaryTargetObserver observer(primary_config, nullptr, crop_config);
+  cv::Mat frame(8, 10, CV_8UC3, cv::Scalar{10, 20, 30});
+
+  const auto output = observer.Update(
+      {TrustedPerson(cv::Rect2f{1.0F, 2.0F, 4.0F, 4.0F})}, Metadata(frame), frame);
+
+  ASSERT_TRUE(output.observation.has_value());
+  EXPECT_EQ(output.observation->bbox, cv::Rect(0, 0, 7, 8));
+  EXPECT_EQ(output.observation->target_image.size(), cv::Size(7, 8));
+}
+
 TEST(PrimaryTargetObserverTest, DoesNotReturnHistoricalObservationWhenCurrentTargetIsMissing) {
   PrimaryTargetManager::Config config;
   config.min_person_area_px = 1.0F;

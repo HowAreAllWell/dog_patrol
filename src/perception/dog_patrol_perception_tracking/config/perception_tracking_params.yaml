@@ -56,6 +56,12 @@ dog_patrol_perception_tracking_node:
       camera_optical_frame_id: "hik_camera_optical_frame"
       capability_status_topic: "/perception/capability_status"
 
+    target_image:
+      topic: "/perception/tracked_target_image"
+      crop_padding_ratio: 0.10
+      max_publish_hz: 10.0
+      queue_capacity: 2
+
     sid:
       feat_bank_size: 30
       recover_sim_thresh_strict: 0.85
