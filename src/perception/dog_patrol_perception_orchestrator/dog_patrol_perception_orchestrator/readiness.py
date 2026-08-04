@@ -7,7 +7,6 @@ from typing import Dict, Iterable, Optional, Tuple
 NOT_READY = 0
 READY = 1
 ERROR = 2
-MISSION_STARTUP = 0
 VALID_STATUSES = frozenset((NOT_READY, READY, ERROR))
 UINT32_MASK = (1 << 32) - 1
 UINT32_HALF_RANGE = 1 << 31
@@ -29,13 +28,14 @@ def _is_current_or_newer(candidate: int, current: int) -> bool:
 class ReadinessCoordinator:
     """Emits at most one action after all required capabilities match STARTUP."""
 
-    def __init__(self, required_capabilities: Iterable[str]) -> None:
+    def __init__(self, required_capabilities: Iterable[str], *, startup_state: int) -> None:
         required = tuple(str(name) for name in required_capabilities)
         if not required or any(not name for name in required):
             raise ValueError("required capability names must be non-empty")
         if len(set(required)) != len(required):
             raise ValueError("required capability names must be unique")
         self._required: Tuple[str, ...] = required
+        self._startup_state = int(startup_state)
         self._samples: Dict[str, CapabilitySample] = {}
         self._mission_seq: Optional[int] = None
         self._mission_state: Optional[int] = None
@@ -80,7 +80,7 @@ class ReadinessCoordinator:
         return self._ready_startup_sequence()
 
     def _ready_startup_sequence(self) -> Optional[int]:
-        if self._mission_seq is None or self._mission_state != MISSION_STARTUP:
+        if self._mission_seq is None or self._mission_state != self._startup_state:
             return None
         if self._emitted_startup_seq == self._mission_seq:
             return None

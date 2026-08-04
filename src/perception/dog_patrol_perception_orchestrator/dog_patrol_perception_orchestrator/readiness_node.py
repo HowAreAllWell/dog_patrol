@@ -42,7 +42,9 @@ class PerceptionReadinessNode(Node):
             depth=10,
         )
         self._lock = threading.RLock()
-        self._coordinator = ReadinessCoordinator(self.REQUIRED_CAPABILITIES)
+        self._coordinator = ReadinessCoordinator(
+            self.REQUIRED_CAPABILITIES, startup_state=MissionState.STARTUP
+        )
         self._event_pub = self.create_publisher(
             MissionEvent, str(self.get_parameter("mission_event_topic").value), event_qos
         )
