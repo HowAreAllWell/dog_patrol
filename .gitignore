@@ -7,7 +7,9 @@ log/
 
 # Local models, recordings, and runtime artifacts
 data/
-assets/models/
+assets/models/engines/
+assets/models/reid/
+assets/models/upstream/
 *.engine
 *.onnx
 *.pt

@@ -7,11 +7,9 @@
 - `dog_patrol_interfaces`：已实现，保存主状态机、任务事件、目标框和导航状态消息。
 - `dog_patrol_manager`：已实现，包含 ROS-independent 状态机和 `mission_supervisor` ROS 2 节点。
 - `navigation/`：只保留模块入口说明，导航实现尚未迁入。
+- `dog_patrol_perception_tracking`：已从视觉准备仓保留必要历史导入；普通环境构建
+  portable tracking 核心和 ROS adapter，Orin runtime 由部署端显式开启。
 - `dog_patrol_perception_orchestrator`：已实现纯 Python 授权编排；readiness、真实人脸和语音结果尚未接入。
-- 现有 `vision_demo_ws` 尚未迁入；tracking 迁移候选已冻结在远端分支
-  `deploy/dog_patrol-integration` 的提交
-  `380b44582c0c55e5e46d2eb862da7700f05349b3`，迁入/排除、历史敏感信息和许可证审计见
-  [`docs/issue4_tracking_baseline_audit.md`](docs/issue4_tracking_baseline_audit.md)。
 - 人脸实现尚未建立。
 - 目标公开远程：`https://github.com/HowAreAllWell/dog_patrol`
 
@@ -22,7 +20,9 @@ src/contracts/dog_patrol_interfaces/       # 两团队共同维护的 ROS 2 合�
 src/orchestration/dog_patrol_manager/      # 主状态机和 supervisor
 src/navigation/                            # 导航模块预留位置
 src/perception/                            # 感知业务编排入口
+src/perception/dog_patrol_perception_tracking/ # tracking 核心与可选 Orin runtime
 docs/contracts/                             # 可评审的接口协议
+docs/perception/tracking/                    # tracking 稳定说明与迁移验收证据
 docs/workflows/                             # 业务流程参考文档
 ```
 
@@ -34,16 +34,22 @@ ROS 2 package 名称保持 `dog_patrol_` 前缀；上层目录是所有权和代
 source /opt/ros/humble/setup.bash
 colcon build --packages-select \
   dog_patrol_interfaces dog_patrol_manager \
-  dog_patrol_perception_orchestrator
+  dog_patrol_perception_orchestrator \
+  dog_patrol_perception_tracking \
+  --cmake-args -DTRACKING_ENABLE_ORIN_RUNTIME=OFF
 source install/setup.bash
 colcon test --packages-select \
   dog_patrol_interfaces dog_patrol_manager \
   dog_patrol_perception_orchestrator \
+  dog_patrol_perception_tracking \
   --event-handlers console_direct+
 colcon test-result --verbose
 ```
 
 模型、录制视频、相机日志、人脸白名单、特征向量和现场配置不进入公开仓库；它们必须通过本机部署或受控资产目录提供。
+
+根目录代码默认使用 BSD-3-Clause；从视觉准备仓迁入的 tracking 组件保持
+Apache-2.0。具体范围和许可证副本见 [`LICENSES/README.md`](LICENSES/README.md)。
 
 ## 核心协作约定
 
@@ -56,6 +62,8 @@ colcon test-result --verbose
 详细合同见 [`docs/contracts/perception_navigation_interface.md`](docs/contracts/perception_navigation_interface.md)，业务流程见 [`docs/workflows/机器狗巡逻与可疑目标处置流程（更新后）.docx`](docs/workflows/机器狗巡逻与可疑目标处置流程（更新后）.docx)。
 
 感知编排模块说明见 [`src/perception/README.md`](src/perception/README.md)。
+tracking 的 portable/Orin 构建、运行和配置说明见
+[`src/perception/dog_patrol_perception_tracking/README.md`](src/perception/dog_patrol_perception_tracking/README.md)。
 
 ## 协作方式
 

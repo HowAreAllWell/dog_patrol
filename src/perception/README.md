@@ -1,6 +1,10 @@
 # 感知模块
 
-感知团队的实现入口。现有 `vision_demo_ws` 仍是独立仓库，人脸和语音实现尚未建立，当前不接入任何具体算法。
+感知团队的实现入口。tracking 已正式迁入本仓，人脸和语音实现尚未建立。
+
+`dog_patrol_perception_tracking` 提供相机、检测、tracking、semantic identity、主目标选择、
+mission ROS 2 adapter，以及录制和离线评估工具。普通开发和 CI 显式关闭 Orin runtime，
+只构建可移植核心；CUDA、TensorRT、Hik MVS 和 FFmpeg runtime 由 Orin 部署显式开启。
 
 `dog_patrol_perception_orchestrator` 当前只提供 ROS-independent 的感知业务编排：
 
@@ -16,11 +20,14 @@
 source /opt/ros/humble/setup.bash
 colcon build --packages-select \
   dog_patrol_interfaces dog_patrol_manager \
-  dog_patrol_perception_orchestrator
+  dog_patrol_perception_orchestrator \
+  dog_patrol_perception_tracking \
+  --cmake-args -DTRACKING_ENABLE_ORIN_RUNTIME=OFF
 source install/setup.bash
 colcon test --packages-select \
   dog_patrol_interfaces dog_patrol_manager \
   dog_patrol_perception_orchestrator \
+  dog_patrol_perception_tracking \
   --event-handlers console_direct+
 colcon test-result --verbose
 ```
