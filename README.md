@@ -8,7 +8,11 @@
 - `dog_patrol_manager`：已实现，包含 ROS-independent 状态机和 `mission_supervisor` ROS 2 节点。
 - `navigation/`：只保留模块入口说明，导航实现尚未迁入。
 - `dog_patrol_perception`：已实现 Fake 感知和纯 Python 授权编排，具体算法尚未接入。
-- 现有 `vision_demo_ws` 尚未迁入；人脸实现尚未建立。
+- 现有 `vision_demo_ws` 尚未迁入；tracking 迁移候选已冻结在远端分支
+  `deploy/dog_patrol-integration` 的提交
+  `380b44582c0c55e5e46d2eb862da7700f05349b3`，迁入/排除、历史敏感信息和许可证审计见
+  [`docs/issue4_tracking_baseline_audit.md`](docs/issue4_tracking_baseline_audit.md)。
+- 人脸实现尚未建立。
 - 目标公开远程：`https://github.com/HowAreAllWell/dog_patrol`
 
 ## 目录
