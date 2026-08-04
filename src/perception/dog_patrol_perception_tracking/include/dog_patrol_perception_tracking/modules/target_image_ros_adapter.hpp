@@ -65,6 +65,7 @@ class TargetImageRosAdapter final : public PrimaryTargetObservationSink {
 
   void Start();
   void Run();
+  void BeginPublish(Message::UniquePtr message);
 
   Config config_;
   PublishFunction publish_;
@@ -72,11 +73,13 @@ class TargetImageRosAdapter final : public PrimaryTargetObservationSink {
   rclcpp::Publisher<Message>::SharedPtr publisher_;
   mutable std::mutex mutex_;
   std::condition_variable wake_;
+  std::condition_variable publication_started_;
   std::deque<PendingObservation> queue_;
   Metrics metrics_;
   std::uint64_t last_published_source_ns_{0U};
   std::uint64_t generation_{0U};
   bool current_observation_{false};
+  bool publish_starting_{false};
   bool stopping_{false};
   std::thread worker_;
 };

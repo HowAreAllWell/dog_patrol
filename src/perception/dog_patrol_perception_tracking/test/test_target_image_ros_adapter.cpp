@@ -2,6 +2,7 @@
 #include <chrono>
 #include <condition_variable>
 #include <cstdint>
+#include <future>
 #include <mutex>
 #include <thread>
 
@@ -56,7 +57,9 @@ TEST(TargetImageRosAdapterTest, ConvertsOwnedBgrCropAndSourceCoordinates) {
 TEST(TargetImageRosAdapterTest, SlowPublisherDropsOldCropsWithoutBlockingProducer) {
   std::mutex mutex;
   std::condition_variable first_publish_started;
+  std::condition_variable release_publisher;
   bool started = false;
+  bool release = false;
   std::atomic<int> published{0};
   TargetImageRosAdapter::Config config;
   config.queue_capacity = 2U;
@@ -68,7 +71,8 @@ TEST(TargetImageRosAdapterTest, SlowPublisherDropsOldCropsWithoutBlockingProduce
     }
     first_publish_started.notify_one();
     ++published;
-    std::this_thread::sleep_for(std::chrono::milliseconds(80));
+    std::unique_lock<std::mutex> lock(mutex);
+    release_publisher.wait(lock, [&] { return release; });
   });
 
   adapter.Consume(TargetImageObservation(1000000000ULL));
@@ -77,15 +81,22 @@ TEST(TargetImageRosAdapterTest, SlowPublisherDropsOldCropsWithoutBlockingProduce
     ASSERT_TRUE(first_publish_started.wait_for(
         lock, std::chrono::seconds(1), [&] { return started; }));
   }
-  const auto before = std::chrono::steady_clock::now();
-  for (int index = 1; index <= 20; ++index) {
-    adapter.Consume(TargetImageObservation(
-        1000000000ULL + static_cast<std::uint64_t>(index) * 2000000ULL));
+  auto producer = std::async(std::launch::async, [&] {
+    adapter.Consume(std::nullopt);
+    for (int index = 1; index <= 20; ++index) {
+      adapter.Consume(TargetImageObservation(
+          1000000000ULL + static_cast<std::uint64_t>(index) * 2000000ULL));
+    }
+  });
+  EXPECT_EQ(producer.wait_for(std::chrono::seconds(2)),
+            std::future_status::ready);
+  {
+    std::lock_guard<std::mutex> lock(mutex);
+    release = true;
   }
-  const auto producer_elapsed = std::chrono::steady_clock::now() - before;
-
-  EXPECT_LT(producer_elapsed, std::chrono::milliseconds(20));
-  std::this_thread::sleep_for(std::chrono::milliseconds(180));
+  release_publisher.notify_all();
+  producer.get();
+  std::this_thread::sleep_for(std::chrono::milliseconds(50));
   const auto metrics = adapter.GetMetrics();
   EXPECT_EQ(metrics.submitted, 21U);
   EXPECT_GT(metrics.queue_dropped, 0U);

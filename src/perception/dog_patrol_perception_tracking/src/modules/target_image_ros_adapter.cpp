@@ -60,11 +60,16 @@ rclcpp::QoS TargetImageRosAdapter::Qos() {
 void TargetImageRosAdapter::Consume(
     std::optional<PrimaryTargetObservation> observation) {
   {
-    std::lock_guard<std::mutex> lock(mutex_);
+    std::unique_lock<std::mutex> lock(mutex_);
     ++generation_;
     current_observation_ = observation.has_value();
     if (!observation.has_value()) {
       queue_.clear();
+      // A publish that already linearized is in flight and may finish, but an
+      // invalidation never returns while a worker is between its final
+      // generation check and that linearization point. It does not wait for
+      // middleware work after publication has begun.
+      publication_started_.wait(lock, [this] { return !publish_starting_; });
       return;
     }
     ++metrics_.submitted;
@@ -153,8 +158,9 @@ void TargetImageRosAdapter::Run() {
           continue;
         }
         last_published_source_ns_ = pending.observation.source.source_timestamp_ns;
+        publish_starting_ = true;
       }
-      publish_(std::move(message));
+      BeginPublish(std::move(message));
       {
         std::lock_guard<std::mutex> lock(mutex_);
         ++metrics_.published;
@@ -164,6 +170,17 @@ void TargetImageRosAdapter::Run() {
       // pipeline. The next current observation remains eligible for publish.
     }
   }
+}
+
+void TargetImageRosAdapter::BeginPublish(Message::UniquePtr message) {
+  {
+    std::lock_guard<std::mutex> lock(mutex_);
+    // Linearization point for publication. Invalidation waits only for this
+    // transition, never for ROS serialization or DDS/middleware completion.
+    publish_starting_ = false;
+  }
+  publication_started_.notify_all();
+  publish_(std::move(message));
 }
 
 }  // namespace dog_patrol_perception_tracking
