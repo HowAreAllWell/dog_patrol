@@ -27,7 +27,7 @@ face/voice provider 后续通过 `AuthorizationEvidence` 接入，不得用测�
 | capability readiness | tracking capability publisher、orchestrator readiness node 和 test-only provider；PR #20 | 通过；tracking/face/voice 全部匹配当前 STARTUP 才至多发布一次整体 READY |
 | 部署 requirements | `src/perception/requirements.md`、统一环境检查器；PR #23 | 通过；模块状态、精确平台/SDK、资产、参数、full-runtime 和 PASS/FAIL 入口单一且可执行 |
 | 当前感知 Orin/Hik | `issue14_tracking_hardware_acceptance.md`；PR #24 | 通过；full-runtime、真实 1280×1024@30 FPS、真人 semantic primary、crop、离场停发、资源与慢消费者均有现场证据 |
-| 权威入口与归档 | `issue15_authoritative_entry_archive.md`；PR #25–#27 | 通过；主仓为唯一入口，旧仓 `archived=true`，默认/冻结分支锚点仍可读 |
+| 权威入口与旧仓治理 | `issue15_authoritative_entry_archive.md`；PR #25–#27 | 通过；主仓为正式实现唯一入口；旧仓后续改为非生产研究空间，默认/部署基线由 active ruleset 冻结 |
 
 Problem/Solution 中列出的仓库漂移、demo/Fake 命名、readiness 所有权、跨语言 crop seam、双运行模式、
 portable CI、部署门禁和两台 Orin 验收分工均由上表闭合。Implementation Decisions 与 Testing Decisions
@@ -51,8 +51,10 @@ portable CI、部署门禁和两台 Orin 验收分工均由上表闭合。Implem
 | #14 Orin/Hik 验收 | dog_patrol PR #24，merge `c91996e` | closed |
 | #15 权威入口/归档 | dog_patrol PR #25–#27，merge `fd23749`、`c60ea3e`、`19c4b65` | closed |
 
-上述 dog_patrol PR 的 `build-and-test` 均为 `SUCCESS`。旧仓已归档，REST API 返回
-`archived=true`；默认分支为 `599bdfc`，冻结分支 `deploy/dog_patrol-integration` 为 `4f3df15`。
+上述 dog_patrol PR 的 `build-and-test` 均为 `SUCCESS`。#15 验收时旧仓曾归档，默认分支为
+`599bdfc`，冻结分支 `deploy/dog_patrol-integration` 为 `4f3df15`。2026-08-04 后续治理决定允许旧仓承担
+非生产研究；当前仓库已取消归档，`main` 与部署分支在更新治理告示后由无 bypass 的 active ruleset
+禁止更新、强推和删除，新实验只使用 `research/*`。
 
 ## 本次独立复验
 
