@@ -1,13 +1,13 @@
-#include "vision_demo_host/modules/reliable_geometry_cost.hpp"
+#include "dog_patrol_perception_tracking/modules/reliable_geometry_cost.hpp"
 
 #include <algorithm>
 #include <cmath>
 
 #include <opencv2/core.hpp>
 
-#include "vision_demo_host/modules/association_utils.hpp"
+#include "dog_patrol_perception_tracking/modules/association_utils.hpp"
 
-namespace vision_demo_host {
+namespace dog_patrol_perception_tracking {
 
 cv::Rect2f ReliableGeometryCost::ReferenceBBox(const State &state) {
   return state.has_reliable_geometry ? state.reliable_bbox : state.latest_bbox;
@@ -91,4 +91,4 @@ bool ReliableGeometryCost::PassesShortMissingAppearanceGate(const State &state, 
   return app_cost <= std::clamp(max_app_cost, 0.0F, 1.0F);
 }
 
-}  // namespace vision_demo_host
+}  // namespace dog_patrol_perception_tracking

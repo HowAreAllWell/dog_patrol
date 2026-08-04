@@ -1,4 +1,4 @@
-#include "vision_demo_host/modules/mission_ros_adapter.hpp"
+#include "dog_patrol_perception_tracking/modules/mission_ros_adapter.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -7,7 +7,7 @@
 #include <utility>
 #include <vector>
 
-namespace vision_demo_host {
+namespace dog_patrol_perception_tracking {
 namespace {
 
 using MissionEventMessage = dog_patrol_interfaces::msg::MissionEvent;
@@ -307,4 +307,4 @@ MissionFrameTransaction::Output MissionRosAdapter::ProcessFrame(
   return output;
 }
 
-}  // namespace vision_demo_host
+}  // namespace dog_patrol_perception_tracking

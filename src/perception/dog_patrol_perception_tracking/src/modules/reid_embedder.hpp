@@ -6,7 +6,7 @@
 #include <opencv2/core.hpp>
 #include <opencv2/dnn.hpp>
 
-namespace vision_demo_host {
+namespace dog_patrol_perception_tracking {
 
 class ReIdEmbedder {
  public:
@@ -39,4 +39,4 @@ class ReIdEmbedder {
   bool ready_{false};
 };
 
-}  // namespace vision_demo_host
+}  // namespace dog_patrol_perception_tracking

@@ -5,7 +5,7 @@
 
 #include "assignment_application_plan.hpp"
 
-namespace vision_demo_host {
+namespace dog_patrol_perception_tracking {
 
 class RawSemanticBindingStore {
  public:
@@ -25,4 +25,4 @@ class RawSemanticBindingStore {
   std::vector<AssignmentApplicationPlan::RawMapping> planned_entries_;
 };
 
-}  // namespace vision_demo_host
+}  // namespace dog_patrol_perception_tracking

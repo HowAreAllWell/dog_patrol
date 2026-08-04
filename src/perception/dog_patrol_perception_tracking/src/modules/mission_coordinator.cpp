@@ -1,9 +1,9 @@
-#include "vision_demo_host/modules/mission_coordinator.hpp"
+#include "dog_patrol_perception_tracking/modules/mission_coordinator.hpp"
 
 #include <cmath>
 #include <stdexcept>
 
-namespace vision_demo_host {
+namespace dog_patrol_perception_tracking {
 MissionCoordinator::MissionCoordinator() : MissionCoordinator(Config{}) {}
 
 MissionCoordinator::MissionCoordinator(Config config) : config_(config) {
@@ -173,4 +173,4 @@ MissionCoordinator::Output MissionCoordinator::Update(const FrameInput &input) {
   return output;
 }
 
-}  // namespace vision_demo_host
+}  // namespace dog_patrol_perception_tracking

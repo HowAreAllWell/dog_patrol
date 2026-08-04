@@ -4,11 +4,11 @@
 
 namespace {
 
-using vision_demo_host::ClassId;
-using vision_demo_host::IdentityManager;
-using vision_demo_host::OcclusionGroupShadowLifecycle;
-using vision_demo_host::TrackletHypothesis;
-using vision_demo_host::TrackletHypothesisStatus;
+using dog_patrol_perception_tracking::ClassId;
+using dog_patrol_perception_tracking::IdentityManager;
+using dog_patrol_perception_tracking::OcclusionGroupShadowLifecycle;
+using dog_patrol_perception_tracking::TrackletHypothesis;
+using dog_patrol_perception_tracking::TrackletHypothesisStatus;
 
 TrackletHypothesis MakeHypothesis(const int raw_id, const TrackletHypothesisStatus status,
                                   const char *reason, const int related_raw_track_id = -1) {

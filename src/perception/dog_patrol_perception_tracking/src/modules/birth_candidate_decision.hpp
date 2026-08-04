@@ -2,7 +2,7 @@
 
 #include <string>
 
-namespace vision_demo_host {
+namespace dog_patrol_perception_tracking {
 
 class BirthCandidateDecision {
  public:
@@ -42,4 +42,4 @@ class BirthCandidateDecision {
   static Decision Evaluate(const Input &input, const Config &config);
 };
 
-}  // namespace vision_demo_host
+}  // namespace dog_patrol_perception_tracking

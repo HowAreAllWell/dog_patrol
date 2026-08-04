@@ -4,7 +4,7 @@
 #include <set>
 #include <utility>
 
-namespace vision_demo_host {
+namespace dog_patrol_perception_tracking {
 namespace {
 
 bool RequiresStability(const TrackletObservation &observation) {
@@ -220,4 +220,4 @@ void Phase5BirthCoordinator::AppendShadowLifecycleRows(const ShadowRowsInput &in
   }
 }
 
-}  // namespace vision_demo_host
+}  // namespace dog_patrol_perception_tracking

@@ -7,9 +7,9 @@
 
 #include <opencv2/core/mat.hpp>
 
-#include "vision_demo_host/modules/identity_manager.hpp"
+#include "dog_patrol_perception_tracking/modules/identity_manager.hpp"
 
-namespace vision_demo_host {
+namespace dog_patrol_perception_tracking {
 
 class Phase5BirthCoordinator {
  public:
@@ -51,4 +51,4 @@ class Phase5BirthCoordinator {
   static void AppendShadowLifecycleRows(const ShadowRowsInput &input);
 };
 
-}  // namespace vision_demo_host
+}  // namespace dog_patrol_perception_tracking

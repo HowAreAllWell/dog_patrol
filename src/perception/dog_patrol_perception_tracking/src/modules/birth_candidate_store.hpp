@@ -2,7 +2,7 @@
 
 #include <unordered_map>
 
-namespace vision_demo_host {
+namespace dog_patrol_perception_tracking {
 
 class BirthCandidateStore {
  public:
@@ -19,4 +19,4 @@ class BirthCandidateStore {
   std::unordered_map<int, Candidate> candidates_by_raw_id_;
 };
 
-}  // namespace vision_demo_host
+}  // namespace dog_patrol_perception_tracking

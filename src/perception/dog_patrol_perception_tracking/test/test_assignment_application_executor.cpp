@@ -8,17 +8,17 @@
 #include "assignment_application_plan.hpp"
 #include "identity_runtime_store.hpp"
 #include "raw_semantic_binding_store.hpp"
-#include "vision_demo_host/modules/feature_update_policy.hpp"
-#include "vision_demo_host/types.hpp"
+#include "dog_patrol_perception_tracking/modules/feature_update_policy.hpp"
+#include "dog_patrol_perception_tracking/types.hpp"
 
 namespace {
 
-using vision_demo_host::AssignmentApplicationExecutor;
-using vision_demo_host::AssignmentApplicationPlan;
-using vision_demo_host::FeatureUpdatePolicy;
-using vision_demo_host::IdentityRuntimeStore;
-using vision_demo_host::RawSemanticBindingStore;
-using vision_demo_host::Track;
+using dog_patrol_perception_tracking::AssignmentApplicationExecutor;
+using dog_patrol_perception_tracking::AssignmentApplicationPlan;
+using dog_patrol_perception_tracking::FeatureUpdatePolicy;
+using dog_patrol_perception_tracking::IdentityRuntimeStore;
+using dog_patrol_perception_tracking::RawSemanticBindingStore;
+using dog_patrol_perception_tracking::Track;
 
 struct TestDebugRow {
   int frame_idx{-1};
@@ -35,7 +35,7 @@ struct TestDebugRow {
 Track MakeTrack(const int raw_track_id, const float x) {
   Track track;
   track.id = raw_track_id;
-  track.class_id = vision_demo_host::ClassId::kPerson;
+  track.class_id = dog_patrol_perception_tracking::ClassId::kPerson;
   track.confidence = 0.9F;
   track.bbox = cv::Rect2f(x, 0.0F, 50.0F, 100.0F);
   track.is_confirmed = true;
@@ -85,7 +85,7 @@ TEST(AssignmentApplicationExecutorTest, AppliesAcceptedMutationsProtectsOcclusio
   IdentityRuntimeStore store;
   auto &existing = store.Upsert(3);
   existing.semantic_id = 3;
-  existing.class_id = vision_demo_host::ClassId::kPerson;
+  existing.class_id = dog_patrol_perception_tracking::ClassId::kPerson;
   existing.missing_frames = 0;
   existing.seen_this_frame = false;
   existing.occlusion_protect_remaining = 0;
@@ -100,7 +100,7 @@ TEST(AssignmentApplicationExecutorTest, AppliesAcceptedMutationsProtectsOcclusio
 
   AssignmentApplicationExecutor<TestDebugRow>::Execute(
       plan, {0}, tracks, feature_index, features, &rows, &store, &bindings, config,
-      [](const Track &, int, int, const vision_demo_host::IdentityRuntimeRecord *, float, float, bool) {
+      [](const Track &, int, int, const dog_patrol_perception_tracking::IdentityRuntimeRecord *, float, float, bool) {
         FeatureUpdatePolicy::Decision decision;
         decision.feature_update_allowed = true;
         decision.geometry_update_allowed = true;
@@ -146,7 +146,7 @@ TEST(AssignmentApplicationExecutorTest, SideRecoveryForcesGeometryUpdate) {
 
   AssignmentApplicationExecutor<TestDebugRow>::Execute(
       plan, {0}, tracks, feature_index, features, &rows, &store, &bindings, config,
-      [&](const Track &, int, int, const vision_demo_host::IdentityRuntimeRecord *, float, float,
+      [&](const Track &, int, int, const dog_patrol_perception_tracking::IdentityRuntimeRecord *, float, float,
           const bool force_geometry_update) {
         forced_geometry = force_geometry_update;
         FeatureUpdatePolicy::Decision decision;

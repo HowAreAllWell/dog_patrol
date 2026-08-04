@@ -1,4 +1,4 @@
-#include "vision_demo_host/modules/visualizer_recorder.hpp"
+#include "dog_patrol_perception_tracking/modules/visualizer_recorder.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -11,13 +11,13 @@
 #include <opencv2/highgui.hpp>
 #include <opencv2/imgproc.hpp>
 
-#include "vision_demo_host/modules/ffv1_mkv_writer.hpp"
-#include "vision_demo_host/modules/primary_recovery_debug.hpp"
+#include "dog_patrol_perception_tracking/modules/ffv1_mkv_writer.hpp"
+#include "dog_patrol_perception_tracking/modules/primary_recovery_debug.hpp"
 
-namespace vision_demo_host {
+namespace dog_patrol_perception_tracking {
 namespace {
 
-constexpr char kPreviewWindowName[] = "vision_demo_host";
+constexpr char kPreviewWindowName[] = "dog_patrol_perception_tracking";
 
 bool Fail(std::string *error, const std::string &message) {
   if (error != nullptr) {
@@ -563,4 +563,4 @@ void VisualizerRecorder::WorkerLoop() {
   }
 }
 
-}  // namespace vision_demo_host
+}  // namespace dog_patrol_perception_tracking

@@ -2,9 +2,9 @@
 
 #include <limits>
 
-#include "vision_demo_host/modules/preprocess_infer.hpp"
+#include "dog_patrol_perception_tracking/modules/preprocess_infer.hpp"
 
-namespace vision_demo_host {
+namespace dog_patrol_perception_tracking {
 
 TEST(PreprocessInferTimingTest, ReportsNearestRankStagePercentiles) {
   PreprocessInfer::StageTiming timing;
@@ -32,4 +32,4 @@ TEST(PreprocessInferTimingTest, IgnoresInvalidMeasurementsAndCanReset) {
   EXPECT_DOUBLE_EQ(summary.p50_ms, 0.0);
 }
 
-}  // namespace vision_demo_host
+}  // namespace dog_patrol_perception_tracking

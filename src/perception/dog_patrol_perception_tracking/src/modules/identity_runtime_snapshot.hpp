@@ -2,9 +2,9 @@
 
 #include <opencv2/core/types.hpp>
 
-#include "vision_demo_host/types.hpp"
+#include "dog_patrol_perception_tracking/types.hpp"
 
-namespace vision_demo_host {
+namespace dog_patrol_perception_tracking {
 
 struct IdentityRuntimeSnapshot {
   int semantic_id{-1};
@@ -19,4 +19,4 @@ struct IdentityRuntimeSnapshot {
   float confidence{0.0F};
 };
 
-}  // namespace vision_demo_host
+}  // namespace dog_patrol_perception_tracking

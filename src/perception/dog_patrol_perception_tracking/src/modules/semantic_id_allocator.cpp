@@ -1,6 +1,6 @@
 #include "semantic_id_allocator.hpp"
 
-namespace vision_demo_host {
+namespace dog_patrol_perception_tracking {
 
 void SemanticIdAllocator::Reset() {
   next_non_primary_semantic_id_ = 2;
@@ -14,4 +14,4 @@ int SemanticIdAllocator::Allocate(const std::unordered_set<int> &occupied_semant
   return next_non_primary_semantic_id_++;
 }
 
-}  // namespace vision_demo_host
+}  // namespace dog_patrol_perception_tracking

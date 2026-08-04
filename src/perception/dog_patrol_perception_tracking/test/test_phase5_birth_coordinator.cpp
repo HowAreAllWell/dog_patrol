@@ -8,10 +8,10 @@
 
 namespace {
 
-using vision_demo_host::ClassId;
-using vision_demo_host::IdentityManager;
-using vision_demo_host::Phase5BirthCoordinator;
-using vision_demo_host::TrackletObservation;
+using dog_patrol_perception_tracking::ClassId;
+using dog_patrol_perception_tracking::IdentityManager;
+using dog_patrol_perception_tracking::Phase5BirthCoordinator;
+using dog_patrol_perception_tracking::TrackletObservation;
 
 TrackletObservation MakeObservation(const int raw_track_id,
                                    const cv::Rect2f &bbox,

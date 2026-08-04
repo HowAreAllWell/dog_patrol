@@ -3,10 +3,10 @@
 #include "identity_runtime_record.hpp"
 
 TEST(IdentityRuntimeRecordTest, CarriesRuntimeIdentityStateShape) {
-  vision_demo_host::IdentityRuntimeRecord record;
+  dog_patrol_perception_tracking::IdentityRuntimeRecord record;
 
   record.semantic_id = 7;
-  record.class_id = vision_demo_host::ClassId::kPerson;
+  record.class_id = dog_patrol_perception_tracking::ClassId::kPerson;
   record.last_bbox = cv::Rect2f(10.0F, 20.0F, 30.0F, 40.0F);
   record.last_center = cv::Point2f(25.0F, 40.0F);
   record.feature_geometry.feature_bank.push_back({0.25F, 0.75F});
@@ -22,7 +22,7 @@ TEST(IdentityRuntimeRecordTest, CarriesRuntimeIdentityStateShape) {
   record.confidence = 0.9F;
 
   EXPECT_EQ(record.semantic_id, 7);
-  EXPECT_EQ(record.class_id, vision_demo_host::ClassId::kPerson);
+  EXPECT_EQ(record.class_id, dog_patrol_perception_tracking::ClassId::kPerson);
   EXPECT_FLOAT_EQ(record.last_bbox.x, 10.0F);
   EXPECT_FLOAT_EQ(record.last_center.y, 40.0F);
   EXPECT_EQ(record.feature_geometry.feature_bank.size(), 1U);

@@ -8,7 +8,7 @@ Hik MVS 和 FFV1 写入路径，不加载 detector、tracker 或 identity。
 早期三次运行均为 headless 自动 take：
 
 ```bash
-build/vision_demo_host/capture_ffv1 \
+build/dog_patrol_perception_tracking/capture_ffv1 \
   --headless --auto-record --max-seconds <seconds> \
   --output-root data/captures --width 1280 --height 1024 --fps 30.0 \
   --bayer-interpolation <optimal|balanced>

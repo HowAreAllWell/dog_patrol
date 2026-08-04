@@ -25,8 +25,8 @@
 #include <utility>
 #include <vector>
 
-#include "vision_demo_host/modules/ffv1_capture_artifact_writer.hpp"
-#include "vision_demo_host/modules/preprocess_infer.hpp"
+#include "dog_patrol_perception_tracking/modules/ffv1_capture_artifact_writer.hpp"
+#include "dog_patrol_perception_tracking/modules/preprocess_infer.hpp"
 
 namespace {
 
@@ -53,7 +53,7 @@ struct Options {
 
 struct RawFrame {
   std::vector<unsigned char> bayer;
-  vision_demo_host::CameraIngest::AcquiredFrame metadata;
+  dog_patrol_perception_tracking::CameraIngest::AcquiredFrame metadata;
 };
 
 struct PixelDifferenceSummary {
@@ -66,7 +66,7 @@ struct PixelDifferenceSummary {
 };
 
 struct DetectionFrame {
-  std::vector<vision_demo_host::Detection> detections;
+  std::vector<dog_patrol_perception_tracking::Detection> detections;
 };
 
 struct DetectionDifferenceSummary {
@@ -83,8 +83,8 @@ struct ModeReport {
   bool supported{false};
   int set_quality_code{MV_OK};
   int conversion_failure_code{MV_OK};
-  vision_demo_host::PreprocessInfer::PercentileSummary conversion;
-  vision_demo_host::PreprocessInfer::MetricsSnapshot preprocess;
+  dog_patrol_perception_tracking::PreprocessInfer::PercentileSummary conversion;
+  dog_patrol_perception_tracking::PreprocessInfer::MetricsSnapshot preprocess;
   double detector_throughput_fps{0.0};
   std::size_t detector_positive_frames{0};
   std::size_t detector_total_detections{0};
@@ -482,8 +482,8 @@ bool ConfigureCamera(void *handle, const Options &options, std::string *error) {
 bool CaptureRawFrames(void *handle,
                       const Options &options,
                       std::vector<RawFrame> *frames,
-                      vision_demo_host::PreprocessInfer::StageTiming *acquisition_timing,
-                      vision_demo_host::PreprocessInfer::StageTiming *raw_copy_timing,
+                      dog_patrol_perception_tracking::PreprocessInfer::StageTiming *acquisition_timing,
+                      dog_patrol_perception_tracking::PreprocessInfer::StageTiming *raw_copy_timing,
                       std::string *error) {
   if (frames == nullptr || acquisition_timing == nullptr || raw_copy_timing == nullptr) {
     return Fail(error, "benchmark output pointers are null");
@@ -513,7 +513,7 @@ bool CaptureRawFrames(void *handle,
           (static_cast<std::uint64_t>(source.stFrameInfo.nDevTimeStampHigh) << 32U) |
           source.stFrameInfo.nDevTimeStampLow;
       captured.metadata.source_pixel_type = static_cast<std::uint32_t>(source.stFrameInfo.enPixelType);
-      captured.metadata.source_pixel_type_name = vision_demo_host::CameraIngest::PixelTypeName(
+      captured.metadata.source_pixel_type_name = dog_patrol_perception_tracking::CameraIngest::PixelTypeName(
           captured.metadata.source_pixel_type);
       captured.metadata.width = static_cast<int>(source.stFrameInfo.nWidth);
       captured.metadata.height = static_cast<int>(source.stFrameInfo.nHeight);
@@ -538,7 +538,7 @@ bool CaptureRawFrames(void *handle,
 
 bool SynthesizeBayerFrames(const Options &options,
                            std::vector<RawFrame> *frames,
-                           vision_demo_host::PreprocessInfer::StageTiming *derive_timing,
+                           dog_patrol_perception_tracking::PreprocessInfer::StageTiming *derive_timing,
                            std::string *error) {
   if (frames == nullptr || derive_timing == nullptr) {
     return Fail(error, "synthetic Bayer output pointers are null");
@@ -610,7 +610,7 @@ bool WriteDetectionCsv(const std::filesystem::path &path, const std::vector<Dete
 
 void WritePercentiles(std::ostream &out,
                       const std::string &name,
-                      const vision_demo_host::PreprocessInfer::PercentileSummary &summary) {
+                      const dog_patrol_perception_tracking::PreprocessInfer::PercentileSummary &summary) {
   out << "  " << name << ": {samples: " << summary.samples << ", p50_ms: " << summary.p50_ms
       << ", p95_ms: " << summary.p95_ms << ", p99_ms: " << summary.p99_ms << "}\n";
 }
@@ -619,7 +619,7 @@ bool ConvertAndMeasureMode(void *handle,
                            const Options &options,
                            const std::vector<RawFrame> &raw_frames,
                            const unsigned int quality,
-                           vision_demo_host::PreprocessInfer *infer,
+                           dog_patrol_perception_tracking::PreprocessInfer *infer,
                            const std::filesystem::path &output_directory,
                            const std::vector<std::vector<unsigned char>> *optimal_bgr,
                            std::vector<std::vector<unsigned char>> *record_optimal_bgr,
@@ -641,13 +641,13 @@ bool ConvertAndMeasureMode(void *handle,
   const int height = first.metadata.height;
   const std::size_t output_bytes = static_cast<std::size_t>(width) * static_cast<std::size_t>(height) * 3U;
   std::vector<unsigned char> converted(output_bytes);
-  vision_demo_host::PreprocessInfer::StageTiming conversion_timing;
+  dog_patrol_perception_tracking::PreprocessInfer::StageTiming conversion_timing;
   std::array<std::uint64_t, 256U> pixel_difference_histogram{};
   std::uint64_t pixel_difference_count = 0U;
   std::uint64_t pixel_difference_sum = 0U;
   unsigned int pixel_difference_maximum = 0U;
 
-  vision_demo_host::Ffv1CaptureArtifactWriterFactory::Config writer_config;
+  dog_patrol_perception_tracking::Ffv1CaptureArtifactWriterFactory::Config writer_config;
   writer_config.session_directory = output_directory;
   writer_config.requested_fps = options.fps;
   writer_config.mvs_model = options.mvs_model;
@@ -655,12 +655,12 @@ bool ConvertAndMeasureMode(void *handle,
   writer_config.requested_width = width;
   writer_config.requested_height = height;
   writer_config.timeout_ms = options.timeout_ms;
-  auto writer = vision_demo_host::Ffv1CaptureArtifactWriterFactory(writer_config).Create();
-  vision_demo_host::CaptureTakeDescriptor descriptor;
+  auto writer = dog_patrol_perception_tracking::Ffv1CaptureArtifactWriterFactory(writer_config).Create();
+  dog_patrol_perception_tracking::CaptureTakeDescriptor descriptor;
   descriptor.sequence = quality + 1U;
   descriptor.name = "bayer_" + report->name;
   descriptor.started_wall_time_ns = UnixNowNs();
-  vision_demo_host::CaptureFrameContract contract;
+  dog_patrol_perception_tracking::CaptureFrameContract contract;
   contract.source_pixel_type = first.metadata.source_pixel_type;
   contract.source_pixel_type_name = first.metadata.source_pixel_type_name;
   contract.width = width;
@@ -746,7 +746,7 @@ bool ConvertAndMeasureMode(void *handle,
     report->detector_total_detections += detection_frame.detections.size();
     record_detections->push_back(std::move(detection_frame));
 
-    vision_demo_host::CaptureFrame artifact_frame;
+    dog_patrol_perception_tracking::CaptureFrame artifact_frame;
     artifact_frame.capture_index = frame_index;
     artifact_frame.source = raw.metadata;
     artifact_frame.source.bgr8 = bgr;
@@ -765,7 +765,7 @@ bool ConvertAndMeasureMode(void *handle,
   report->supported = true;
   report->take_directory = output_directory / descriptor.name;
 
-  vision_demo_host::CaptureTakeSummary summary;
+  dog_patrol_perception_tracking::CaptureTakeSummary summary;
   summary.descriptor = descriptor;
   summary.frame_contract = contract;
   summary.complete = true;
@@ -906,8 +906,8 @@ int main(int argc, char **argv) {
   WriteNodeFacts(report_file, handle);
 
   std::vector<RawFrame> raw_frames;
-  vision_demo_host::PreprocessInfer::StageTiming acquisition_timing;
-  vision_demo_host::PreprocessInfer::StageTiming raw_copy_timing;
+  dog_patrol_perception_tracking::PreprocessInfer::StageTiming acquisition_timing;
+  dog_patrol_perception_tracking::PreprocessInfer::StageTiming raw_copy_timing;
   const bool native_camera_source = options.input_video.empty();
   const bool captured = native_camera_source
                             ? CaptureRawFrames(handle, options, &raw_frames, &acquisition_timing,
@@ -941,11 +941,11 @@ int main(int argc, char **argv) {
     WritePercentiles(report_file, "synthetic_bayer_derivation", raw_copy_timing.Summary());
   }
 
-  vision_demo_host::PreprocessInfer::Config detector_config;
+  dog_patrol_perception_tracking::PreprocessInfer::Config detector_config;
   detector_config.detector_runtime_path = options.detector_engine;
   detector_config.raw_conf_threshold = options.detector_raw_confidence;
   detector_config.enable_timing_metrics = true;
-  vision_demo_host::PreprocessInfer infer(detector_config);
+  dog_patrol_perception_tracking::PreprocessInfer infer(detector_config);
   if (!infer.Initialize(&error)) {
     std::cerr << "benchmark_bayer_input: detector initialization failed: " << error << std::endl;
     cleanup();

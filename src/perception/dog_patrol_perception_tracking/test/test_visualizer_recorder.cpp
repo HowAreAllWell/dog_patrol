@@ -1,4 +1,4 @@
-#include "vision_demo_host/modules/visualizer_recorder.hpp"
+#include "dog_patrol_perception_tracking/modules/visualizer_recorder.hpp"
 
 #include <gtest/gtest.h>
 
@@ -17,9 +17,9 @@
 #include <utility>
 #include <vector>
 
-#include "vision_demo_host/modules/primary_recovery_debug.hpp"
+#include "dog_patrol_perception_tracking/modules/primary_recovery_debug.hpp"
 
-namespace vision_demo_host {
+namespace dog_patrol_perception_tracking {
 namespace {
 
 class BlockingOverlayArtifactWriter final : public OverlayArtifactWriter {
@@ -334,4 +334,4 @@ TEST(VisualizerRecorderTest, DefaultWriterPersistsTrackingIdentityAndPrimaryOver
 }
 
 }  // namespace
-}  // namespace vision_demo_host
+}  // namespace dog_patrol_perception_tracking

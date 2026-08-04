@@ -1,9 +1,9 @@
-#include "vision_demo_host/modules/primary_recovery_debug.hpp"
+#include "dog_patrol_perception_tracking/modules/primary_recovery_debug.hpp"
 
 #include <algorithm>
 #include <sstream>
 
-namespace vision_demo_host {
+namespace dog_patrol_perception_tracking {
 namespace {
 
 const IdentityObservation *FindPrimaryIdentity(const PrimaryTargetResult &primary,
@@ -109,4 +109,4 @@ cv::Point CompactOverlayTrackLabelPoint(const cv::Size &frame_size, const cv::Re
   return cv::Point(tx, ty);
 }
 
-}  // namespace vision_demo_host
+}  // namespace dog_patrol_perception_tracking

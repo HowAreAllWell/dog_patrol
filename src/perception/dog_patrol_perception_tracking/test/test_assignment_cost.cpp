@@ -7,14 +7,14 @@
 
 #include "assignment_cost.hpp"
 #include "identity_runtime_record.hpp"
-#include "vision_demo_host/types.hpp"
+#include "dog_patrol_perception_tracking/types.hpp"
 
 namespace {
 
-using vision_demo_host::AssignmentCost;
-using vision_demo_host::ClassId;
-using vision_demo_host::IdentityRuntimeRecord;
-using vision_demo_host::Track;
+using dog_patrol_perception_tracking::AssignmentCost;
+using dog_patrol_perception_tracking::ClassId;
+using dog_patrol_perception_tracking::IdentityRuntimeRecord;
+using dog_patrol_perception_tracking::Track;
 
 Track PersonTrack(const cv::Rect2f &bbox) {
   Track track;

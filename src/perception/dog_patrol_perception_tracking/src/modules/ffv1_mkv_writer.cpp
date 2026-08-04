@@ -1,4 +1,4 @@
-#include "vision_demo_host/modules/ffv1_mkv_writer.hpp"
+#include "dog_patrol_perception_tracking/modules/ffv1_mkv_writer.hpp"
 
 extern "C" {
 #include <libavcodec/avcodec.h>
@@ -15,7 +15,7 @@ extern "C" {
 #include <utility>
 #include <vector>
 
-namespace vision_demo_host {
+namespace dog_patrol_perception_tracking {
 namespace {
 
 bool Fail(std::string *error, const std::string &message) {
@@ -289,4 +289,4 @@ bool Ffv1MkvWriter::Close(std::string *error) { return impl_->Close(error); }
 
 const Ffv1MkvWriter::EncoderInfo &Ffv1MkvWriter::Info() const { return impl_->Info(); }
 
-}  // namespace vision_demo_host
+}  // namespace dog_patrol_perception_tracking

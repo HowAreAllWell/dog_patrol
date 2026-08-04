@@ -4,7 +4,7 @@
 
 #include <opencv2/core.hpp>
 
-#include "vision_demo_host/modules/appearance_feature_service.hpp"
+#include "dog_patrol_perception_tracking/modules/appearance_feature_service.hpp"
 
 namespace {
 
@@ -18,9 +18,9 @@ cv::Mat MakeColorPatchFrame() {
 }  // namespace
 
 TEST(AppearanceFeatureServiceTest, LightTrackerFeatureReturnsNormalizedMatrix) {
-  vision_demo_host::AppearanceFeatureService service(
-      vision_demo_host::AppearanceFeatureService::Config{"light", "", 128, 256, 8, 4},
-      vision_demo_host::AppearanceFeatureService::Profile::kTracker);
+  dog_patrol_perception_tracking::AppearanceFeatureService service(
+      dog_patrol_perception_tracking::AppearanceFeatureService::Config{"light", "", 128, 256, 8, 4},
+      dog_patrol_perception_tracking::AppearanceFeatureService::Profile::kTracker);
 
   std::string error;
   ASSERT_TRUE(service.Initialize(&error)) << error;
@@ -34,9 +34,9 @@ TEST(AppearanceFeatureServiceTest, LightTrackerFeatureReturnsNormalizedMatrix) {
 }
 
 TEST(AppearanceFeatureServiceTest, LightIdentityFeatureReturnsHistogramVector) {
-  vision_demo_host::AppearanceFeatureService service(
-      vision_demo_host::AppearanceFeatureService::Config{"light", "", 128, 256, 8, 4},
-      vision_demo_host::AppearanceFeatureService::Profile::kIdentity);
+  dog_patrol_perception_tracking::AppearanceFeatureService service(
+      dog_patrol_perception_tracking::AppearanceFeatureService::Config{"light", "", 128, 256, 8, 4},
+      dog_patrol_perception_tracking::AppearanceFeatureService::Profile::kIdentity);
 
   std::string error;
   ASSERT_TRUE(service.Initialize(&error)) << error;

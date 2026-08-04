@@ -2,7 +2,7 @@
 
 #include "identity_runtime_store.hpp"
 
-namespace vision_demo_host {
+namespace dog_patrol_perception_tracking {
 
 class IdentityRuntimeLifecycleCoordinator {
  public:
@@ -13,4 +13,4 @@ class IdentityRuntimeLifecycleCoordinator {
   static void ApplyEndFrameAging(const EndFrameInput &input);
 };
 
-}  // namespace vision_demo_host
+}  // namespace dog_patrol_perception_tracking

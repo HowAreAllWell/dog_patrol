@@ -2,7 +2,7 @@
 
 #include <algorithm>
 
-namespace vision_demo_host {
+namespace dog_patrol_perception_tracking {
 
 BirthCandidateDecision::Decision BirthCandidateDecision::Evaluate(const Input &input,
                                                                   const Config &config) {
@@ -37,4 +37,4 @@ BirthCandidateDecision::Decision BirthCandidateDecision::Evaluate(const Input &i
   return decision;
 }
 
-}  // namespace vision_demo_host
+}  // namespace dog_patrol_perception_tracking

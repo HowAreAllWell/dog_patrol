@@ -9,17 +9,17 @@ live/capture entry 的默认 Bayer interpolation；不改变 detector、tracker�
 
 | 入口 | 无 override 的 Bayer interpolation | smoothing |
 | --- | --- | --- |
-| `CameraIngest::Config`、ROS node parameter declaration、`config/demo_params.yaml` | `balanced` | `false` |
-| `vision_demo_node` | `balanced` | `false` |
+| `CameraIngest::Config`、ROS node parameter declaration、`config/perception_tracking_params.yaml` | `balanced` | `false` |
+| `dog_patrol_perception_tracking_node` | `balanced` | `false` |
 | `capture_ffv1` 与 `Ffv1CaptureWorkflow::Config` | `balanced` | `false` |
 `bench_hik_mvs_camera.sh` 仍以显式 `fast` 作为固定性能比较，不是 production runtime 默认。
 `fast`、`optimal`、`optimal_plus` 都继续由既有 parser 接受；旧 `optimal` 比较/回滚可使用：
 
 ```bash
-ros2 run vision_demo_host vision_demo_node --ros-args \
+ros2 run dog_patrol_perception_tracking dog_patrol_perception_tracking_node --ros-args \
   -p camera.bayer_interpolation:=optimal
 
-ros2 run vision_demo_host capture_ffv1 --bayer-interpolation optimal ...
+ros2 run dog_patrol_perception_tracking capture_ffv1 --bayer-interpolation optimal ...
 ```
 
 ## 默认配置与 override 测试
@@ -30,10 +30,10 @@ ros2 run vision_demo_host capture_ffv1 --bayer-interpolation optimal ...
 旧行为；改动后运行：
 
 ```bash
-cmake --build build/vision_demo_host \
+cmake --build build/dog_patrol_perception_tracking \
   --target test_camera_ingest_contract test_ffv1_capture_workflow -j2
 source /opt/ros/humble/setup.bash
-colcon test --packages-select vision_demo_host --event-handlers console_direct+ \
+colcon test --packages-select dog_patrol_perception_tracking --event-handlers console_direct+ \
   --ctest-args -R 'test_camera_ingest_contract|test_ffv1_capture_workflow'
 ```
 
@@ -50,12 +50,12 @@ export LD_LIBRARY_PATH="/opt/MVS/lib/aarch64:/opt/MVS/lib/64:${LD_LIBRARY_PATH:-
 source /opt/ros/humble/setup.bash
 source /path/to/workspace/dog_patrol/install/setup.bash
 source install/setup.bash
-timeout --signal=INT 35s ros2 run vision_demo_host vision_demo_node --ros-args \
+timeout --signal=INT 35s ros2 run dog_patrol_perception_tracking dog_patrol_perception_tracking_node --ros-args \
   -p camera.mvs_model:=MV-CU013-A0UC \
   -p camera.width:=1280 -p camera.height:=1024 -p camera.fps:=30.0 \
   -p detector.runtime_path:="$PWD/assets/models/engines/orin_jp621_trt_local/yolo26n_fp16_640.engine" \
   -p detector.enable_fake_detection:=false \
-  -p tracker.config_path:="$PWD/src/vision_demo_host/config/bot_sort.yaml" \
+  -p tracker.config_path:="$PWD/src/dog_patrol_perception_tracking/config/bot_sort.yaml" \
   -p visualization.enable:=false -p recording.enable:=false
 ```
 

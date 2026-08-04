@@ -1,5 +1,5 @@
-#include "vision_demo_host/modules/ffv1_capture_workflow.hpp"
-#include "vision_demo_host/modules/ffv1_capture_artifact_writer.hpp"
+#include "dog_patrol_perception_tracking/modules/ffv1_capture_workflow.hpp"
+#include "dog_patrol_perception_tracking/modules/ffv1_capture_artifact_writer.hpp"
 
 #include <gtest/gtest.h>
 
@@ -17,7 +17,7 @@
 #include <utility>
 #include <vector>
 
-namespace vision_demo_host {
+namespace dog_patrol_perception_tracking {
 namespace {
 
 struct CapturedArtifacts {
@@ -596,4 +596,4 @@ TEST(Ffv1CaptureArtifactWriterTest, PersistsIncompleteMetadataWhenFfv1NeverOpene
 }
 
 }  // namespace
-}  // namespace vision_demo_host
+}  // namespace dog_patrol_perception_tracking

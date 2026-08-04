@@ -3,7 +3,7 @@
 #include <sstream>
 #include <utility>
 
-namespace vision_demo_host {
+namespace dog_patrol_perception_tracking {
 namespace {
 
 std::string JoinSemanticIds(const std::set<int> &semantic_ids) {
@@ -189,4 +189,4 @@ void OcclusionGroupShadowLifecycle::EndMissingSplitCandidates(State *state, cons
   }
 }
 
-}  // namespace vision_demo_host
+}  // namespace dog_patrol_perception_tracking

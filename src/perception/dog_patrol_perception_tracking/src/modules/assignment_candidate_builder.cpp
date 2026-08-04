@@ -2,7 +2,7 @@
 
 #include <algorithm>
 
-namespace vision_demo_host {
+namespace dog_patrol_perception_tracking {
 
 AssignmentCandidateBuilder::DebugRow AssignmentCandidateBuilder::MakeAssignCandidateRow(
     const int track_idx, const int raw_track_id, const int semantic_id, const float app_cost, const float geo_cost,
@@ -132,4 +132,4 @@ void AssignmentCandidateBuilder::ApplyInactiveRecoveryAssignments(
   }
 }
 
-}  // namespace vision_demo_host
+}  // namespace dog_patrol_perception_tracking

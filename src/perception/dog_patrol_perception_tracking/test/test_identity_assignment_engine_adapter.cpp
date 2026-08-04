@@ -9,11 +9,11 @@
 
 namespace {
 
-vision_demo_host::Track MakePersonTrack(const int raw_id, const cv::Rect2f &bbox,
+dog_patrol_perception_tracking::Track MakePersonTrack(const int raw_id, const cv::Rect2f &bbox,
                                         const std::vector<float> &feature = {1.0F, 0.0F, 0.0F}) {
-  vision_demo_host::Track track;
+  dog_patrol_perception_tracking::Track track;
   track.id = raw_id;
-  track.class_id = vision_demo_host::ClassId::kPerson;
+  track.class_id = dog_patrol_perception_tracking::ClassId::kPerson;
   track.confidence = 0.9F;
   track.bbox = bbox;
   track.is_confirmed = true;
@@ -23,21 +23,21 @@ vision_demo_host::Track MakePersonTrack(const int raw_id, const cv::Rect2f &bbox
   return track;
 }
 
-vision_demo_host::PrimaryTargetResult IdlePrimary() {
-  vision_demo_host::PrimaryTargetResult primary;
-  primary.state = vision_demo_host::PrimaryState::kIdle;
+dog_patrol_perception_tracking::PrimaryTargetResult IdlePrimary() {
+  dog_patrol_perception_tracking::PrimaryTargetResult primary;
+  primary.state = dog_patrol_perception_tracking::PrimaryState::kIdle;
   return primary;
 }
 
-vision_demo_host::PrimaryTargetResult LockedPrimary(const int semantic_id) {
-  vision_demo_host::PrimaryTargetResult primary;
-  primary.state = vision_demo_host::PrimaryState::kLocked;
+dog_patrol_perception_tracking::PrimaryTargetResult LockedPrimary(const int semantic_id) {
+  dog_patrol_perception_tracking::PrimaryTargetResult primary;
+  primary.state = dog_patrol_perception_tracking::PrimaryState::kLocked;
   primary.primary_target_id = semantic_id;
   return primary;
 }
 
-const vision_demo_host::IdentityAssignmentEngineAdapter::ScoreDebugRow *FindDebugRow(
-    const std::vector<vision_demo_host::IdentityAssignmentEngineAdapter::ScoreDebugRow> &rows,
+const dog_patrol_perception_tracking::IdentityAssignmentEngineAdapter::ScoreDebugRow *FindDebugRow(
+    const std::vector<dog_patrol_perception_tracking::IdentityAssignmentEngineAdapter::ScoreDebugRow> &rows,
     const int raw_id, const std::string &stage) {
   const auto it = std::find_if(rows.begin(), rows.end(), [&](const auto &row) {
     return row.raw_track_id == raw_id && row.stage == stage;
@@ -46,15 +46,15 @@ const vision_demo_host::IdentityAssignmentEngineAdapter::ScoreDebugRow *FindDebu
 }
 
 bool HasSelectedRejectReason(
-    const std::vector<vision_demo_host::IdentityAssignmentEngineAdapter::ScoreDebugRow> &rows,
+    const std::vector<dog_patrol_perception_tracking::IdentityAssignmentEngineAdapter::ScoreDebugRow> &rows,
     const std::string &stage, const std::string &reason) {
   return std::any_of(rows.begin(), rows.end(), [&](const auto &row) {
     return row.stage == stage && row.selected && !row.accepted && row.reject_reason == reason;
   });
 }
 
-std::vector<vision_demo_host::IdentityRuntimeSnapshot> MakeTwoIdentitySeed(
-    vision_demo_host::IdentityAssignmentEngineAdapter *assigner) {
+std::vector<dog_patrol_perception_tracking::IdentityRuntimeSnapshot> MakeTwoIdentitySeed(
+    dog_patrol_perception_tracking::IdentityAssignmentEngineAdapter *assigner) {
   const auto initial = assigner->Update(
       {MakePersonTrack(1, cv::Rect2f(0, 0, 100, 300), {1.0F, 0.0F, 0.0F}),
        MakePersonTrack(2, cv::Rect2f(300, 0, 100, 300), {0.0F, 1.0F, 0.0F})},
@@ -64,21 +64,21 @@ std::vector<vision_demo_host::IdentityRuntimeSnapshot> MakeTwoIdentitySeed(
   return assigner->IdentitySnapshots();
 }
 
-vision_demo_host::IdentityRuntimeMutationApplier MakeMutationApplier(
-    vision_demo_host::IdentityAssignmentEngineAdapter::RuntimeState *runtime_state,
-    vision_demo_host::AppearanceFeatureService *appearance_features) {
-  return vision_demo_host::IdentityRuntimeMutationApplier(
-      vision_demo_host::IdentityAssignmentEngineAdapter::Config{}, runtime_state, appearance_features);
+dog_patrol_perception_tracking::IdentityRuntimeMutationApplier MakeMutationApplier(
+    dog_patrol_perception_tracking::IdentityAssignmentEngineAdapter::RuntimeState *runtime_state,
+    dog_patrol_perception_tracking::AppearanceFeatureService *appearance_features) {
+  return dog_patrol_perception_tracking::IdentityRuntimeMutationApplier(
+      dog_patrol_perception_tracking::IdentityAssignmentEngineAdapter::Config{}, runtime_state, appearance_features);
 }
 
 }  // namespace
 
 TEST(IdentityAssignmentEngineAdapterTest, RawContinuityCostOverThresholdRejectsDirectInheritance) {
-  vision_demo_host::IdentityAssignmentEngineAdapter::Config cfg;
+  dog_patrol_perception_tracking::IdentityAssignmentEngineAdapter::Config cfg;
   cfg.raw_continuity_max_cost = 0.10F;
   cfg.active_assign_max_cost = 0.90F;
-  vision_demo_host::IdentityAssignmentEngineAdapter::RuntimeState assigner_runtime_state;
-  vision_demo_host::IdentityAssignmentEngineAdapter assigner(cfg, &assigner_runtime_state);
+  dog_patrol_perception_tracking::IdentityAssignmentEngineAdapter::RuntimeState assigner_runtime_state;
+  dog_patrol_perception_tracking::IdentityAssignmentEngineAdapter assigner(cfg, &assigner_runtime_state);
 
   const auto first = assigner.Update(
       {MakePersonTrack(7, cv::Rect2f(0, 0, 50, 50))}, IdlePrimary());
@@ -97,11 +97,11 @@ TEST(IdentityAssignmentEngineAdapterTest, RawContinuityCostOverThresholdRejectsD
 }
 
 TEST(IdentityAssignmentEngineAdapterTest, AdapterCanOperateOnExternallyOwnedRuntimeState) {
-  vision_demo_host::IdentityAssignmentEngineAdapter::RuntimeState runtime_state;
-  vision_demo_host::IdentityAssignmentEngineAdapter writer(
-      vision_demo_host::IdentityAssignmentEngineAdapter::Config{}, &runtime_state);
-  vision_demo_host::IdentityAssignmentEngineAdapter reader(
-      vision_demo_host::IdentityAssignmentEngineAdapter::Config{}, &runtime_state);
+  dog_patrol_perception_tracking::IdentityAssignmentEngineAdapter::RuntimeState runtime_state;
+  dog_patrol_perception_tracking::IdentityAssignmentEngineAdapter writer(
+      dog_patrol_perception_tracking::IdentityAssignmentEngineAdapter::Config{}, &runtime_state);
+  dog_patrol_perception_tracking::IdentityAssignmentEngineAdapter reader(
+      dog_patrol_perception_tracking::IdentityAssignmentEngineAdapter::Config{}, &runtime_state);
 
   const auto first = writer.Update(
       {MakePersonTrack(7, cv::Rect2f(0, 0, 50, 50))}, LockedPrimary(1));
@@ -112,7 +112,7 @@ TEST(IdentityAssignmentEngineAdapterTest, AdapterCanOperateOnExternallyOwnedRunt
   ASSERT_EQ(reader.IdentitySnapshots().size(), 1U);
   EXPECT_EQ(reader.LastScoreDebugRows().size(), writer.LastScoreDebugRows().size());
 
-  vision_demo_host::IdentityAssignmentEngineAdapter::ResetRuntimeState(&runtime_state);
+  dog_patrol_perception_tracking::IdentityAssignmentEngineAdapter::ResetRuntimeState(&runtime_state);
 
   EXPECT_EQ(reader.SemanticIdForRawTrack(7), -1);
   EXPECT_EQ(reader.CurrentPrimarySemanticId(), -1);
@@ -121,10 +121,10 @@ TEST(IdentityAssignmentEngineAdapterTest, AdapterCanOperateOnExternallyOwnedRunt
 }
 
 TEST(IdentityAssignmentEngineAdapterTest, EndFrameLifecycleAgingUpdatesRuntimeSnapshots) {
-  vision_demo_host::IdentityAssignmentEngineAdapter::Config cfg;
+  dog_patrol_perception_tracking::IdentityAssignmentEngineAdapter::Config cfg;
   cfg.max_missing_frames = 1;
-  vision_demo_host::IdentityAssignmentEngineAdapter::RuntimeState assigner_runtime_state;
-  vision_demo_host::IdentityAssignmentEngineAdapter assigner(cfg, &assigner_runtime_state);
+  dog_patrol_perception_tracking::IdentityAssignmentEngineAdapter::RuntimeState assigner_runtime_state;
+  dog_patrol_perception_tracking::IdentityAssignmentEngineAdapter assigner(cfg, &assigner_runtime_state);
 
   const auto first = assigner.Update(
       {MakePersonTrack(7, cv::Rect2f(0, 0, 50, 50))}, IdlePrimary());
@@ -147,11 +147,11 @@ TEST(IdentityAssignmentEngineAdapterTest, EndFrameLifecycleAgingUpdatesRuntimeSn
 }
 
 TEST(IdentityAssignmentEngineAdapterTest, AssignmentCostOverMaxRejectsAndAllocatesNewSemanticId) {
-  vision_demo_host::IdentityAssignmentEngineAdapter::Config cfg;
+  dog_patrol_perception_tracking::IdentityAssignmentEngineAdapter::Config cfg;
   cfg.active_assign_max_cost = 0.10F;
   cfg.min_assignment_margin = 0.0F;
-  vision_demo_host::IdentityAssignmentEngineAdapter::RuntimeState assigner_runtime_state;
-  vision_demo_host::IdentityAssignmentEngineAdapter assigner(cfg, &assigner_runtime_state);
+  dog_patrol_perception_tracking::IdentityAssignmentEngineAdapter::RuntimeState assigner_runtime_state;
+  dog_patrol_perception_tracking::IdentityAssignmentEngineAdapter assigner(cfg, &assigner_runtime_state);
 
   const auto first = assigner.Update(
       {MakePersonTrack(7, cv::Rect2f(0, 0, 50, 50))}, IdlePrimary());
@@ -166,15 +166,15 @@ TEST(IdentityAssignmentEngineAdapterTest, AssignmentCostOverMaxRejectsAndAllocat
 }
 
 TEST(IdentityAssignmentEngineAdapterTest, RecentlyMissingActiveIdentityUsesAssignmentMarginCushion) {
-  vision_demo_host::IdentityAssignmentEngineAdapter::Config cfg;
+  dog_patrol_perception_tracking::IdentityAssignmentEngineAdapter::Config cfg;
   cfg.active_assign_max_cost = 0.55F;
   cfg.min_assignment_margin = 0.08F;
   cfg.max_missing_frames = 100;
   cfg.app_w = 0.70F;
   cfg.geo_w = 0.20F;
   cfg.time_w = 0.10F;
-  vision_demo_host::IdentityAssignmentEngineAdapter::RuntimeState assigner_runtime_state;
-  vision_demo_host::IdentityAssignmentEngineAdapter assigner(cfg, &assigner_runtime_state);
+  dog_patrol_perception_tracking::IdentityAssignmentEngineAdapter::RuntimeState assigner_runtime_state;
+  dog_patrol_perception_tracking::IdentityAssignmentEngineAdapter assigner(cfg, &assigner_runtime_state);
 
   const auto candidate = assigner.Update(
       {MakePersonTrack(1, cv::Rect2f(0, 0, 200, 200)),
@@ -205,14 +205,14 @@ TEST(IdentityAssignmentEngineAdapterTest, RecentlyMissingActiveIdentityUsesAssig
 }
 
 TEST(IdentityAssignmentEngineAdapterTest, ShortMissingUsesGeometryWhenAppearanceIsWeak) {
-  vision_demo_host::IdentityAssignmentEngineAdapter::Config cfg;
+  dog_patrol_perception_tracking::IdentityAssignmentEngineAdapter::Config cfg;
   cfg.max_missing_frames = 180;
   cfg.active_assign_max_cost = 0.55F;
   cfg.min_assignment_margin = 0.08F;
   cfg.missing_assign_max_app_cost = 0.50F;
   cfg.stable_frames_before_feature_update = 1;
-  vision_demo_host::IdentityAssignmentEngineAdapter::RuntimeState assigner_runtime_state;
-  vision_demo_host::IdentityAssignmentEngineAdapter assigner(cfg, &assigner_runtime_state);
+  dog_patrol_perception_tracking::IdentityAssignmentEngineAdapter::RuntimeState assigner_runtime_state;
+  dog_patrol_perception_tracking::IdentityAssignmentEngineAdapter assigner(cfg, &assigner_runtime_state);
 
   const auto first = assigner.Update(
       {MakePersonTrack(12, cv::Rect2f(1298, 960, 70, 196), {1.0F, 0.0F, 0.0F})},
@@ -236,15 +236,15 @@ TEST(IdentityAssignmentEngineAdapterTest, ShortMissingUsesGeometryWhenAppearance
 }
 
 TEST(IdentityAssignmentEngineAdapterTest, RecentlyMissingActiveIdentityAllowsStrongAppearanceSmallAreaRecovery) {
-  vision_demo_host::IdentityAssignmentEngineAdapter::Config cfg;
+  dog_patrol_perception_tracking::IdentityAssignmentEngineAdapter::Config cfg;
   cfg.max_missing_frames = 180;
   cfg.active_assign_max_cost = 0.55F;
   cfg.min_assignment_margin = 0.08F;
   cfg.missing_assign_min_area_ratio = 0.40F;
   cfg.missing_assign_max_app_cost = 0.50F;
   cfg.stable_frames_before_feature_update = 1;
-  vision_demo_host::IdentityAssignmentEngineAdapter::RuntimeState assigner_runtime_state;
-  vision_demo_host::IdentityAssignmentEngineAdapter assigner(cfg, &assigner_runtime_state);
+  dog_patrol_perception_tracking::IdentityAssignmentEngineAdapter::RuntimeState assigner_runtime_state;
+  dog_patrol_perception_tracking::IdentityAssignmentEngineAdapter assigner(cfg, &assigner_runtime_state);
 
   const auto first = assigner.Update(
       {MakePersonTrack(1, cv::Rect2f(0, 0, 500, 1500), {1.0F, 0.0F, 0.0F})},
@@ -268,14 +268,14 @@ TEST(IdentityAssignmentEngineAdapterTest, RecentlyMissingActiveIdentityAllowsStr
 }
 
 TEST(IdentityAssignmentEngineAdapterTest, InsufficientAssignmentMarginRejectsAndAllocatesNewSemanticId) {
-  vision_demo_host::IdentityAssignmentEngineAdapter::Config cfg;
+  dog_patrol_perception_tracking::IdentityAssignmentEngineAdapter::Config cfg;
   cfg.app_w = 1.0F;
   cfg.geo_w = 0.0F;
   cfg.time_w = 0.0F;
   cfg.active_assign_max_cost = 0.90F;
   cfg.min_assignment_margin = 0.20F;
-  vision_demo_host::IdentityAssignmentEngineAdapter::RuntimeState assigner_runtime_state;
-  vision_demo_host::IdentityAssignmentEngineAdapter assigner(cfg, &assigner_runtime_state);
+  dog_patrol_perception_tracking::IdentityAssignmentEngineAdapter::RuntimeState assigner_runtime_state;
+  dog_patrol_perception_tracking::IdentityAssignmentEngineAdapter assigner(cfg, &assigner_runtime_state);
 
   const auto first = assigner.Update(
       {MakePersonTrack(10, cv::Rect2f(0, 0, 50, 50), {}),
@@ -293,15 +293,15 @@ TEST(IdentityAssignmentEngineAdapterTest, InsufficientAssignmentMarginRejectsAnd
 }
 
 TEST(IdentityAssignmentEngineAdapterTest, AmbiguousRecentlyMissingAssignmentDoesNotBirthNewSemanticId) {
-  vision_demo_host::IdentityAssignmentEngineAdapter::Config cfg;
+  dog_patrol_perception_tracking::IdentityAssignmentEngineAdapter::Config cfg;
   cfg.app_w = 1.0F;
   cfg.geo_w = 0.0F;
   cfg.time_w = 0.0F;
   cfg.active_assign_max_cost = 0.90F;
   cfg.min_assignment_margin = 0.20F;
   cfg.max_missing_frames = 100;
-  vision_demo_host::IdentityAssignmentEngineAdapter::RuntimeState assigner_runtime_state;
-  vision_demo_host::IdentityAssignmentEngineAdapter assigner(cfg, &assigner_runtime_state);
+  dog_patrol_perception_tracking::IdentityAssignmentEngineAdapter::RuntimeState assigner_runtime_state;
+  dog_patrol_perception_tracking::IdentityAssignmentEngineAdapter assigner(cfg, &assigner_runtime_state);
 
   const auto first = assigner.Update(
       {MakePersonTrack(10, cv::Rect2f(0, 0, 50, 50), {}),
@@ -328,13 +328,13 @@ TEST(IdentityAssignmentEngineAdapterTest, AmbiguousRecentlyMissingAssignmentDoes
 }
 
 TEST(IdentityAssignmentEngineAdapterTest, PairwiseAppearanceEmitsEvidenceWithoutLegacyApply) {
-  vision_demo_host::IdentityAssignmentEngineAdapter::Config cfg;
+  dog_patrol_perception_tracking::IdentityAssignmentEngineAdapter::Config cfg;
   cfg.max_missing_frames = 180;
   cfg.active_assign_max_cost = 0.55F;
   cfg.min_assignment_margin = 0.08F;
   cfg.stable_frames_before_feature_update = 1;
-  vision_demo_host::IdentityAssignmentEngineAdapter::RuntimeState assigner_runtime_state;
-  vision_demo_host::IdentityAssignmentEngineAdapter assigner(cfg, &assigner_runtime_state);
+  dog_patrol_perception_tracking::IdentityAssignmentEngineAdapter::RuntimeState assigner_runtime_state;
+  dog_patrol_perception_tracking::IdentityAssignmentEngineAdapter assigner(cfg, &assigner_runtime_state);
 
   const std::vector<float> primary_feature{1.0F, 0.0F};
   const std::vector<float> secondary_feature{0.96F, 0.28F};
@@ -366,8 +366,8 @@ TEST(IdentityAssignmentEngineAdapterTest, PairwiseAppearanceEmitsEvidenceWithout
 }
 
 TEST(IdentityAssignmentEngineAdapterTest, SkinnyPartialNewTrackIsHiddenInsteadOfAllocatingSemanticId) {
-  vision_demo_host::IdentityAssignmentEngineAdapter::RuntimeState assigner_runtime_state;
-  vision_demo_host::IdentityAssignmentEngineAdapter assigner(vision_demo_host::IdentityAssignmentEngineAdapter::Config{}, &assigner_runtime_state);
+  dog_patrol_perception_tracking::IdentityAssignmentEngineAdapter::RuntimeState assigner_runtime_state;
+  dog_patrol_perception_tracking::IdentityAssignmentEngineAdapter assigner(dog_patrol_perception_tracking::IdentityAssignmentEngineAdapter::Config{}, &assigner_runtime_state);
 
   const auto first = assigner.Update(
       {MakePersonTrack(1, cv::Rect2f(800, 0, 700, 1500))}, IdlePrimary());
@@ -395,8 +395,8 @@ TEST(IdentityAssignmentEngineAdapterTest, SkinnyPartialNewTrackIsHiddenInsteadOf
 }
 
 TEST(IdentityAssignmentEngineAdapterTest, WideLowHeightFragmentNewTrackIsHiddenInsteadOfAllocatingSemanticId) {
-  vision_demo_host::IdentityAssignmentEngineAdapter::RuntimeState assigner_runtime_state;
-  vision_demo_host::IdentityAssignmentEngineAdapter assigner(vision_demo_host::IdentityAssignmentEngineAdapter::Config{}, &assigner_runtime_state);
+  dog_patrol_perception_tracking::IdentityAssignmentEngineAdapter::RuntimeState assigner_runtime_state;
+  dog_patrol_perception_tracking::IdentityAssignmentEngineAdapter assigner(dog_patrol_perception_tracking::IdentityAssignmentEngineAdapter::Config{}, &assigner_runtime_state);
 
   const auto first = assigner.Update(
       {MakePersonTrack(14, cv::Rect2f(2300, 180, 300, 1210))}, IdlePrimary());
@@ -418,8 +418,8 @@ TEST(IdentityAssignmentEngineAdapterTest, WideLowHeightFragmentNewTrackIsHiddenI
 }
 
 TEST(IdentityAssignmentEngineAdapterTest, ActiveDuplicateSplitTrackIsHiddenInsteadOfAllocatingSemanticId) {
-  vision_demo_host::IdentityAssignmentEngineAdapter::RuntimeState assigner_runtime_state;
-  vision_demo_host::IdentityAssignmentEngineAdapter assigner(vision_demo_host::IdentityAssignmentEngineAdapter::Config{}, &assigner_runtime_state);
+  dog_patrol_perception_tracking::IdentityAssignmentEngineAdapter::RuntimeState assigner_runtime_state;
+  dog_patrol_perception_tracking::IdentityAssignmentEngineAdapter assigner(dog_patrol_perception_tracking::IdentityAssignmentEngineAdapter::Config{}, &assigner_runtime_state);
 
   const auto first = assigner.Update(
       {MakePersonTrack(1, cv::Rect2f(0, 0, 500, 1500)),
@@ -448,8 +448,8 @@ TEST(IdentityAssignmentEngineAdapterTest, ActiveDuplicateSplitTrackIsHiddenInste
 }
 
 TEST(IdentityAssignmentEngineAdapterTest, DuplicateSplitTrackCanContinueExistingIdentityWhenMainRawDisappears) {
-  vision_demo_host::IdentityAssignmentEngineAdapter::RuntimeState assigner_runtime_state;
-  vision_demo_host::IdentityAssignmentEngineAdapter assigner(vision_demo_host::IdentityAssignmentEngineAdapter::Config{}, &assigner_runtime_state);
+  dog_patrol_perception_tracking::IdentityAssignmentEngineAdapter::RuntimeState assigner_runtime_state;
+  dog_patrol_perception_tracking::IdentityAssignmentEngineAdapter assigner(dog_patrol_perception_tracking::IdentityAssignmentEngineAdapter::Config{}, &assigner_runtime_state);
 
   const auto first = assigner.Update(
       {MakePersonTrack(1, cv::Rect2f(0, 0, 500, 1500)),
@@ -475,8 +475,8 @@ TEST(IdentityAssignmentEngineAdapterTest, DuplicateSplitTrackCanContinueExisting
 }
 
 TEST(IdentityAssignmentEngineAdapterTest, SmallStableNewTrackPromotesAfterQuickConfirmation) {
-  vision_demo_host::IdentityAssignmentEngineAdapter::RuntimeState assigner_runtime_state;
-  vision_demo_host::IdentityAssignmentEngineAdapter assigner(vision_demo_host::IdentityAssignmentEngineAdapter::Config{}, &assigner_runtime_state);
+  dog_patrol_perception_tracking::IdentityAssignmentEngineAdapter::RuntimeState assigner_runtime_state;
+  dog_patrol_perception_tracking::IdentityAssignmentEngineAdapter assigner(dog_patrol_perception_tracking::IdentityAssignmentEngineAdapter::Config{}, &assigner_runtime_state);
 
   const auto first = assigner.Update(
       {MakePersonTrack(1, cv::Rect2f(0, 0, 500, 1500))}, IdlePrimary());
@@ -500,8 +500,8 @@ TEST(IdentityAssignmentEngineAdapterTest, SmallStableNewTrackPromotesAfterQuickC
 }
 
 TEST(IdentityAssignmentEngineAdapterTest, HiddenCandidatesDoNotConsumeSemanticIdsBeforeFullBodyEdgeNewcomer) {
-  vision_demo_host::IdentityAssignmentEngineAdapter::RuntimeState assigner_runtime_state;
-  vision_demo_host::IdentityAssignmentEngineAdapter assigner(vision_demo_host::IdentityAssignmentEngineAdapter::Config{}, &assigner_runtime_state);
+  dog_patrol_perception_tracking::IdentityAssignmentEngineAdapter::RuntimeState assigner_runtime_state;
+  dog_patrol_perception_tracking::IdentityAssignmentEngineAdapter assigner(dog_patrol_perception_tracking::IdentityAssignmentEngineAdapter::Config{}, &assigner_runtime_state);
 
   const auto initial = assigner.Update(
       {MakePersonTrack(1, cv::Rect2f(0, 0, 500, 1500)),
@@ -552,8 +552,8 @@ TEST(IdentityAssignmentEngineAdapterTest, HiddenCandidatesDoNotConsumeSemanticId
 }
 
 TEST(IdentityAssignmentEngineAdapterTest, OverlapFreezesFeatureAndGeometryUpdates) {
-  vision_demo_host::IdentityAssignmentEngineAdapter::RuntimeState assigner_runtime_state;
-  vision_demo_host::IdentityAssignmentEngineAdapter assigner(vision_demo_host::IdentityAssignmentEngineAdapter::Config{}, &assigner_runtime_state);
+  dog_patrol_perception_tracking::IdentityAssignmentEngineAdapter::RuntimeState assigner_runtime_state;
+  dog_patrol_perception_tracking::IdentityAssignmentEngineAdapter assigner(dog_patrol_perception_tracking::IdentityAssignmentEngineAdapter::Config{}, &assigner_runtime_state);
 
   const auto mapping = assigner.Update(
       {MakePersonTrack(10, cv::Rect2f(0, 0, 80, 80)),
@@ -572,13 +572,13 @@ TEST(IdentityAssignmentEngineAdapterTest, OverlapFreezesFeatureAndGeometryUpdate
 }
 
 TEST(IdentityAssignmentEngineAdapterTest, UpdatePolicyReasonsExplainAllowedStableAndRejectedUpdates) {
-  vision_demo_host::IdentityAssignmentEngineAdapter::Config cfg;
+  dog_patrol_perception_tracking::IdentityAssignmentEngineAdapter::Config cfg;
   cfg.active_assign_max_cost = 0.90F;
   cfg.raw_continuity_max_cost = 0.90F;
   cfg.min_assignment_margin = 0.0F;
   cfg.stable_frames_before_feature_update = 3;
-  vision_demo_host::IdentityAssignmentEngineAdapter::RuntimeState assigner_runtime_state;
-  vision_demo_host::IdentityAssignmentEngineAdapter assigner(cfg, &assigner_runtime_state);
+  dog_patrol_perception_tracking::IdentityAssignmentEngineAdapter::RuntimeState assigner_runtime_state;
+  dog_patrol_perception_tracking::IdentityAssignmentEngineAdapter assigner(cfg, &assigner_runtime_state);
 
   const auto first = assigner.Update(
       {MakePersonTrack(7, cv::Rect2f(0, 0, 100, 300), {1.0F, 0.0F, 0.0F}),
@@ -622,11 +622,11 @@ TEST(IdentityAssignmentEngineAdapterTest, UpdatePolicyReasonsExplainAllowedStabl
   EXPECT_EQ(weak_row->feature_update_reason, "unreliable_low_quality_observation");
   EXPECT_EQ(weak_row->geometry_update_reason, "unreliable_low_quality_observation");
 
-  vision_demo_host::IdentityAssignmentEngineAdapter::Config reject_cfg;
+  dog_patrol_perception_tracking::IdentityAssignmentEngineAdapter::Config reject_cfg;
   reject_cfg.active_assign_max_cost = 0.10F;
   reject_cfg.min_assignment_margin = 0.0F;
-  vision_demo_host::IdentityAssignmentEngineAdapter::RuntimeState rejecter_runtime_state;
-  vision_demo_host::IdentityAssignmentEngineAdapter rejecter(reject_cfg, &rejecter_runtime_state);
+  dog_patrol_perception_tracking::IdentityAssignmentEngineAdapter::RuntimeState rejecter_runtime_state;
+  dog_patrol_perception_tracking::IdentityAssignmentEngineAdapter rejecter(reject_cfg, &rejecter_runtime_state);
   ASSERT_EQ(rejecter.Update({MakePersonTrack(1, cv::Rect2f(0, 0, 100, 300))}, IdlePrimary()).at(1), 1);
   const auto rejected = rejecter.Update(
       {MakePersonTrack(9, cv::Rect2f(900, 0, 100, 300), {0.0F, 0.0F, 1.0F})},
@@ -640,12 +640,12 @@ TEST(IdentityAssignmentEngineAdapterTest, UpdatePolicyReasonsExplainAllowedStabl
 }
 
 TEST(IdentityAssignmentEngineAdapterTest, UnreliableObservationDoesNotOverwriteReliableGeometry) {
-  vision_demo_host::IdentityAssignmentEngineAdapter::Config cfg;
+  dog_patrol_perception_tracking::IdentityAssignmentEngineAdapter::Config cfg;
   cfg.raw_continuity_max_cost = 0.15F;
   cfg.active_assign_max_cost = 0.90F;
   cfg.min_assignment_margin = 0.0F;
-  vision_demo_host::IdentityAssignmentEngineAdapter::RuntimeState assigner_runtime_state;
-  vision_demo_host::IdentityAssignmentEngineAdapter assigner(cfg, &assigner_runtime_state);
+  dog_patrol_perception_tracking::IdentityAssignmentEngineAdapter::RuntimeState assigner_runtime_state;
+  dog_patrol_perception_tracking::IdentityAssignmentEngineAdapter assigner(cfg, &assigner_runtime_state);
 
   const auto first = assigner.Update(
       {MakePersonTrack(7, cv::Rect2f(0, 0, 50, 50))}, IdlePrimary());
@@ -668,12 +668,12 @@ TEST(IdentityAssignmentEngineAdapterTest, UnreliableObservationDoesNotOverwriteR
 }
 
 TEST(IdentityAssignmentEngineAdapterTest, SnapshotKeepsReliableBBoxSeparateFromFrozenActiveBBox) {
-  vision_demo_host::IdentityAssignmentEngineAdapter::Config cfg;
+  dog_patrol_perception_tracking::IdentityAssignmentEngineAdapter::Config cfg;
   cfg.raw_continuity_max_cost = 0.90F;
   cfg.active_assign_max_cost = 0.90F;
   cfg.min_assignment_margin = 0.0F;
-  vision_demo_host::IdentityAssignmentEngineAdapter::RuntimeState assigner_runtime_state;
-  vision_demo_host::IdentityAssignmentEngineAdapter assigner(cfg, &assigner_runtime_state);
+  dog_patrol_perception_tracking::IdentityAssignmentEngineAdapter::RuntimeState assigner_runtime_state;
+  dog_patrol_perception_tracking::IdentityAssignmentEngineAdapter assigner(cfg, &assigner_runtime_state);
 
   const auto first = assigner.Update({MakePersonTrack(7, cv::Rect2f(0, 0, 100, 300))}, IdlePrimary());
   ASSERT_EQ(first.at(7), 1);
@@ -695,14 +695,14 @@ TEST(IdentityAssignmentEngineAdapterTest, SnapshotKeepsReliableBBoxSeparateFromF
 }
 
 TEST(IdentityAssignmentEngineAdapterTest, MergedSingleBlobKeepsRawContinuityWhenAlternativeOnlySlightlyBetter) {
-  vision_demo_host::IdentityAssignmentEngineAdapter::Config cfg;
+  dog_patrol_perception_tracking::IdentityAssignmentEngineAdapter::Config cfg;
   cfg.app_w = 0.0F;
   cfg.geo_w = 1.0F;
   cfg.time_w = 0.0F;
   cfg.min_assignment_margin = 0.08F;
   cfg.overlap_iou_freeze = 0.10F;
-  vision_demo_host::IdentityAssignmentEngineAdapter::RuntimeState assigner_runtime_state;
-  vision_demo_host::IdentityAssignmentEngineAdapter assigner(cfg, &assigner_runtime_state);
+  dog_patrol_perception_tracking::IdentityAssignmentEngineAdapter::RuntimeState assigner_runtime_state;
+  dog_patrol_perception_tracking::IdentityAssignmentEngineAdapter assigner(cfg, &assigner_runtime_state);
 
   const auto first = assigner.Update(
       {MakePersonTrack(1, cv::Rect2f(0, 0, 100, 100)),
@@ -716,7 +716,7 @@ TEST(IdentityAssignmentEngineAdapterTest, MergedSingleBlobKeepsRawContinuityWhen
       {MakePersonTrack(1, cv::Rect2f(11, 0, 100, 100), {0.0F, 1.0F, 0.0F})},
       LockedPrimary(1));
 
-  ASSERT_EQ(assigner.CurrentMode(), vision_demo_host::IdentityLifecycleMode::kMerged);
+  ASSERT_EQ(assigner.CurrentMode(), dog_patrol_perception_tracking::IdentityLifecycleMode::kMerged);
   ASSERT_EQ(merged.count(1), 1U);
   EXPECT_EQ(merged.at(1), 1);
   EXPECT_TRUE(std::any_of(assigner.LastScoreDebugRows().begin(), assigner.LastScoreDebugRows().end(),
@@ -727,15 +727,15 @@ TEST(IdentityAssignmentEngineAdapterTest, MergedSingleBlobKeepsRawContinuityWhen
 }
 
 TEST(IdentityAssignmentEngineAdapterTest, MergedSingleBlobRejectsMissingPrimaryWhenAppearanceIsPoor) {
-  vision_demo_host::IdentityAssignmentEngineAdapter::Config cfg;
+  dog_patrol_perception_tracking::IdentityAssignmentEngineAdapter::Config cfg;
   cfg.max_missing_frames = 180;
   cfg.active_assign_max_cost = 0.55F;
   cfg.min_assignment_margin = 0.08F;
   cfg.missing_assign_max_app_cost = 0.50F;
   cfg.stable_frames_before_feature_update = 1;
   cfg.overlap_iou_freeze = 0.10F;
-  vision_demo_host::IdentityAssignmentEngineAdapter::RuntimeState assigner_runtime_state;
-  vision_demo_host::IdentityAssignmentEngineAdapter assigner(cfg, &assigner_runtime_state);
+  dog_patrol_perception_tracking::IdentityAssignmentEngineAdapter::RuntimeState assigner_runtime_state;
+  dog_patrol_perception_tracking::IdentityAssignmentEngineAdapter assigner(cfg, &assigner_runtime_state);
 
   const auto first = assigner.Update(
       {MakePersonTrack(1, cv::Rect2f(2469, 5, 215, 1503), {1.0F, 0.0F, 0.0F})},
@@ -763,7 +763,7 @@ TEST(IdentityAssignmentEngineAdapterTest, MergedSingleBlobRejectsMissingPrimaryW
         LockedPrimary(1));
     ASSERT_EQ(only_other.at(2), 2);
   }
-  ASSERT_EQ(assigner.CurrentMode(), vision_demo_host::IdentityLifecycleMode::kMerged);
+  ASSERT_EQ(assigner.CurrentMode(), dog_patrol_perception_tracking::IdentityLifecycleMode::kMerged);
 
   const auto newcomer = assigner.Update(
       {MakePersonTrack(14, cv::Rect2f(2509, 150, 178, 1270), {0.4F, 0.0F, 0.916515F})},
@@ -778,7 +778,7 @@ TEST(IdentityAssignmentEngineAdapterTest, MergedSingleBlobRejectsMissingPrimaryW
 }
 
 TEST(IdentityAssignmentEngineAdapterTest, MergedSingleBlobRejectsMissingPrimaryWhenAreaShrinksTooMuch) {
-  vision_demo_host::IdentityAssignmentEngineAdapter::Config cfg;
+  dog_patrol_perception_tracking::IdentityAssignmentEngineAdapter::Config cfg;
   cfg.max_missing_frames = 180;
   cfg.active_assign_max_cost = 0.55F;
   cfg.min_assignment_margin = 0.08F;
@@ -786,8 +786,8 @@ TEST(IdentityAssignmentEngineAdapterTest, MergedSingleBlobRejectsMissingPrimaryW
   cfg.missing_assign_max_app_cost = 0.50F;
   cfg.stable_frames_before_feature_update = 1;
   cfg.overlap_iou_freeze = 0.10F;
-  vision_demo_host::IdentityAssignmentEngineAdapter::RuntimeState assigner_runtime_state;
-  vision_demo_host::IdentityAssignmentEngineAdapter assigner(cfg, &assigner_runtime_state);
+  dog_patrol_perception_tracking::IdentityAssignmentEngineAdapter::RuntimeState assigner_runtime_state;
+  dog_patrol_perception_tracking::IdentityAssignmentEngineAdapter assigner(cfg, &assigner_runtime_state);
 
   ASSERT_EQ(assigner.Update(
                 {MakePersonTrack(1, cv::Rect2f(2469, 5, 215, 1503), {1.0F, 0.0F, 0.0F})},
@@ -822,14 +822,14 @@ TEST(IdentityAssignmentEngineAdapterTest, MergedSingleBlobRejectsMissingPrimaryW
 }
 
 TEST(IdentityAssignmentEngineAdapterTest, MergedSingleBlobKeepsNonPrimaryRawContinuityWhenPrimaryIsOnlySlightlyWorse) {
-  vision_demo_host::IdentityAssignmentEngineAdapter::Config cfg;
+  dog_patrol_perception_tracking::IdentityAssignmentEngineAdapter::Config cfg;
   cfg.app_w = 0.0F;
   cfg.geo_w = 1.0F;
   cfg.time_w = 0.0F;
   cfg.min_assignment_margin = 0.08F;
   cfg.overlap_iou_freeze = 0.10F;
-  vision_demo_host::IdentityAssignmentEngineAdapter::RuntimeState assigner_runtime_state;
-  vision_demo_host::IdentityAssignmentEngineAdapter assigner(cfg, &assigner_runtime_state);
+  dog_patrol_perception_tracking::IdentityAssignmentEngineAdapter::RuntimeState assigner_runtime_state;
+  dog_patrol_perception_tracking::IdentityAssignmentEngineAdapter assigner(cfg, &assigner_runtime_state);
 
   const auto first = assigner.Update(
       {MakePersonTrack(1, cv::Rect2f(0, 0, 100, 100)),
@@ -842,21 +842,21 @@ TEST(IdentityAssignmentEngineAdapterTest, MergedSingleBlobKeepsNonPrimaryRawCont
       {MakePersonTrack(2, cv::Rect2f(11, 0, 100, 100), {0.0F, 1.0F, 0.0F})},
       LockedPrimary(1));
 
-  ASSERT_EQ(assigner.CurrentMode(), vision_demo_host::IdentityLifecycleMode::kMerged);
+  ASSERT_EQ(assigner.CurrentMode(), dog_patrol_perception_tracking::IdentityLifecycleMode::kMerged);
   ASSERT_EQ(merged.count(2), 1U);
   EXPECT_EQ(merged.at(2), 2);
 }
 
 TEST(IdentityAssignmentEngineAdapterTest, MergedSingleBlobKeepsContinuityForPhase4HandoffCoordinator) {
-  vision_demo_host::IdentityAssignmentEngineAdapter::Config cfg;
+  dog_patrol_perception_tracking::IdentityAssignmentEngineAdapter::Config cfg;
   cfg.max_missing_frames = 180;
   cfg.active_assign_max_cost = 0.55F;
   cfg.min_assignment_margin = 0.08F;
   cfg.missing_assign_max_app_cost = 0.50F;
   cfg.stable_frames_before_feature_update = 1;
   cfg.overlap_iou_freeze = 0.10F;
-  vision_demo_host::IdentityAssignmentEngineAdapter::RuntimeState assigner_runtime_state;
-  vision_demo_host::IdentityAssignmentEngineAdapter assigner(cfg, &assigner_runtime_state);
+  dog_patrol_perception_tracking::IdentityAssignmentEngineAdapter::RuntimeState assigner_runtime_state;
+  dog_patrol_perception_tracking::IdentityAssignmentEngineAdapter assigner(cfg, &assigner_runtime_state);
 
   const std::vector<float> primary_feature{1.0F, 0.0F};
   const std::vector<float> secondary_feature{0.0F, 1.0F};
@@ -892,7 +892,7 @@ TEST(IdentityAssignmentEngineAdapterTest, MergedSingleBlobKeepsContinuityForPhas
       {MakePersonTrack(2, cv::Rect2f(560, 240, 200, 560), primary_feature)},
       LockedPrimary(1));
 
-  ASSERT_EQ(assigner.CurrentMode(), vision_demo_host::IdentityLifecycleMode::kMerged);
+  ASSERT_EQ(assigner.CurrentMode(), dog_patrol_perception_tracking::IdentityLifecycleMode::kMerged);
   ASSERT_EQ(handoff.count(2), 1U);
   EXPECT_EQ(handoff.at(2), 2);
   EXPECT_NE(std::find_if(assigner.LastScoreDebugRows().begin(), assigner.LastScoreDebugRows().end(),
@@ -904,15 +904,15 @@ TEST(IdentityAssignmentEngineAdapterTest, MergedSingleBlobKeepsContinuityForPhas
 }
 
 TEST(IdentityAssignmentEngineAdapterTest, MergedSplitHandoffNoLongerAppliesInsideLegacyUpdate) {
-  vision_demo_host::IdentityAssignmentEngineAdapter::Config cfg;
+  dog_patrol_perception_tracking::IdentityAssignmentEngineAdapter::Config cfg;
   cfg.max_missing_frames = 180;
   cfg.active_assign_max_cost = 0.55F;
   cfg.min_assignment_margin = 0.08F;
   cfg.missing_assign_max_app_cost = 0.50F;
   cfg.stable_frames_before_feature_update = 1;
   cfg.overlap_iou_freeze = 0.10F;
-  vision_demo_host::IdentityAssignmentEngineAdapter::RuntimeState assigner_runtime_state;
-  vision_demo_host::IdentityAssignmentEngineAdapter assigner(cfg, &assigner_runtime_state);
+  dog_patrol_perception_tracking::IdentityAssignmentEngineAdapter::RuntimeState assigner_runtime_state;
+  dog_patrol_perception_tracking::IdentityAssignmentEngineAdapter assigner(cfg, &assigner_runtime_state);
 
   const std::vector<float> primary_feature{1.0F, 0.0F};
   const std::vector<float> secondary_feature{0.0F, 1.0F};
@@ -942,7 +942,7 @@ TEST(IdentityAssignmentEngineAdapterTest, MergedSplitHandoffNoLongerAppliesInsid
        MakePersonTrack(7, cv::Rect2f(736, 204, 177, 555), secondary_feature)},
       LockedPrimary(1));
 
-  ASSERT_EQ(assigner.CurrentMode(), vision_demo_host::IdentityLifecycleMode::kMerged);
+  ASSERT_EQ(assigner.CurrentMode(), dog_patrol_perception_tracking::IdentityLifecycleMode::kMerged);
   ASSERT_EQ(split.count(2), 1U);
   ASSERT_EQ(split.count(7), 1U);
   EXPECT_EQ(split.at(2), 1);
@@ -951,15 +951,15 @@ TEST(IdentityAssignmentEngineAdapterTest, MergedSplitHandoffNoLongerAppliesInsid
 }
 
 TEST(IdentityAssignmentEngineAdapterTest, EarlyMergedSplitHandoffNoLongerAppliesInsideLegacyUpdate) {
-  vision_demo_host::IdentityAssignmentEngineAdapter::Config cfg;
+  dog_patrol_perception_tracking::IdentityAssignmentEngineAdapter::Config cfg;
   cfg.max_missing_frames = 180;
   cfg.active_assign_max_cost = 0.55F;
   cfg.min_assignment_margin = 0.08F;
   cfg.missing_assign_max_app_cost = 0.50F;
   cfg.stable_frames_before_feature_update = 1;
   cfg.overlap_iou_freeze = 0.10F;
-  vision_demo_host::IdentityAssignmentEngineAdapter::RuntimeState assigner_runtime_state;
-  vision_demo_host::IdentityAssignmentEngineAdapter assigner(cfg, &assigner_runtime_state);
+  dog_patrol_perception_tracking::IdentityAssignmentEngineAdapter::RuntimeState assigner_runtime_state;
+  dog_patrol_perception_tracking::IdentityAssignmentEngineAdapter assigner(cfg, &assigner_runtime_state);
 
   const std::vector<float> primary_feature{1.0F, 0.0F};
   const std::vector<float> secondary_feature{0.0F, 1.0F};
@@ -989,7 +989,7 @@ TEST(IdentityAssignmentEngineAdapterTest, EarlyMergedSplitHandoffNoLongerApplies
        MakePersonTrack(7, cv::Rect2f(717, 210, 164, 551), secondary_feature)},
       LockedPrimary(1));
 
-  ASSERT_EQ(assigner.CurrentMode(), vision_demo_host::IdentityLifecycleMode::kMerged);
+  ASSERT_EQ(assigner.CurrentMode(), dog_patrol_perception_tracking::IdentityLifecycleMode::kMerged);
   ASSERT_EQ(split.count(2), 1U);
   ASSERT_EQ(split.count(7), 1U);
   EXPECT_EQ(split.at(2), 1);
@@ -999,15 +999,15 @@ TEST(IdentityAssignmentEngineAdapterTest, EarlyMergedSplitHandoffNoLongerApplies
 }
 
 TEST(IdentityAssignmentEngineAdapterTest, MergedSideReappearanceNoLongerAppliesInsideLegacyUpdate) {
-  vision_demo_host::IdentityAssignmentEngineAdapter::Config cfg;
+  dog_patrol_perception_tracking::IdentityAssignmentEngineAdapter::Config cfg;
   cfg.max_missing_frames = 180;
   cfg.active_assign_max_cost = 0.55F;
   cfg.min_assignment_margin = 0.08F;
   cfg.missing_assign_max_app_cost = 0.50F;
   cfg.stable_frames_before_feature_update = 1;
   cfg.overlap_iou_freeze = 0.10F;
-  vision_demo_host::IdentityAssignmentEngineAdapter::RuntimeState assigner_runtime_state;
-  vision_demo_host::IdentityAssignmentEngineAdapter assigner(cfg, &assigner_runtime_state);
+  dog_patrol_perception_tracking::IdentityAssignmentEngineAdapter::RuntimeState assigner_runtime_state;
+  dog_patrol_perception_tracking::IdentityAssignmentEngineAdapter assigner(cfg, &assigner_runtime_state);
 
   const std::vector<float> primary_feature{1.0F, 0.0F};
   const std::vector<float> secondary_feature{0.0F, 1.0F};
@@ -1044,13 +1044,13 @@ TEST(IdentityAssignmentEngineAdapterTest, MergedSideReappearanceNoLongerAppliesI
 }
 
 TEST(IdentityAssignmentEngineAdapterTest, Phase4MergedSplitDirectApplyUpdatesTwoTracks) {
-  vision_demo_host::IdentityAssignmentEngineAdapter::RuntimeState assigner_runtime_state;
-  vision_demo_host::IdentityAssignmentEngineAdapter assigner(vision_demo_host::IdentityAssignmentEngineAdapter::Config{}, &assigner_runtime_state);
-  vision_demo_host::AppearanceFeatureService mutation_features;
+  dog_patrol_perception_tracking::IdentityAssignmentEngineAdapter::RuntimeState assigner_runtime_state;
+  dog_patrol_perception_tracking::IdentityAssignmentEngineAdapter assigner(dog_patrol_perception_tracking::IdentityAssignmentEngineAdapter::Config{}, &assigner_runtime_state);
+  dog_patrol_perception_tracking::AppearanceFeatureService mutation_features;
   auto applier = MakeMutationApplier(&assigner_runtime_state, &mutation_features);
   MakeTwoIdentitySeed(&assigner);
 
-  const std::vector<vision_demo_host::Track> tracks = {
+  const std::vector<dog_patrol_perception_tracking::Track> tracks = {
       MakePersonTrack(11, cv::Rect2f(10, 0, 100, 300), {1.0F, 0.0F, 0.0F}),
       MakePersonTrack(12, cv::Rect2f(310, 0, 100, 300), {0.0F, 1.0F, 0.0F})};
 
@@ -1071,16 +1071,16 @@ TEST(IdentityAssignmentEngineAdapterTest, Phase4MergedSplitDirectApplyUpdatesTwo
 }
 
 TEST(IdentityAssignmentEngineAdapterTest, Phase4MergedSideRecoveryDirectApplyForcesGeometryUpdate) {
-  vision_demo_host::IdentityAssignmentEngineAdapter::RuntimeState assigner_runtime_state;
-  vision_demo_host::IdentityAssignmentEngineAdapter assigner(vision_demo_host::IdentityAssignmentEngineAdapter::Config{}, &assigner_runtime_state);
-  vision_demo_host::AppearanceFeatureService mutation_features;
+  dog_patrol_perception_tracking::IdentityAssignmentEngineAdapter::RuntimeState assigner_runtime_state;
+  dog_patrol_perception_tracking::IdentityAssignmentEngineAdapter assigner(dog_patrol_perception_tracking::IdentityAssignmentEngineAdapter::Config{}, &assigner_runtime_state);
+  dog_patrol_perception_tracking::AppearanceFeatureService mutation_features;
   auto applier = MakeMutationApplier(&assigner_runtime_state, &mutation_features);
   MakeTwoIdentitySeed(&assigner);
 
   auto candidate = MakePersonTrack(12, cv::Rect2f(310, 0, 100, 300), {0.0F, 1.0F, 0.0F});
   candidate.low_score_update = true;
   candidate.association.low_score_detection = true;
-  const std::vector<vision_demo_host::Track> tracks = {
+  const std::vector<dog_patrol_perception_tracking::Track> tracks = {
       MakePersonTrack(11, cv::Rect2f(10, 0, 100, 300), {1.0F, 0.0F, 0.0F}),
       candidate};
 
@@ -1097,13 +1097,13 @@ TEST(IdentityAssignmentEngineAdapterTest, Phase4MergedSideRecoveryDirectApplyFor
 }
 
 TEST(IdentityAssignmentEngineAdapterTest, Phase4MergedSingleBlobDirectApplyMarksCarrierMissing) {
-  vision_demo_host::IdentityAssignmentEngineAdapter::RuntimeState assigner_runtime_state;
-  vision_demo_host::IdentityAssignmentEngineAdapter assigner(vision_demo_host::IdentityAssignmentEngineAdapter::Config{}, &assigner_runtime_state);
-  vision_demo_host::AppearanceFeatureService mutation_features;
+  dog_patrol_perception_tracking::IdentityAssignmentEngineAdapter::RuntimeState assigner_runtime_state;
+  dog_patrol_perception_tracking::IdentityAssignmentEngineAdapter assigner(dog_patrol_perception_tracking::IdentityAssignmentEngineAdapter::Config{}, &assigner_runtime_state);
+  dog_patrol_perception_tracking::AppearanceFeatureService mutation_features;
   auto applier = MakeMutationApplier(&assigner_runtime_state, &mutation_features);
   MakeTwoIdentitySeed(&assigner);
 
-  const std::vector<vision_demo_host::Track> tracks = {
+  const std::vector<dog_patrol_perception_tracking::Track> tracks = {
       MakePersonTrack(11, cv::Rect2f(10, 0, 100, 300), {0.0F, 1.0F, 0.0F})};
 
   ASSERT_TRUE(applier.ApplyPhase4MergedSingleBlobHandoff(tracks, 11, 1, 2));
@@ -1125,13 +1125,13 @@ TEST(IdentityAssignmentEngineAdapterTest, Phase4MergedSingleBlobDirectApplyMarks
 }
 
 TEST(IdentityAssignmentEngineAdapterTest, Phase4PairwiseDirectApplyUpdatesTwoTracks) {
-  vision_demo_host::IdentityAssignmentEngineAdapter::RuntimeState assigner_runtime_state;
-  vision_demo_host::IdentityAssignmentEngineAdapter assigner(vision_demo_host::IdentityAssignmentEngineAdapter::Config{}, &assigner_runtime_state);
-  vision_demo_host::AppearanceFeatureService mutation_features;
+  dog_patrol_perception_tracking::IdentityAssignmentEngineAdapter::RuntimeState assigner_runtime_state;
+  dog_patrol_perception_tracking::IdentityAssignmentEngineAdapter assigner(dog_patrol_perception_tracking::IdentityAssignmentEngineAdapter::Config{}, &assigner_runtime_state);
+  dog_patrol_perception_tracking::AppearanceFeatureService mutation_features;
   auto applier = MakeMutationApplier(&assigner_runtime_state, &mutation_features);
   MakeTwoIdentitySeed(&assigner);
 
-  const std::vector<vision_demo_host::Track> tracks = {
+  const std::vector<dog_patrol_perception_tracking::Track> tracks = {
       MakePersonTrack(21, cv::Rect2f(10, 0, 100, 300), {1.0F, 0.0F, 0.0F}),
       MakePersonTrack(22, cv::Rect2f(310, 0, 100, 300), {0.0F, 1.0F, 0.0F})};
 
@@ -1144,12 +1144,12 @@ TEST(IdentityAssignmentEngineAdapterTest, Phase4PairwiseDirectApplyUpdatesTwoTra
 }
 
 TEST(IdentityAssignmentEngineAdapterTest, Phase4DirectApplyRejectsInvalidRawId) {
-  vision_demo_host::IdentityAssignmentEngineAdapter::RuntimeState assigner_runtime_state;
-  vision_demo_host::IdentityAssignmentEngineAdapter assigner(vision_demo_host::IdentityAssignmentEngineAdapter::Config{}, &assigner_runtime_state);
-  vision_demo_host::AppearanceFeatureService mutation_features;
+  dog_patrol_perception_tracking::IdentityAssignmentEngineAdapter::RuntimeState assigner_runtime_state;
+  dog_patrol_perception_tracking::IdentityAssignmentEngineAdapter assigner(dog_patrol_perception_tracking::IdentityAssignmentEngineAdapter::Config{}, &assigner_runtime_state);
+  dog_patrol_perception_tracking::AppearanceFeatureService mutation_features;
   auto applier = MakeMutationApplier(&assigner_runtime_state, &mutation_features);
   MakeTwoIdentitySeed(&assigner);
-  const std::vector<vision_demo_host::Track> tracks = {
+  const std::vector<dog_patrol_perception_tracking::Track> tracks = {
       MakePersonTrack(21, cv::Rect2f(10, 0, 100, 300), {1.0F, 0.0F, 0.0F}),
       MakePersonTrack(22, cv::Rect2f(310, 0, 100, 300), {0.0F, 1.0F, 0.0F})};
 
@@ -1159,12 +1159,12 @@ TEST(IdentityAssignmentEngineAdapterTest, Phase4DirectApplyRejectsInvalidRawId) 
 }
 
 TEST(IdentityAssignmentEngineAdapterTest, Phase4DirectApplyRejectsInvalidSemanticId) {
-  vision_demo_host::IdentityAssignmentEngineAdapter::RuntimeState assigner_runtime_state;
-  vision_demo_host::IdentityAssignmentEngineAdapter assigner(vision_demo_host::IdentityAssignmentEngineAdapter::Config{}, &assigner_runtime_state);
-  vision_demo_host::AppearanceFeatureService mutation_features;
+  dog_patrol_perception_tracking::IdentityAssignmentEngineAdapter::RuntimeState assigner_runtime_state;
+  dog_patrol_perception_tracking::IdentityAssignmentEngineAdapter assigner(dog_patrol_perception_tracking::IdentityAssignmentEngineAdapter::Config{}, &assigner_runtime_state);
+  dog_patrol_perception_tracking::AppearanceFeatureService mutation_features;
   auto applier = MakeMutationApplier(&assigner_runtime_state, &mutation_features);
   MakeTwoIdentitySeed(&assigner);
-  const std::vector<vision_demo_host::Track> tracks = {
+  const std::vector<dog_patrol_perception_tracking::Track> tracks = {
       MakePersonTrack(21, cv::Rect2f(10, 0, 100, 300), {1.0F, 0.0F, 0.0F}),
       MakePersonTrack(22, cv::Rect2f(310, 0, 100, 300), {0.0F, 1.0F, 0.0F})};
 
@@ -1175,9 +1175,9 @@ TEST(IdentityAssignmentEngineAdapterTest, Phase4DirectApplyRejectsInvalidSemanti
 }
 
 TEST(IdentityAssignmentEngineAdapterTest, Phase4DirectApplyErasesAcceptedBirthCandidate) {
-  vision_demo_host::IdentityAssignmentEngineAdapter::RuntimeState assigner_runtime_state;
-  vision_demo_host::IdentityAssignmentEngineAdapter assigner(vision_demo_host::IdentityAssignmentEngineAdapter::Config{}, &assigner_runtime_state);
-  vision_demo_host::AppearanceFeatureService mutation_features;
+  dog_patrol_perception_tracking::IdentityAssignmentEngineAdapter::RuntimeState assigner_runtime_state;
+  dog_patrol_perception_tracking::IdentityAssignmentEngineAdapter assigner(dog_patrol_perception_tracking::IdentityAssignmentEngineAdapter::Config{}, &assigner_runtime_state);
+  dog_patrol_perception_tracking::AppearanceFeatureService mutation_features;
   auto applier = MakeMutationApplier(&assigner_runtime_state, &mutation_features);
   const auto initial = assigner.Update(
       {MakePersonTrack(1, cv::Rect2f(0, 0, 500, 1500), {1.0F, 0.0F, 0.0F})},
@@ -1196,7 +1196,7 @@ TEST(IdentityAssignmentEngineAdapterTest, Phase4DirectApplyErasesAcceptedBirthCa
       IdlePrimary());
   ASSERT_EQ(second_identity.at(2), 2);
 
-  const std::vector<vision_demo_host::Track> applied_tracks = {
+  const std::vector<dog_patrol_perception_tracking::Track> applied_tracks = {
       MakePersonTrack(31, cv::Rect2f(10, 0, 500, 1500), {1.0F, 0.0F, 0.0F}),
       MakePersonTrack(30, cv::Rect2f(1329, 974, 58, 146), {0.0F, 1.0F, 0.0F})};
   ASSERT_TRUE(applier.ApplyPhase4MergedSplitHandoff(applied_tracks, 31, 1, 30, 2));
@@ -1215,15 +1215,15 @@ TEST(IdentityAssignmentEngineAdapterTest, Phase4DirectApplyErasesAcceptedBirthCa
 }
 
 TEST(IdentityAssignmentEngineAdapterTest, MergedSingleBlobKeepsContinuityBeforeMissingIdentityIsStableEnough) {
-  vision_demo_host::IdentityAssignmentEngineAdapter::Config cfg;
+  dog_patrol_perception_tracking::IdentityAssignmentEngineAdapter::Config cfg;
   cfg.max_missing_frames = 180;
   cfg.active_assign_max_cost = 0.55F;
   cfg.min_assignment_margin = 0.08F;
   cfg.missing_assign_max_app_cost = 0.50F;
   cfg.stable_frames_before_feature_update = 1;
   cfg.overlap_iou_freeze = 0.10F;
-  vision_demo_host::IdentityAssignmentEngineAdapter::RuntimeState assigner_runtime_state;
-  vision_demo_host::IdentityAssignmentEngineAdapter assigner(cfg, &assigner_runtime_state);
+  dog_patrol_perception_tracking::IdentityAssignmentEngineAdapter::RuntimeState assigner_runtime_state;
+  dog_patrol_perception_tracking::IdentityAssignmentEngineAdapter assigner(cfg, &assigner_runtime_state);
 
   const std::vector<float> primary_feature{1.0F, 0.0F};
   const std::vector<float> secondary_feature{0.0F, 1.0F};

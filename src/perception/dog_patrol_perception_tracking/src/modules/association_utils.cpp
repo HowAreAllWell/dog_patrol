@@ -1,9 +1,9 @@
-#include "vision_demo_host/modules/association_utils.hpp"
+#include "dog_patrol_perception_tracking/modules/association_utils.hpp"
 
 #include <algorithm>
 #include <cmath>
 
-namespace vision_demo_host {
+namespace dog_patrol_perception_tracking {
 namespace association {
 
 cv::Point2f BBoxCenter(const cv::Rect2f &bbox) {
@@ -35,4 +35,4 @@ float AreaRatio(const cv::Rect2f &current, const cv::Rect2f &reference) {
 }
 
 }  // namespace association
-}  // namespace vision_demo_host
+}  // namespace dog_patrol_perception_tracking

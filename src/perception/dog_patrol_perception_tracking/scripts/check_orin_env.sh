@@ -119,7 +119,7 @@ fi
 if [[ -f "$ENGINE_PATH" ]]; then
   pass "Orin TensorRT engine exists: $ENGINE_PATH"
 else
-  warn "Orin TensorRT engine missing; run src/vision_demo_host/scripts/export_yolo26n_engine_orin_jp621.sh on Orin"
+  warn "Orin TensorRT engine missing; run src/dog_patrol_perception_tracking/scripts/export_yolo26n_engine_orin_jp621.sh on Orin"
 fi
 
 if [[ -f "${REID_DIR}/osnet_x1_0_market1501_256x128.onnx" ]]; then

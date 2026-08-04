@@ -3,10 +3,10 @@
 #include <unordered_map>
 #include <vector>
 
-#include "vision_demo_host/modules/identity_manager.hpp"
+#include "dog_patrol_perception_tracking/modules/identity_manager.hpp"
 #include "identity_runtime_snapshot.hpp"
 
-namespace vision_demo_host {
+namespace dog_patrol_perception_tracking {
 
 class IdentityObservationProjection {
  public:
@@ -37,4 +37,4 @@ class IdentityObservationProjection {
 
 std::string TargetLifecycleToString(IdentityObservationProjection::TargetLifecycle lifecycle);
 
-}  // namespace vision_demo_host
+}  // namespace dog_patrol_perception_tracking

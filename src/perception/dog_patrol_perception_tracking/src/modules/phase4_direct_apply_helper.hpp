@@ -8,12 +8,12 @@
 
 #include <opencv2/core/mat.hpp>
 
-#include "vision_demo_host/modules/feature_update_policy.hpp"
+#include "dog_patrol_perception_tracking/modules/feature_update_policy.hpp"
 #include "identity_lifecycle_mode.hpp"
 #include "identity_runtime_record.hpp"
-#include "vision_demo_host/types.hpp"
+#include "dog_patrol_perception_tracking/types.hpp"
 
-namespace vision_demo_host {
+namespace dog_patrol_perception_tracking {
 
 class Phase4DirectApplyHelper {
  public:
@@ -142,4 +142,4 @@ class Phase4DirectApplyHelper {
   }
 };
 
-}  // namespace vision_demo_host
+}  // namespace dog_patrol_perception_tracking

@@ -1,6 +1,6 @@
 #include "birth_manager.hpp"
 
-namespace vision_demo_host {
+namespace dog_patrol_perception_tracking {
 
 BirthManager::BirthManager(BirthCandidateDecision::Config config) : config_(std::move(config)) {}
 
@@ -61,4 +61,4 @@ BirthManager::DebugRow BirthManager::MakeDebugRow(const BirthCandidateDecision::
   return row;
 }
 
-}  // namespace vision_demo_host
+}  // namespace dog_patrol_perception_tracking

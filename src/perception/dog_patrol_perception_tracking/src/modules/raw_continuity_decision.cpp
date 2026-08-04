@@ -2,7 +2,7 @@
 
 #include <algorithm>
 
-namespace vision_demo_host {
+namespace dog_patrol_perception_tracking {
 
 RawContinuityDecision::Decision RawContinuityDecision::Evaluate(const Input &input,
                                                                 const Config &config) {
@@ -38,4 +38,4 @@ RawContinuityDecision::Decision RawContinuityDecision::Evaluate(const Input &inp
   return decision;
 }
 
-}  // namespace vision_demo_host
+}  // namespace dog_patrol_perception_tracking

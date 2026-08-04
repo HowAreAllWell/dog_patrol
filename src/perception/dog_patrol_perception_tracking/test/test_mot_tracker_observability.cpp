@@ -14,26 +14,26 @@
 
 namespace {
 
-class RecordingObservabilityWriter final : public vision_demo_host::MotTrackerObservabilityWriter {
+class RecordingObservabilityWriter final : public dog_patrol_perception_tracking::MotTrackerObservabilityWriter {
  public:
   void BeginFrame(const int frame_id) override { begin_frames.push_back(frame_id); }
 
   void WriteTracks(const int frame_id,
-                   const std::vector<vision_demo_host::MotTrackerTrackObservation> &tracks) override {
+                   const std::vector<dog_patrol_perception_tracking::MotTrackerTrackObservation> &tracks) override {
     track_frames.emplace_back(frame_id, tracks.size());
   }
 
   void WriteDetections(
       const int frame_id,
-      const std::vector<vision_demo_host::MotTrackerDetectionObservation> &detections) override {
+      const std::vector<dog_patrol_perception_tracking::MotTrackerDetectionObservation> &detections) override {
     detection_frames.emplace_back(frame_id, detections.size());
   }
 
-  void WriteGmc(const int frame_id, const vision_demo_host::MotTrackerGmcObservation &gmc) override {
+  void WriteGmc(const int frame_id, const dog_patrol_perception_tracking::MotTrackerGmcObservation &gmc) override {
     gmc_frames.emplace_back(frame_id, gmc.ok);
   }
 
-  void WritePair(const int frame_id, const vision_demo_host::MotTrackerPairObservation &pair) override {
+  void WritePair(const int frame_id, const dog_patrol_perception_tracking::MotTrackerPairObservation &pair) override {
     pair_frames.emplace_back(frame_id, pair.stage_name);
   }
 
@@ -74,24 +74,24 @@ cv::Mat CovWithDiag(const float value) {
 }  // namespace
 
 TEST(MotTrackerObservabilityTest, MemoryWriterOnlySeesEnabledFrames) {
-  vision_demo_host::MotTrackerObservabilityConfig config;
+  dog_patrol_perception_tracking::MotTrackerObservabilityConfig config;
   config.enabled = true;
   config.frame_start = 2;
   config.frame_end = 3;
 
   auto writer = std::make_unique<RecordingObservabilityWriter>();
   auto *recording = writer.get();
-  vision_demo_host::MotTrackerObservability observability(config, std::move(writer));
+  dog_patrol_perception_tracking::MotTrackerObservability observability(config, std::move(writer));
 
   observability.BeginFrame(1);
-  observability.WriteGmc(1, vision_demo_host::MotTrackerGmcObservation{true, cv::Mat::eye(2, 3, CV_32F)});
+  observability.WriteGmc(1, dog_patrol_perception_tracking::MotTrackerGmcObservation{true, cv::Mat::eye(2, 3, CV_32F)});
   observability.BeginFrame(2);
-  observability.WriteGmc(2, vision_demo_host::MotTrackerGmcObservation{true, cv::Mat::eye(2, 3, CV_32F)});
+  observability.WriteGmc(2, dog_patrol_perception_tracking::MotTrackerGmcObservation{true, cv::Mat::eye(2, 3, CV_32F)});
   observability.BeginFrame(3);
   observability.WriteDetections(
-      3, {vision_demo_host::MotTrackerDetectionObservation{"high", 0, 0, vision_demo_host::ClassId::kPerson,
+      3, {dog_patrol_perception_tracking::MotTrackerDetectionObservation{"high", 0, 0, dog_patrol_perception_tracking::ClassId::kPerson,
                                                            0.9F, cv::Rect2f(1, 2, 3, 4)}});
-  observability.WritePair(4, vision_demo_host::MotTrackerPairObservation{});
+  observability.WritePair(4, dog_patrol_perception_tracking::MotTrackerPairObservation{});
 
   EXPECT_EQ(recording->begin_frames, std::vector<int>({1, 2, 3}));
   ASSERT_EQ(recording->gmc_frames.size(), 1U);
@@ -106,30 +106,30 @@ TEST(MotTrackerObservabilityTest, CsvWriterPreservesDiagnosticFiles) {
   const auto output_dir = UniqueTempDir("vision_demo_mot_tracker_observability");
   std::filesystem::remove_all(output_dir);
 
-  vision_demo_host::MotTrackerObservabilityConfig config;
+  dog_patrol_perception_tracking::MotTrackerObservabilityConfig config;
   config.enabled = true;
   config.output_dir = output_dir;
   config.frame_start = 10;
   config.frame_end = 10;
-  auto observability = vision_demo_host::MotTrackerObservability::CreateCsv(config);
+  auto observability = dog_patrol_perception_tracking::MotTrackerObservability::CreateCsv(config);
 
   observability->BeginFrame(9);
-  observability->WriteGmc(9, vision_demo_host::MotTrackerGmcObservation{true, cv::Mat::eye(2, 3, CV_32F)});
+  observability->WriteGmc(9, dog_patrol_perception_tracking::MotTrackerGmcObservation{true, cv::Mat::eye(2, 3, CV_32F)});
   ASSERT_TRUE(std::filesystem::exists(output_dir / "gmc.csv"));
 
   observability->BeginFrame(10);
   cv::Mat warp = cv::Mat::eye(2, 3, CV_32F);
   warp.at<float>(0, 2) = 2.0F;
   warp.at<float>(1, 2) = 3.0F;
-  observability->WriteGmc(10, vision_demo_host::MotTrackerGmcObservation{true, warp});
+  observability->WriteGmc(10, dog_patrol_perception_tracking::MotTrackerGmcObservation{true, warp});
   observability->WriteDetections(
-      10, {vision_demo_host::MotTrackerDetectionObservation{"high", 0, 0, vision_demo_host::ClassId::kPerson,
+      10, {dog_patrol_perception_tracking::MotTrackerDetectionObservation{"high", 0, 0, dog_patrol_perception_tracking::ClassId::kPerson,
                                                             0.9F, cv::Rect2f(1, 2, 3, 4)}});
 
-  vision_demo_host::MotTrackerTrackObservation track;
+  dog_patrol_perception_tracking::MotTrackerTrackObservation track;
   track.track_idx = 2;
   track.track_id = 7;
-  track.class_id = vision_demo_host::ClassId::kPerson;
+  track.class_id = dog_patrol_perception_tracking::ClassId::kPerson;
   track.is_confirmed = true;
   track.hits = 3;
   track.age = 4;
@@ -152,7 +152,7 @@ TEST(MotTrackerObservabilityTest, CsvWriterPreservesDiagnosticFiles) {
   track.post_gmc_error_cov_post = CovWithDiag(5.0F);
   observability->WriteTracks(10, {track});
 
-  vision_demo_host::MotTrackerPairObservation pair;
+  dog_patrol_perception_tracking::MotTrackerPairObservation pair;
   pair.stage_name = "stage1";
   pair.track_idx = 2;
   pair.track_id = 7;

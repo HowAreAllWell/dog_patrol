@@ -3,7 +3,7 @@
 #include <string>
 #include <vector>
 
-#include "vision_demo_host/tools/offline_eval_schema.hpp"
+#include "dog_patrol_perception_tracking/tools/offline_eval_schema.hpp"
 
 TEST(OfflineEvalSchemaTest, PerFrameCsvHeaderAppendsPrimaryRecoveryDebugFields) {
   const std::string expected =
@@ -11,11 +11,11 @@ TEST(OfflineEvalSchemaTest, PerFrameCsvHeaderAppendsPrimaryRecoveryDebugFields) 
       "sid_mode,sid_freeze,visible_semantic_ids,primary_decision_reason,"
       "primary_reject_reason,primary_recovery_reason,primary_supporting_raw_track_id_debug";
 
-  EXPECT_EQ(vision_demo_host::tools::PerFrameCsvHeader(), expected);
+  EXPECT_EQ(dog_patrol_perception_tracking::tools::PerFrameCsvHeader(), expected);
 }
 
 TEST(OfflineEvalSchemaTest, PerFrameCsvHelpDocumentsPendingRecoveryReasonTokens) {
-  const std::string help = vision_demo_host::tools::PerFrameCsvHelp();
+  const std::string help = dog_patrol_perception_tracking::tools::PerFrameCsvHelp();
   const std::vector<std::string> required_terms{
       "per_frame.csv",
       "PENDING_RECOVERY",
@@ -41,7 +41,7 @@ TEST(OfflineEvalSchemaTest, TrackletHypothesesCsvHeaderIsStable) {
       "assoc_stage,assoc_cost,assoc_iou,assoc_motion_dist,assoc_app_dist,assoc_appearance_used,"
       "assoc_final_gate,assoc_reject_reason";
 
-  EXPECT_EQ(vision_demo_host::tools::TrackletHypothesesCsvHeader(), expected);
+  EXPECT_EQ(dog_patrol_perception_tracking::tools::TrackletHypothesesCsvHeader(), expected);
 }
 
 TEST(OfflineEvalSchemaTest, TrackletHypothesesSchemaDocumentsReviewFields) {
@@ -68,7 +68,7 @@ TEST(OfflineEvalSchemaTest, TrackletHypothesesSchemaDocumentsReviewFields) {
       "phase3_shadow_state.csv",
   };
 
-  const std::string help = vision_demo_host::tools::TrackletHypothesesCsvHelp();
+  const std::string help = dog_patrol_perception_tracking::tools::TrackletHypothesesCsvHelp();
   EXPECT_NE(help.find("tracklet_hypotheses.csv"), std::string::npos);
   EXPECT_NE(help.find("760"), std::string::npos);
   EXPECT_NE(help.find("795"), std::string::npos);
@@ -84,9 +84,9 @@ TEST(OfflineEvalSchemaTest, SidScoresCsvHeaderDocumentsFeatureUpdatePolicyReason
       "stage,selected,margin,accepted,reject_reason,continuity_used,feature_update_allowed,"
       "geometry_update_allowed,feature_update_reason,geometry_update_reason";
 
-  EXPECT_EQ(vision_demo_host::tools::SidScoresCsvHeader(), expected);
+  EXPECT_EQ(dog_patrol_perception_tracking::tools::SidScoresCsvHeader(), expected);
 
-  const std::string help = vision_demo_host::tools::SidScoresCsvHelp();
+  const std::string help = dog_patrol_perception_tracking::tools::SidScoresCsvHelp();
   const std::vector<std::string> required_terms{
       "sid_scores.csv",
       "feature_update_allowed",
@@ -117,7 +117,7 @@ TEST(OfflineEvalSchemaTest, Phase3ShadowStateCsvHeaderIsStable) {
       "pairwise_selected_final_cost,pairwise_alternate_final_cost,pairwise_selected_app_cost,"
       "pairwise_alternate_app_cost,pairwise_margin,pairwise_appearance_override";
 
-  EXPECT_EQ(vision_demo_host::tools::Phase3ShadowStateCsvHeader(), expected);
+  EXPECT_EQ(dog_patrol_perception_tracking::tools::Phase3ShadowStateCsvHeader(), expected);
 }
 
 TEST(OfflineEvalSchemaTest, Phase3ShadowStateHelpDocumentsShadowOnlyContract) {
@@ -202,14 +202,14 @@ TEST(OfflineEvalSchemaTest, Phase3ShadowStateHelpDocumentsShadowOnlyContract) {
       "mission ROS",
   };
 
-  const std::string help = vision_demo_host::tools::Phase3ShadowStateCsvHelp();
+  const std::string help = dog_patrol_perception_tracking::tools::Phase3ShadowStateCsvHelp();
   for (const auto &term : required_terms) {
     EXPECT_NE(help.find(term), std::string::npos) << term;
   }
 }
 
 TEST(OfflineEvalSchemaTest, IdentityOfflineMetricsHelpDocumentsAdditiveOutput) {
-  const std::string help = vision_demo_host::tools::IdentityOfflineMetricsHelp();
+  const std::string help = dog_patrol_perception_tracking::tools::IdentityOfflineMetricsHelp();
   const std::vector<std::string> required_terms{
       "identity_metrics.json",
       "identity_metrics.md",

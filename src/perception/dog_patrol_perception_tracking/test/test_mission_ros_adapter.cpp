@@ -16,21 +16,21 @@
 #include <rclcpp/rclcpp.hpp>
 #include <rmw/types.h>
 
-#include "vision_demo_host/modules/mission_ros_adapter.hpp"
+#include "dog_patrol_perception_tracking/modules/mission_ros_adapter.hpp"
 
 namespace {
 
-using vision_demo_host::ClassId;
-using vision_demo_host::FreshTargetBoxAction;
-using vision_demo_host::IdentityObservation;
-using vision_demo_host::IdentityState;
-using vision_demo_host::MissionBlockCause;
-using vision_demo_host::MissionCoordinator;
-using vision_demo_host::MissionPhase;
-using vision_demo_host::MissionRosAdapter;
-using vision_demo_host::MutableReadinessContributor;
-using vision_demo_host::PerceptionReadiness;
-using vision_demo_host::SourceFrameMetadata;
+using dog_patrol_perception_tracking::ClassId;
+using dog_patrol_perception_tracking::FreshTargetBoxAction;
+using dog_patrol_perception_tracking::IdentityObservation;
+using dog_patrol_perception_tracking::IdentityState;
+using dog_patrol_perception_tracking::MissionBlockCause;
+using dog_patrol_perception_tracking::MissionCoordinator;
+using dog_patrol_perception_tracking::MissionPhase;
+using dog_patrol_perception_tracking::MissionRosAdapter;
+using dog_patrol_perception_tracking::MutableReadinessContributor;
+using dog_patrol_perception_tracking::PerceptionReadiness;
+using dog_patrol_perception_tracking::SourceFrameMetadata;
 
 using MissionEventMessage = dog_patrol_interfaces::msg::MissionEvent;
 using MissionStateMessage = dog_patrol_interfaces::msg::MissionState;
@@ -118,13 +118,13 @@ TEST_F(MissionRosAdapterTest, MapsOnlyCompatibleMissionStateMessages) {
   message.blocked = false;
   message.block_cause = dog_patrol_interfaces::msg::MissionState::BLOCK_NONE;
 
-  const auto snapshot = vision_demo_host::MissionRosAdapter::MissionFromMessage(message);
+  const auto snapshot = dog_patrol_perception_tracking::MissionRosAdapter::MissionFromMessage(message);
 
   ASSERT_TRUE(snapshot.has_value());
   EXPECT_EQ(snapshot->state_seq, 17U);
   EXPECT_EQ(snapshot->target_id, 42);
-  EXPECT_EQ(snapshot->phase, vision_demo_host::MissionPhase::kConfirmTarget);
-  EXPECT_EQ(snapshot->block_cause, vision_demo_host::MissionBlockCause::kNone);
+  EXPECT_EQ(snapshot->phase, dog_patrol_perception_tracking::MissionPhase::kConfirmTarget);
+  EXPECT_EQ(snapshot->block_cause, dog_patrol_perception_tracking::MissionBlockCause::kNone);
 }
 
 TEST_F(MissionRosAdapterTest, RejectsIncompatibleMissionStates) {

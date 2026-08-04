@@ -1,8 +1,8 @@
 #include <gtest/gtest.h>
 
-#include "vision_demo_host/modules/feature_update_policy.hpp"
+#include "dog_patrol_perception_tracking/modules/feature_update_policy.hpp"
 
-namespace vision_demo_host {
+namespace dog_patrol_perception_tracking {
 namespace {
 
 TEST(FeatureUpdatePolicyTest, AllowsReliableAcceptedUpdatesForNewIdentity) {
@@ -110,4 +110,4 @@ TEST(FeatureUpdatePolicyTest, ForceGeometryStillHonorsFeatureFreeze) {
 }
 
 }  // namespace
-}  // namespace vision_demo_host
+}  // namespace dog_patrol_perception_tracking

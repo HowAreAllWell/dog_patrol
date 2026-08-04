@@ -3,7 +3,7 @@
 #include <unordered_map>
 #include <utility>
 
-namespace vision_demo_host {
+namespace dog_patrol_perception_tracking {
 namespace {
 
 AssignmentApplicationPlan::Application MakeApplication(
@@ -103,4 +103,4 @@ AssignmentApplicationPlan::Result AssignmentApplicationPlan::Build(
   return result;
 }
 
-}  // namespace vision_demo_host
+}  // namespace dog_patrol_perception_tracking

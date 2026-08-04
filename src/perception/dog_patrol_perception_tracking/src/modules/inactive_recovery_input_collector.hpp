@@ -6,9 +6,9 @@
 
 #include "inactive_recovery_solver.hpp"
 #include "identity_runtime_record.hpp"
-#include "vision_demo_host/types.hpp"
+#include "dog_patrol_perception_tracking/types.hpp"
 
-namespace vision_demo_host {
+namespace dog_patrol_perception_tracking {
 
 class InactiveRecoveryInputCollector {
  public:
@@ -45,4 +45,4 @@ class InactiveRecoveryInputCollector {
   static Result Collect(const Input &input);
 };
 
-}  // namespace vision_demo_host
+}  // namespace dog_patrol_perception_tracking

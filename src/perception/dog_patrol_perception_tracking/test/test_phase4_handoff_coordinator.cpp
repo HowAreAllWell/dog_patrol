@@ -7,13 +7,13 @@
 
 namespace {
 
-using vision_demo_host::ClassId;
-using vision_demo_host::IdentityManager;
-using vision_demo_host::OcclusionGroupShadowLifecycle;
-using vision_demo_host::Phase4HandoffCoordinator;
-using vision_demo_host::TrackletHypothesis;
-using vision_demo_host::TrackletHypothesisStatus;
-using vision_demo_host::TrackletObservation;
+using dog_patrol_perception_tracking::ClassId;
+using dog_patrol_perception_tracking::IdentityManager;
+using dog_patrol_perception_tracking::OcclusionGroupShadowLifecycle;
+using dog_patrol_perception_tracking::Phase4HandoffCoordinator;
+using dog_patrol_perception_tracking::TrackletHypothesis;
+using dog_patrol_perception_tracking::TrackletHypothesisStatus;
+using dog_patrol_perception_tracking::TrackletObservation;
 
 TrackletObservation MakeObservation(const int raw_track_id, const cv::Rect2f &bbox, const float confidence = 0.9F) {
   TrackletObservation observation;

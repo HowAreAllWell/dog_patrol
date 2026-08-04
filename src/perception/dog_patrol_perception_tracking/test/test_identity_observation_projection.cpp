@@ -4,13 +4,13 @@
 
 namespace {
 
-using vision_demo_host::AssociationEvidence;
-using vision_demo_host::ClassId;
-using vision_demo_host::IdentityManager;
-using vision_demo_host::IdentityObservationProjection;
-using vision_demo_host::IdentityState;
-using vision_demo_host::IdentityRuntimeSnapshot;
-using vision_demo_host::TrackletObservation;
+using dog_patrol_perception_tracking::AssociationEvidence;
+using dog_patrol_perception_tracking::ClassId;
+using dog_patrol_perception_tracking::IdentityManager;
+using dog_patrol_perception_tracking::IdentityObservationProjection;
+using dog_patrol_perception_tracking::IdentityState;
+using dog_patrol_perception_tracking::IdentityRuntimeSnapshot;
+using dog_patrol_perception_tracking::TrackletObservation;
 
 IdentityRuntimeSnapshot MakeSnapshot(const int semantic_id, const bool seen_this_frame, const int missing_frames) {
   IdentityRuntimeSnapshot snapshot;
@@ -167,7 +167,7 @@ TEST(IdentityObservationProjectionTest, VisibleSupportingObservationOverridesSna
 }
 
 TEST(IdentityObservationProjectionTest, ProjectsVisibleOccludedAndLostTargetLifecycle) {
-  vision_demo_host::IdentityObservation visible;
+  dog_patrol_perception_tracking::IdentityObservation visible;
   visible.semantic_id = 1;
   visible.state = IdentityState::kActive;
   visible.visible = true;
@@ -175,7 +175,7 @@ TEST(IdentityObservationProjectionTest, ProjectsVisibleOccludedAndLostTargetLife
                 visible, IdentityManager::Mode::kNormal)),
             "VisibleIdentity");
 
-  vision_demo_host::IdentityObservation occluded;
+  dog_patrol_perception_tracking::IdentityObservation occluded;
   occluded.semantic_id = 2;
   occluded.state = IdentityState::kOccluded;
   occluded.visible = false;
@@ -183,7 +183,7 @@ TEST(IdentityObservationProjectionTest, ProjectsVisibleOccludedAndLostTargetLife
                 occluded, IdentityManager::Mode::kNormal)),
             "OccludedIdentity");
 
-  vision_demo_host::IdentityObservation lost;
+  dog_patrol_perception_tracking::IdentityObservation lost;
   lost.semantic_id = 3;
   lost.state = IdentityState::kInactive;
   lost.visible = false;
@@ -193,7 +193,7 @@ TEST(IdentityObservationProjectionTest, ProjectsVisibleOccludedAndLostTargetLife
 }
 
 TEST(IdentityObservationProjectionTest, ProjectsMergedAndSplitEvidenceWithoutChangingPublicState) {
-  vision_demo_host::IdentityObservation merged;
+  dog_patrol_perception_tracking::IdentityObservation merged;
   merged.semantic_id = 4;
   merged.state = IdentityState::kOccluded;
   merged.visible = false;
@@ -206,7 +206,7 @@ TEST(IdentityObservationProjectionTest, ProjectsMergedAndSplitEvidenceWithoutCha
             "MergedGroup");
   EXPECT_EQ(merged.state, IdentityState::kOccluded);
 
-  vision_demo_host::IdentityObservation split;
+  dog_patrol_perception_tracking::IdentityObservation split;
   split.semantic_id = 6;
   split.state = IdentityState::kActive;
   split.visible = true;
@@ -222,7 +222,7 @@ TEST(IdentityObservationProjectionTest, ProjectsMergedAndSplitEvidenceWithoutCha
 }
 
 TEST(IdentityObservationProjectionTest, ProjectsNewBirthCandidateEvidenceBeforeFallbackState) {
-  vision_demo_host::IdentityObservation birth;
+  dog_patrol_perception_tracking::IdentityObservation birth;
   birth.semantic_id = 7;
   birth.state = IdentityState::kLost;
   birth.visible = false;

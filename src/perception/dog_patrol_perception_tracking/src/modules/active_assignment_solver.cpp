@@ -3,7 +3,7 @@
 #include <algorithm>
 #include <cstddef>
 
-namespace vision_demo_host {
+namespace dog_patrol_perception_tracking {
 namespace {
 
 std::vector<std::vector<float>> BuildSquareCost(const std::vector<std::vector<float>> &cost) {
@@ -223,4 +223,4 @@ float ActiveAssignmentSolver::AssignmentMargin(const std::vector<std::vector<flo
   return std::max(0.0F, second - selected);
 }
 
-}  // namespace vision_demo_host
+}  // namespace dog_patrol_perception_tracking

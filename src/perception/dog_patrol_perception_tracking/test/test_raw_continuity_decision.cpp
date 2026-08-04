@@ -4,7 +4,7 @@
 
 namespace {
 
-using vision_demo_host::RawContinuityDecision;
+using dog_patrol_perception_tracking::RawContinuityDecision;
 
 RawContinuityDecision::Input BaseInput() {
   RawContinuityDecision::Input input;

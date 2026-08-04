@@ -4,7 +4,7 @@
 
 #include "identity_runtime_store.hpp"
 
-namespace vision_demo_host {
+namespace dog_patrol_perception_tracking {
 namespace {
 
 IdentityRuntimeRecord MakePersonRecord(const int semantic_id,
@@ -122,4 +122,4 @@ TEST(IdentityRuntimeStoreTest, MarksCarrierMissingAndBuildsSortedSnapshots) {
 }
 
 }  // namespace
-}  // namespace vision_demo_host
+}  // namespace dog_patrol_perception_tracking

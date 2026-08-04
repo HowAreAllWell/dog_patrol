@@ -1,4 +1,4 @@
-#include "vision_demo_host/tools/offline_replay_run.hpp"
+#include "dog_patrol_perception_tracking/tools/offline_replay_run.hpp"
 
 #include <opencv2/opencv.hpp>
 
@@ -15,23 +15,23 @@
 #include <utility>
 #include <vector>
 
-#include "vision_demo_host/modules/det_filter.hpp"
-#include "vision_demo_host/modules/identity_manager.hpp"
-#include "vision_demo_host/modules/mot_tracker.hpp"
-#include "vision_demo_host/modules/perception_config_materializer.hpp"
-#include "vision_demo_host/modules/preprocess_infer.hpp"
-#include "vision_demo_host/modules/primary_recovery_debug.hpp"
-#include "vision_demo_host/modules/primary_target_manager.hpp"
-#include "vision_demo_host/tools/identity_offline_metrics.hpp"
-#include "vision_demo_host/tools/offline_eval_input.hpp"
-#include "vision_demo_host/tools/offline_eval_schema.hpp"
-#include "vision_demo_host/types.hpp"
+#include "dog_patrol_perception_tracking/modules/det_filter.hpp"
+#include "dog_patrol_perception_tracking/modules/identity_manager.hpp"
+#include "dog_patrol_perception_tracking/modules/mot_tracker.hpp"
+#include "dog_patrol_perception_tracking/modules/perception_config_materializer.hpp"
+#include "dog_patrol_perception_tracking/modules/preprocess_infer.hpp"
+#include "dog_patrol_perception_tracking/modules/primary_recovery_debug.hpp"
+#include "dog_patrol_perception_tracking/modules/primary_target_manager.hpp"
+#include "dog_patrol_perception_tracking/tools/identity_offline_metrics.hpp"
+#include "dog_patrol_perception_tracking/tools/offline_eval_input.hpp"
+#include "dog_patrol_perception_tracking/tools/offline_eval_schema.hpp"
+#include "dog_patrol_perception_tracking/types.hpp"
 
-namespace vision_demo_host::tools {
+namespace dog_patrol_perception_tracking::tools {
 
 OfflineReplayRun::TrackerConfig::TrackerConfig() {
   const PerceptionConfigMaterializer::TrackerInput defaults;
-  config_path = "/path/to/my_workplace/vision_demo_ws/src/vision_demo_host/config/bot_sort.yaml";
+  config_path = "/path/to/my_workplace/vision_demo_ws/src/dog_patrol_perception_tracking/config/bot_sort.yaml";
   gmc_enabled = defaults.gmc_enabled;
   reid_backend = defaults.reid_backend;
   reid_model_path = defaults.reid_model_path;
@@ -813,4 +813,4 @@ OfflineReplayRun::Result OfflineReplayRun::Run(const Request &request) {
   return result;
 }
 
-}  // namespace vision_demo_host::tools
+}  // namespace dog_patrol_perception_tracking::tools

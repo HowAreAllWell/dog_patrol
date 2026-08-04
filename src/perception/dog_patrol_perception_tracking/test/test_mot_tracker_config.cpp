@@ -7,8 +7,8 @@
 
 #include <opencv2/core.hpp>
 
-#include "vision_demo_host/modules/det_filter.hpp"
-#include "vision_demo_host/modules/mot_tracker.hpp"
+#include "dog_patrol_perception_tracking/modules/det_filter.hpp"
+#include "dog_patrol_perception_tracking/modules/mot_tracker.hpp"
 
 namespace {
 
@@ -19,8 +19,8 @@ std::filesystem::path WriteTrackerConfig(const std::string &name, const std::str
   return path;
 }
 
-vision_demo_host::MotTracker::Config BaseTrackerConfig(const std::filesystem::path &path) {
-  vision_demo_host::MotTracker::Config cfg;
+dog_patrol_perception_tracking::MotTracker::Config BaseTrackerConfig(const std::filesystem::path &path) {
+  dog_patrol_perception_tracking::MotTracker::Config cfg;
   cfg.tracker_yaml_path = path.string();
   cfg.gmc_enabled = false;
   cfg.reid_backend = "light";
@@ -28,9 +28,9 @@ vision_demo_host::MotTracker::Config BaseTrackerConfig(const std::filesystem::pa
   return cfg;
 }
 
-vision_demo_host::Detection PersonDet(const float confidence, const cv::Rect2f &bbox) {
-  vision_demo_host::Detection det;
-  det.class_id = vision_demo_host::ClassId::kPerson;
+dog_patrol_perception_tracking::Detection PersonDet(const float confidence, const cv::Rect2f &bbox) {
+  dog_patrol_perception_tracking::Detection det;
+  det.class_id = dog_patrol_perception_tracking::ClassId::kPerson;
   det.confidence = confidence;
   det.bbox = bbox;
   return det;
@@ -39,7 +39,7 @@ vision_demo_host::Detection PersonDet(const float confidence, const cv::Rect2f &
 }  // namespace
 
 TEST(MotTrackerConfigTest, DefaultConfigKeepsGmcDisabled) {
-  const vision_demo_host::MotTracker::Config cfg;
+  const dog_patrol_perception_tracking::MotTracker::Config cfg;
   EXPECT_FALSE(cfg.gmc_enabled);
 }
 
@@ -58,7 +58,7 @@ TEST(MotTrackerConfigTest, GmcDownscaleAndStageCostConfigParse) {
       "duplicate_lost_iou: 0.61\n"
       "duplicate_lost_center_dist_norm: 1.25\n");
 
-  vision_demo_host::MotTracker tracker(BaseTrackerConfig(yaml));
+  dog_patrol_perception_tracking::MotTracker tracker(BaseTrackerConfig(yaml));
   std::string error;
   ASSERT_TRUE(tracker.Initialize(&error)) << error;
 
@@ -89,7 +89,7 @@ TEST(MotTrackerConfigTest, StageMaxCostRejectsHighCostSelectedMatch) {
       "assoc_motion_weight: 0.0\n"
       "assoc_app_weight: 0.0\n");
 
-  vision_demo_host::MotTracker tracker(BaseTrackerConfig(yaml));
+  dog_patrol_perception_tracking::MotTracker tracker(BaseTrackerConfig(yaml));
   std::string error;
   ASSERT_TRUE(tracker.Initialize(&error)) << error;
 
@@ -117,7 +117,7 @@ TEST(MotTrackerConfigTest, LowScoreDetectionCanEnterStage2) {
       "unconfirmed_max_cost: 0.80\n"
       "use_low_score_appearance_gate: true\n");
 
-  vision_demo_host::MotTracker tracker(BaseTrackerConfig(yaml));
+  dog_patrol_perception_tracking::MotTracker tracker(BaseTrackerConfig(yaml));
   std::string error;
   ASSERT_TRUE(tracker.Initialize(&error)) << error;
 
@@ -141,7 +141,7 @@ TEST(MotTrackerConfigTest, FinalTracksAreMirroredAsTrackedHypotheses) {
       "new_track_thresh: 0.70\n"
       "confirm_hits: 1\n");
 
-  vision_demo_host::MotTracker tracker(BaseTrackerConfig(yaml));
+  dog_patrol_perception_tracking::MotTracker tracker(BaseTrackerConfig(yaml));
   std::string error;
   ASSERT_TRUE(tracker.Initialize(&error)) << error;
 
@@ -153,7 +153,7 @@ TEST(MotTrackerConfigTest, FinalTracksAreMirroredAsTrackedHypotheses) {
   const auto &hypotheses = tracker.LastTrackletHypotheses();
   ASSERT_EQ(hypotheses.size(), tracks.size());
   for (std::size_t i = 0; i < tracks.size(); ++i) {
-    EXPECT_EQ(hypotheses[i].status, vision_demo_host::TrackletHypothesisStatus::kTracked);
+    EXPECT_EQ(hypotheses[i].status, dog_patrol_perception_tracking::TrackletHypothesisStatus::kTracked);
     EXPECT_EQ(hypotheses[i].raw_track_id, tracks[i].id);
     EXPECT_EQ(hypotheses[i].class_id, tracks[i].class_id);
     EXPECT_FLOAT_EQ(hypotheses[i].confidence, tracks[i].confidence);
@@ -172,7 +172,7 @@ TEST(MotTrackerConfigTest, SuppressedNewTrackDuplicateIsRecordedAsHypothesis) {
       "new_track_thresh: 0.70\n"
       "confirm_hits: 1\n");
 
-  vision_demo_host::MotTracker tracker(BaseTrackerConfig(yaml));
+  dog_patrol_perception_tracking::MotTracker tracker(BaseTrackerConfig(yaml));
   std::string error;
   ASSERT_TRUE(tracker.Initialize(&error)) << error;
 
@@ -188,11 +188,11 @@ TEST(MotTrackerConfigTest, SuppressedNewTrackDuplicateIsRecordedAsHypothesis) {
 
   const auto &hypotheses = tracker.LastTrackletHypotheses();
   ASSERT_EQ(hypotheses.size(), 2U);
-  EXPECT_EQ(hypotheses[0].status, vision_demo_host::TrackletHypothesisStatus::kTracked);
+  EXPECT_EQ(hypotheses[0].status, dog_patrol_perception_tracking::TrackletHypothesisStatus::kTracked);
   EXPECT_EQ(hypotheses[0].raw_track_id, raw_id);
-  EXPECT_EQ(hypotheses[1].status, vision_demo_host::TrackletHypothesisStatus::kSuppressedDuplicateCandidate);
+  EXPECT_EQ(hypotheses[1].status, dog_patrol_perception_tracking::TrackletHypothesisStatus::kSuppressedDuplicateCandidate);
   EXPECT_EQ(hypotheses[1].raw_track_id, -1);
-  EXPECT_EQ(hypotheses[1].class_id, vision_demo_host::ClassId::kPerson);
+  EXPECT_EQ(hypotheses[1].class_id, dog_patrol_perception_tracking::ClassId::kPerson);
   EXPECT_FLOAT_EQ(hypotheses[1].confidence, 0.82F);
   EXPECT_EQ(hypotheses[1].bbox, cv::Rect2f(48, 35, 58, 105));
   EXPECT_EQ(hypotheses[1].candidate_reason, "new_track_suppressed_duplicate_tracked");
@@ -216,7 +216,7 @@ TEST(MotTrackerConfigTest, SuppressedNewTrackNearLostTrackIsRecordedAsHypothesis
       "duplicate_lost_iou: 0.50\n"
       "duplicate_lost_center_dist_norm: 1.0\n");
 
-  vision_demo_host::MotTracker tracker(BaseTrackerConfig(yaml));
+  dog_patrol_perception_tracking::MotTracker tracker(BaseTrackerConfig(yaml));
   std::string error;
   ASSERT_TRUE(tracker.Initialize(&error)) << error;
 
@@ -233,7 +233,7 @@ TEST(MotTrackerConfigTest, SuppressedNewTrackNearLostTrackIsRecordedAsHypothesis
 
   const auto &hypotheses = tracker.LastTrackletHypotheses();
   ASSERT_EQ(hypotheses.size(), 1U);
-  EXPECT_EQ(hypotheses[0].status, vision_demo_host::TrackletHypothesisStatus::kSuppressedDuplicateCandidate);
+  EXPECT_EQ(hypotheses[0].status, dog_patrol_perception_tracking::TrackletHypothesisStatus::kSuppressedDuplicateCandidate);
   EXPECT_EQ(hypotheses[0].candidate_reason, "new_track_suppressed_duplicate_lost");
   ASSERT_TRUE(hypotheses[0].related_raw_track_id.has_value());
   EXPECT_EQ(*hypotheses[0].related_raw_track_id, raw_id);
@@ -256,7 +256,7 @@ TEST(MotTrackerConfigTest, AgedLostTrackDoesNotSuppressSeparatedHighScoreDetecti
       "duplicate_lost_iou: 0.50\n"
       "duplicate_lost_center_dist_norm: 1.0\n");
 
-  vision_demo_host::MotTracker tracker(BaseTrackerConfig(yaml));
+  dog_patrol_perception_tracking::MotTracker tracker(BaseTrackerConfig(yaml));
   std::string error;
   ASSERT_TRUE(tracker.Initialize(&error)) << error;
 
@@ -299,7 +299,7 @@ TEST(MotTrackerConfigTest, SeparatedHighScoreDetectionSpawnsDuringSplit) {
       "assoc_motion_weight: 0.0\n"
       "assoc_app_weight: 0.0\n");
 
-  vision_demo_host::MotTracker tracker(BaseTrackerConfig(yaml));
+  dog_patrol_perception_tracking::MotTracker tracker(BaseTrackerConfig(yaml));
   std::string error;
   ASSERT_TRUE(tracker.Initialize(&error)) << error;
 
@@ -337,7 +337,7 @@ TEST(MotTrackerConfigTest, DuplicateOverlappedOutputsAreHiddenDuringOcclusion) {
       "assoc_motion_weight: 0.0\n"
       "assoc_app_weight: 0.0\n");
 
-  vision_demo_host::MotTracker tracker(BaseTrackerConfig(yaml));
+  dog_patrol_perception_tracking::MotTracker tracker(BaseTrackerConfig(yaml));
   std::string error;
   ASSERT_TRUE(tracker.Initialize(&error)) << error;
 
@@ -360,14 +360,14 @@ TEST(MotTrackerConfigTest, DuplicateOverlappedOutputsAreHiddenDuringOcclusion) {
 
   const auto &hypotheses = tracker.LastTrackletHypotheses();
   ASSERT_EQ(hypotheses.size(), 2U);
-  EXPECT_EQ(hypotheses[0].status, vision_demo_host::TrackletHypothesisStatus::kTracked);
+  EXPECT_EQ(hypotheses[0].status, dog_patrol_perception_tracking::TrackletHypothesisStatus::kTracked);
   EXPECT_EQ(hypotheses[0].raw_track_id, overlapped.front().id);
   EXPECT_FALSE(hypotheses[0].related_raw_track_id.has_value());
 
-  EXPECT_EQ(hypotheses[1].status, vision_demo_host::TrackletHypothesisStatus::kSuppressedDuplicateCandidate);
+  EXPECT_EQ(hypotheses[1].status, dog_patrol_perception_tracking::TrackletHypothesisStatus::kSuppressedDuplicateCandidate);
   EXPECT_NE(hypotheses[1].raw_track_id, overlapped.front().id);
   EXPECT_GT(hypotheses[1].raw_track_id, 0);
-  EXPECT_EQ(hypotheses[1].class_id, vision_demo_host::ClassId::kPerson);
+  EXPECT_EQ(hypotheses[1].class_id, dog_patrol_perception_tracking::ClassId::kPerson);
   EXPECT_FLOAT_EQ(hypotheses[1].confidence, 0.80F);
   EXPECT_EQ(hypotheses[1].bbox, cv::Rect2f(115, 42, 115, 218));
   EXPECT_EQ(hypotheses[1].candidate_reason, "duplicate_output_hidden");
@@ -376,19 +376,19 @@ TEST(MotTrackerConfigTest, DuplicateOverlappedOutputsAreHiddenDuringOcclusion) {
 }
 
 TEST(DetFilterTest, DefaultsPreserveLowScoreDetections) {
-  vision_demo_host::DetFilter filter(vision_demo_host::DetFilter::Config{});
+  dog_patrol_perception_tracking::DetFilter filter(dog_patrol_perception_tracking::DetFilter::Config{});
 
-  const std::vector<vision_demo_host::Detection> input{
+  const std::vector<dog_patrol_perception_tracking::Detection> input{
       PersonDet(0.09F, cv::Rect2f(0, 0, 10, 10)),
       PersonDet(0.10F, cv::Rect2f(0, 0, 10, 10)),
-      vision_demo_host::Detection{vision_demo_host::ClassId::kCar, 0.10F, cv::Rect2f(0, 0, 10, 10)},
-      vision_demo_host::Detection{vision_demo_host::ClassId::kUnknown, 0.99F, cv::Rect2f(0, 0, 10, 10)},
+      dog_patrol_perception_tracking::Detection{dog_patrol_perception_tracking::ClassId::kCar, 0.10F, cv::Rect2f(0, 0, 10, 10)},
+      dog_patrol_perception_tracking::Detection{dog_patrol_perception_tracking::ClassId::kUnknown, 0.99F, cv::Rect2f(0, 0, 10, 10)},
   };
 
   const auto filtered = filter.Filter(input);
   ASSERT_EQ(filtered.size(), 2U);
-  EXPECT_EQ(filtered[0].class_id, vision_demo_host::ClassId::kPerson);
+  EXPECT_EQ(filtered[0].class_id, dog_patrol_perception_tracking::ClassId::kPerson);
   EXPECT_FLOAT_EQ(filtered[0].confidence, 0.10F);
-  EXPECT_EQ(filtered[1].class_id, vision_demo_host::ClassId::kCar);
+  EXPECT_EQ(filtered[1].class_id, dog_patrol_perception_tracking::ClassId::kCar);
   EXPECT_FLOAT_EQ(filtered[1].confidence, 0.10F);
 }

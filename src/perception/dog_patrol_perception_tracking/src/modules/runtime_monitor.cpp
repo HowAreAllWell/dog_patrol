@@ -1,6 +1,6 @@
-#include "vision_demo_host/modules/runtime_monitor.hpp"
+#include "dog_patrol_perception_tracking/modules/runtime_monitor.hpp"
 
-namespace vision_demo_host {
+namespace dog_patrol_perception_tracking {
 
 RuntimeMonitor::RuntimeMonitor() {
   start_window_time_ = std::chrono::steady_clock::now();
@@ -30,4 +30,4 @@ bool RuntimeMonitor::ShouldReport() {
 
 double RuntimeMonitor::CurrentFps() const { return current_fps_; }
 
-}  // namespace vision_demo_host
+}  // namespace dog_patrol_perception_tracking

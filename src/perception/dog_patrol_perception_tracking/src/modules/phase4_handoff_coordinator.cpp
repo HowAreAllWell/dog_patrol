@@ -4,7 +4,7 @@
 #include <sstream>
 #include <utility>
 
-namespace vision_demo_host {
+namespace dog_patrol_perception_tracking {
 namespace {
 
 std::vector<std::pair<int, int>> ParsePairwisePairs(const std::string &pairs) {
@@ -379,4 +379,4 @@ bool Phase4HandoffCoordinator::ApplyMergedSplitHandoff(
   return false;
 }
 
-}  // namespace vision_demo_host
+}  // namespace dog_patrol_perception_tracking

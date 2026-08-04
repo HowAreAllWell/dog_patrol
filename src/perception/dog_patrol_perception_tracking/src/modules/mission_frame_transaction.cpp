@@ -1,10 +1,10 @@
-#include "vision_demo_host/modules/mission_frame_transaction.hpp"
+#include "dog_patrol_perception_tracking/modules/mission_frame_transaction.hpp"
 
 #include <algorithm>
 #include <cmath>
 #include <utility>
 
-namespace vision_demo_host {
+namespace dog_patrol_perception_tracking {
 namespace {
 
 bool IsFinite(const float value) { return std::isfinite(value); }
@@ -106,4 +106,4 @@ PrimaryTargetResult MissionFrameTransaction::CurrentPrimary() const {
   return primary_manager_.GetState();
 }
 
-}  // namespace vision_demo_host
+}  // namespace dog_patrol_perception_tracking

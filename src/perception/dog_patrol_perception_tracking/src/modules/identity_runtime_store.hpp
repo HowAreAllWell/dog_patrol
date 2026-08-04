@@ -7,7 +7,7 @@
 #include "identity_runtime_record.hpp"
 #include "identity_runtime_snapshot.hpp"
 
-namespace vision_demo_host {
+namespace dog_patrol_perception_tracking {
 
 class IdentityRuntimeStore {
  public:
@@ -34,4 +34,4 @@ class IdentityRuntimeStore {
   std::unordered_map<int, IdentityRuntimeRecord> identities_by_semantic_id_;
 };
 
-}  // namespace vision_demo_host
+}  // namespace dog_patrol_perception_tracking

@@ -3,7 +3,7 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 WS_DIR="${WS_DIR:-$(cd "${SCRIPT_DIR}/../../.." && pwd)}"
-BIN="$WS_DIR/build/vision_demo_host/offline_eval_recordings"
+BIN="$WS_DIR/build/dog_patrol_perception_tracking/offline_eval_recordings"
 INPUT_VIDEO="${1:-}"
 
 if [[ ! -x "$BIN" ]]; then
@@ -27,8 +27,8 @@ run_case() {
     --short-dataset-dir-names true
 }
 
-run_case "t1_old_final" "$WS_DIR/src/vision_demo_host/config/legacy/tracker_old_minimal.yaml"
-run_case "t2_core_final" "$WS_DIR/src/vision_demo_host/config/legacy/tracker_new_core_no_app.yaml"
-run_case "t3_app_final" "$WS_DIR/src/vision_demo_host/config/legacy/tracker_new_core_with_app.yaml"
+run_case "t1_old_final" "$WS_DIR/src/dog_patrol_perception_tracking/config/legacy/tracker_old_minimal.yaml"
+run_case "t2_core_final" "$WS_DIR/src/dog_patrol_perception_tracking/config/legacy/tracker_new_core_no_app.yaml"
+run_case "t3_app_final" "$WS_DIR/src/dog_patrol_perception_tracking/config/legacy/tracker_new_core_with_app.yaml"
 
 echo "[eval] done"

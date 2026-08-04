@@ -4,7 +4,7 @@
 
 namespace {
 
-using vision_demo_host::BirthCandidateDecision;
+using dog_patrol_perception_tracking::BirthCandidateDecision;
 
 BirthCandidateDecision::Input BaseInput() {
   BirthCandidateDecision::Input input;

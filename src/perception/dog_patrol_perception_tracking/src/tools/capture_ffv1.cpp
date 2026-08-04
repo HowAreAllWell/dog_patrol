@@ -1,6 +1,6 @@
-#include "vision_demo_host/modules/camera_ingest.hpp"
-#include "vision_demo_host/modules/ffv1_capture_artifact_writer.hpp"
-#include "vision_demo_host/modules/ffv1_capture_workflow.hpp"
+#include "dog_patrol_perception_tracking/modules/camera_ingest.hpp"
+#include "dog_patrol_perception_tracking/modules/ffv1_capture_artifact_writer.hpp"
+#include "dog_patrol_perception_tracking/modules/ffv1_capture_workflow.hpp"
 
 #include <opencv2/highgui.hpp>
 #include <opencv2/imgproc.hpp>
@@ -29,9 +29,9 @@ struct Options {
   int height{1024};
   double fps{30.0};
   int timeout_ms{1000};
-  vision_demo_host::CameraIngest::BayerInterpolation bayer_interpolation{
-      vision_demo_host::CameraIngest::kDefaultBayerInterpolation};
-  bool bayer_smoothing{vision_demo_host::CameraIngest::kDefaultBayerSmoothing};
+  dog_patrol_perception_tracking::CameraIngest::BayerInterpolation bayer_interpolation{
+      dog_patrol_perception_tracking::CameraIngest::kDefaultBayerInterpolation};
+  bool bayer_smoothing{dog_patrol_perception_tracking::CameraIngest::kDefaultBayerSmoothing};
   std::string output_root{"data/captures"};
   std::string session_name{"capture"};
   std::size_t queue_capacity{120};
@@ -56,15 +56,15 @@ std::string TimestampNowCompact() {
   return timestamp.str();
 }
 
-const char *StateName(const vision_demo_host::CaptureState state) {
+const char *StateName(const dog_patrol_perception_tracking::CaptureState state) {
   switch (state) {
-    case vision_demo_host::CaptureState::kStandby:
+    case dog_patrol_perception_tracking::CaptureState::kStandby:
       return "STANDBY";
-    case vision_demo_host::CaptureState::kRecording:
+    case dog_patrol_perception_tracking::CaptureState::kRecording:
       return "RECORDING";
-    case vision_demo_host::CaptureState::kFinalizing:
+    case dog_patrol_perception_tracking::CaptureState::kFinalizing:
       return "FINALIZING";
-    case vision_demo_host::CaptureState::kStopped:
+    case dog_patrol_perception_tracking::CaptureState::kStopped:
       return "STOPPED";
   }
   return "UNKNOWN";
@@ -149,7 +149,7 @@ bool ParseArgs(const int argc, char **argv, Options *options, std::string *error
         return false;
       }
     } else if (argument == "--bayer-interpolation") {
-      if (!vision_demo_host::CameraIngest::ParseBayerInterpolation(
+      if (!dog_patrol_perception_tracking::CameraIngest::ParseBayerInterpolation(
               value(argument), &options->bayer_interpolation, error)) {
         return false;
       }
@@ -199,28 +199,28 @@ bool ParseArgs(const int argc, char **argv, Options *options, std::string *error
     }
     return false;
   }
-  vision_demo_host::CameraIngest::Config camera_config;
+  dog_patrol_perception_tracking::CameraIngest::Config camera_config;
   camera_config.width = options->width;
   camera_config.height = options->height;
   camera_config.fps = options->fps;
   camera_config.timeout_ms = options->timeout_ms;
   camera_config.bayer_interpolation = options->bayer_interpolation;
   camera_config.bayer_smoothing = options->bayer_smoothing;
-  return vision_demo_host::CameraIngest::ValidateConfig(camera_config, error);
+  return dog_patrol_perception_tracking::CameraIngest::ValidateConfig(camera_config, error);
 }
 
-void DrawPreview(cv::Mat *preview, const vision_demo_host::CaptureSnapshot &snapshot,
-                 const vision_demo_host::CameraIngest::AcquiredFrame &frame,
+void DrawPreview(cv::Mat *preview, const dog_patrol_perception_tracking::CaptureSnapshot &snapshot,
+                 const dog_patrol_perception_tracking::CameraIngest::AcquiredFrame &frame,
                  const double capture_fps) {
   if (preview == nullptr || preview->empty() || !snapshot.preview_info_enabled) {
     return;
   }
-  const vision_demo_host::CaptureTakeSummary &take = snapshot.active_take;
-  const cv::Scalar state_color = snapshot.state == vision_demo_host::CaptureState::kRecording
+  const dog_patrol_perception_tracking::CaptureTakeSummary &take = snapshot.active_take;
+  const cv::Scalar state_color = snapshot.state == dog_patrol_perception_tracking::CaptureState::kRecording
                                      ? cv::Scalar(0, 0, 255)
                                      : cv::Scalar(0, 255, 0);
   const std::string source_format = frame.source_pixel_type_name.empty()
-                                        ? vision_demo_host::CameraIngest::PixelTypeName(
+                                        ? dog_patrol_perception_tracking::CameraIngest::PixelTypeName(
                                               frame.source_pixel_type)
                                         : frame.source_pixel_type_name;
   const std::string lines[] = {
@@ -241,8 +241,8 @@ void DrawPreview(cv::Mat *preview, const vision_demo_host::CaptureSnapshot &snap
   }
 }
 
-void PrintTakeSummaries(const vision_demo_host::CaptureSnapshot &snapshot) {
-  for (const vision_demo_host::CaptureTakeSummary &take : snapshot.completed_takes) {
+void PrintTakeSummaries(const dog_patrol_perception_tracking::CaptureSnapshot &snapshot) {
+  for (const dog_patrol_perception_tracking::CaptureTakeSummary &take : snapshot.completed_takes) {
     std::cout << "[capture] take=" << take.descriptor.name
               << " state=" << (take.complete ? "complete" : "incomplete")
               << " captured=" << take.captured_frames << " written=" << take.written_frames
@@ -275,7 +275,7 @@ int main(int argc, char **argv) {
     }
   }
 
-  vision_demo_host::CameraIngest::Config camera_config;
+  dog_patrol_perception_tracking::CameraIngest::Config camera_config;
   camera_config.hik_mvs_model = options.mvs_model;
   camera_config.hik_mvs_serial = options.mvs_serial;
   camera_config.width = options.width;
@@ -284,7 +284,7 @@ int main(int argc, char **argv) {
   camera_config.timeout_ms = options.timeout_ms;
   camera_config.bayer_interpolation = options.bayer_interpolation;
   camera_config.bayer_smoothing = options.bayer_smoothing;
-  vision_demo_host::CameraIngest camera;
+  dog_patrol_perception_tracking::CameraIngest camera;
   if (!camera.Open(camera_config, &error)) {
     std::cerr << "Failed to open Hik MVS camera: " << error << std::endl;
     return 4;
@@ -293,7 +293,7 @@ int main(int argc, char **argv) {
   const std::filesystem::path session_directory =
       std::filesystem::path(options.output_root) /
       (options.session_name + "_" + TimestampNowCompact());
-  vision_demo_host::Ffv1CaptureArtifactWriterFactory::Config writer_config;
+  dog_patrol_perception_tracking::Ffv1CaptureArtifactWriterFactory::Config writer_config;
   writer_config.session_directory = session_directory;
   writer_config.requested_fps = options.fps;
   writer_config.mvs_model = options.mvs_model;
@@ -301,17 +301,17 @@ int main(int argc, char **argv) {
   writer_config.requested_width = options.width;
   writer_config.requested_height = options.height;
   writer_config.timeout_ms = options.timeout_ms;
-  vision_demo_host::Ffv1CaptureWorkflow::Config workflow_config;
+  dog_patrol_perception_tracking::Ffv1CaptureWorkflow::Config workflow_config;
   workflow_config.take_name_prefix = "take";
   workflow_config.queue_capacity = options.queue_capacity;
   workflow_config.bayer_interpolation = options.bayer_interpolation;
   workflow_config.bayer_smoothing = options.bayer_smoothing;
-  vision_demo_host::Ffv1CaptureWorkflow workflow(
+  dog_patrol_perception_tracking::Ffv1CaptureWorkflow workflow(
       workflow_config,
-      std::make_unique<vision_demo_host::Ffv1CaptureArtifactWriterFactory>(writer_config));
+      std::make_unique<dog_patrol_perception_tracking::Ffv1CaptureArtifactWriterFactory>(writer_config));
 
   if (options.auto_record &&
-      !workflow.HandleControl(vision_demo_host::CaptureControl::kStart, WallTimeNs(), &error)) {
+      !workflow.HandleControl(dog_patrol_perception_tracking::CaptureControl::kStart, WallTimeNs(), &error)) {
     std::cerr << "Failed to start automatic take: " << error << std::endl;
     camera.Close();
     return 5;
@@ -330,7 +330,7 @@ int main(int argc, char **argv) {
   }
 
   while (!g_interrupted && !quit_requested) {
-    vision_demo_host::CameraIngest::AcquiredFrame frame;
+    dog_patrol_perception_tracking::CameraIngest::AcquiredFrame frame;
     if (!camera.Read(&frame, &error) || frame.bgr8.empty()) {
       std::cerr << "Hik MVS frame acquisition failed: " << error << std::endl;
       interrupted = true;
@@ -339,7 +339,7 @@ int main(int argc, char **argv) {
     }
     ++acquired_frames;
     const auto snapshot_before_submit = workflow.Snapshot();
-    if (snapshot_before_submit.state == vision_demo_host::CaptureState::kRecording) {
+    if (snapshot_before_submit.state == dog_patrol_perception_tracking::CaptureState::kRecording) {
       workflow.Submit(frame);
     }
     const auto elapsed = std::chrono::duration<double>(std::chrono::steady_clock::now() - loop_started);
@@ -347,7 +347,7 @@ int main(int argc, char **argv) {
                                    ? static_cast<double>(acquired_frames) / elapsed.count()
                                    : 0.0;
     const auto snapshot = workflow.Snapshot();
-    if (snapshot.state == vision_demo_host::CaptureState::kRecording &&
+    if (snapshot.state == dog_patrol_perception_tracking::CaptureState::kRecording &&
         !snapshot.active_take.last_write_error.empty()) {
       std::cerr << "FFV1 write failure: " << snapshot.active_take.last_write_error << std::endl;
       interrupted = true;
@@ -361,23 +361,23 @@ int main(int argc, char **argv) {
       cv::imshow(preview_window, preview);
       const int key = cv::waitKey(1) & 0xFF;
       const int normalized_key = std::toupper(key);
-      vision_demo_host::CaptureControl control{};
+      dog_patrol_perception_tracking::CaptureControl control{};
       bool has_control = true;
       switch (normalized_key) {
         case 'R':
-          control = vision_demo_host::CaptureControl::kStart;
+          control = dog_patrol_perception_tracking::CaptureControl::kStart;
           break;
         case 'S':
-          control = vision_demo_host::CaptureControl::kStop;
+          control = dog_patrol_perception_tracking::CaptureControl::kStop;
           break;
         case 'M':
-          control = vision_demo_host::CaptureControl::kAddMarker;
+          control = dog_patrol_perception_tracking::CaptureControl::kAddMarker;
           break;
         case 'I':
-          control = vision_demo_host::CaptureControl::kTogglePreviewInfo;
+          control = dog_patrol_perception_tracking::CaptureControl::kTogglePreviewInfo;
           break;
         case 'Q':
-          control = vision_demo_host::CaptureControl::kQuit;
+          control = dog_patrol_perception_tracking::CaptureControl::kQuit;
           break;
         default:
           has_control = false;
@@ -386,12 +386,12 @@ int main(int argc, char **argv) {
       if (has_control && !workflow.HandleControl(control, WallTimeNs(), &error)) {
         std::cerr << "Capture control failed: " << error << std::endl;
       }
-      quit_requested = has_control && control == vision_demo_host::CaptureControl::kQuit;
+      quit_requested = has_control && control == dog_patrol_perception_tracking::CaptureControl::kQuit;
     }
 
     if (options.auto_record && options.max_seconds > 0 &&
         elapsed >= std::chrono::seconds(options.max_seconds)) {
-      if (!workflow.HandleControl(vision_demo_host::CaptureControl::kStop, WallTimeNs(), &error)) {
+      if (!workflow.HandleControl(dog_patrol_perception_tracking::CaptureControl::kStop, WallTimeNs(), &error)) {
         std::cerr << "Failed to finalize automatic take: " << error << std::endl;
         exit_code = 8;
       }
@@ -401,7 +401,7 @@ int main(int argc, char **argv) {
 
   if (g_interrupted || interrupted) {
     workflow.Interrupt(WallTimeNs());
-  } else if (!quit_requested && workflow.Snapshot().state == vision_demo_host::CaptureState::kRecording) {
+  } else if (!quit_requested && workflow.Snapshot().state == dog_patrol_perception_tracking::CaptureState::kRecording) {
     workflow.Interrupt(WallTimeNs());
   }
   camera.Close();

@@ -32,12 +32,12 @@ run 目录前被拒绝。
 source /opt/ros/humble/setup.bash
 source install/setup.bash
 
-ros2 run vision_demo_host offline_eval_recordings \
+ros2 run dog_patrol_perception_tracking offline_eval_recordings \
   --video /path/to/workspace/vision_demo_ws/data/captures/issue81_native_ffmpeg_q2_30s_20260730_200049/take_001/video.mkv \
   --results-root /path/to/workspace/vision_demo_ws/data/eval_results \
   --run-name issue82_ffv1_lossless_headless \
   --detector-engine /path/to/workspace/vision_demo_ws/assets/models/engines/orin_jp621_trt_local/yolo26n_fp16_640.engine \
-  --tracker-config /path/to/workspace/vision_demo_ws/src/vision_demo_host/config/bot_sort.yaml \
+  --tracker-config /path/to/workspace/vision_demo_ws/src/dog_patrol_perception_tracking/config/bot_sort.yaml \
   --save-frame-csv false --save-sid-scores false --save-tracks-csv false
 ```
 
@@ -77,13 +77,13 @@ decoded `901`，吞吐 `11.122 FPS`。它的 `eval_overlay.mkv` 由 `ffprobe -co
 旧数据集仍可读，且旧 `metadata.json` 不被误作 #81 capture sidecar：
 
 ```bash
-ros2 run vision_demo_host offline_eval_recordings \
+ros2 run dog_patrol_perception_tracking offline_eval_recordings \
   --recordings-root /path/to/workspace/vision_demo_ws/data/datasets \
   --datasets orin_hik_h264_MOT/03 \
   --results-root /path/to/workspace/vision_demo_ws/data/eval_results \
   --run-name issue82_historical_h264_smoke_retry \
   --detector-engine /path/to/workspace/vision_demo_ws/assets/models/engines/orin_jp621_trt_local/yolo26n_fp16_640.engine \
-  --tracker-config /path/to/workspace/vision_demo_ws/src/vision_demo_host/config/bot_sort.yaml \
+  --tracker-config /path/to/workspace/vision_demo_ws/src/dog_patrol_perception_tracking/config/bot_sort.yaml \
   --save-frame-csv false --save-sid-scores false --save-tracks-csv false
 ```
 

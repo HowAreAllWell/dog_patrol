@@ -8,9 +8,9 @@
 
 namespace {
 
-using vision_demo_host::ActiveAssignmentSolver;
-using vision_demo_host::AssignmentCandidateBuilder;
-using vision_demo_host::InactiveRecoverySolver;
+using dog_patrol_perception_tracking::ActiveAssignmentSolver;
+using dog_patrol_perception_tracking::AssignmentCandidateBuilder;
+using dog_patrol_perception_tracking::InactiveRecoverySolver;
 
 AssignmentCandidateBuilder::ActiveTrackInput ActiveTrack(const int track_idx, const int raw_track_id) {
   AssignmentCandidateBuilder::ActiveTrackInput track;

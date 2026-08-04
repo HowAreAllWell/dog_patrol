@@ -5,9 +5,9 @@
 
 #include "active_assignment_solver.hpp"
 #include "inactive_recovery_solver.hpp"
-#include "vision_demo_host/types.hpp"
+#include "dog_patrol_perception_tracking/types.hpp"
 
-namespace vision_demo_host {
+namespace dog_patrol_perception_tracking {
 
 class AssignmentCandidateBuilder {
  public:
@@ -72,4 +72,4 @@ class AssignmentCandidateBuilder {
                                                std::vector<DebugRow> *rows);
 };
 
-}  // namespace vision_demo_host
+}  // namespace dog_patrol_perception_tracking

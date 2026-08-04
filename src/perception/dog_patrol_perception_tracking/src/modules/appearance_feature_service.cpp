@@ -1,4 +1,4 @@
-#include "vision_demo_host/modules/appearance_feature_service.hpp"
+#include "dog_patrol_perception_tracking/modules/appearance_feature_service.hpp"
 
 #include <algorithm>
 #include <memory>
@@ -6,7 +6,7 @@
 
 #include "reid_embedder.hpp"
 
-namespace vision_demo_host {
+namespace dog_patrol_perception_tracking {
 namespace {
 
 const char *LightProfileName(const AppearanceFeatureService::Profile profile) {
@@ -83,4 +83,4 @@ std::vector<float> AppearanceFeatureService::ExtractIdentityFeature(const cv::Ma
   return impl_->backend.ExtractVector(frame, bbox);
 }
 
-}  // namespace vision_demo_host
+}  // namespace dog_patrol_perception_tracking

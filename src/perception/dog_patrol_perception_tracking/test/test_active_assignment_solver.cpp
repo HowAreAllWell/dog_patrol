@@ -6,7 +6,7 @@
 
 namespace {
 
-using vision_demo_host::ActiveAssignmentSolver;
+using dog_patrol_perception_tracking::ActiveAssignmentSolver;
 
 ActiveAssignmentSolver::TrackInput TrackInput(const int row) {
   ActiveAssignmentSolver::TrackInput track;

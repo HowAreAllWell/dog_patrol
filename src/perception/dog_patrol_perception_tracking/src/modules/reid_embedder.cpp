@@ -8,7 +8,7 @@
 
 #include <opencv2/imgproc.hpp>
 
-namespace vision_demo_host {
+namespace dog_patrol_perception_tracking {
 namespace {
 
 cv::Rect MakeSafeRoi(const cv::Rect2f &bbox, const cv::Mat &frame) {
@@ -259,4 +259,4 @@ std::vector<float> ReIdEmbedder::ExtractVector(const cv::Mat &frame, const cv::R
   return out;
 }
 
-}  // namespace vision_demo_host
+}  // namespace dog_patrol_perception_tracking

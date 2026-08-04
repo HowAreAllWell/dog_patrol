@@ -6,7 +6,7 @@
 
 namespace {
 
-using vision_demo_host::SemanticIdAllocator;
+using dog_patrol_perception_tracking::SemanticIdAllocator;
 
 }  // namespace
 

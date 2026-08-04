@@ -52,11 +52,11 @@ ROS 进程。
 离场、同 semantic/raw-change 重获和下一可用目标的片段，再复用同一 mission 断言：
 
 ```bash
-bash src/vision_demo_host/test/test_mission_pipeline_integration.sh \
-  build/vision_demo_host/test_mission_pipeline_integration_driver \
+bash src/dog_patrol_perception_tracking/test/test_mission_pipeline_integration.sh \
+  build/dog_patrol_perception_tracking/test_mission_pipeline_integration_driver \
   --visual-video data/datasets/orin_hik_h264_MOT/03/video.mp4 \
   --detector-engine assets/models/engines/orin_jp621_trt_local/yolo26n_fp16_640.engine \
-  --tracker-config src/vision_demo_host/config/bot_sort.yaml
+  --tracker-config src/dog_patrol_perception_tracking/config/bot_sort.yaml
 ```
 
 默认无资产模式的精确断言顺序如下：
@@ -132,8 +132,8 @@ mission-facing duration 全部使用注入的 `steady_clock` time point，不按
 执行环境均先 source ROS 2 Humble 和 `/path/to/workspace/dog_patrol/install/setup.bash`：
 
 ```bash
-colcon build --packages-select vision_demo_host --event-handlers console_direct+
-colcon test --packages-select vision_demo_host --event-handlers console_direct+
+colcon build --packages-select dog_patrol_perception_tracking --event-handlers console_direct+
+colcon test --packages-select dog_patrol_perception_tracking --event-handlers console_direct+
 colcon test-result --verbose --all
 ```
 

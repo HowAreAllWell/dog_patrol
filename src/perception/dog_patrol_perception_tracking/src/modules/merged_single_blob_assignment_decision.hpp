@@ -5,7 +5,7 @@
 
 #include "inactive_recovery_solver.hpp"
 
-namespace vision_demo_host {
+namespace dog_patrol_perception_tracking {
 
 class MergedSingleBlobAssignmentDecision {
  public:
@@ -52,4 +52,4 @@ class MergedSingleBlobAssignmentDecision {
   static Result Decide(const Input &input, const Config &config);
 };
 
-}  // namespace vision_demo_host
+}  // namespace dog_patrol_perception_tracking

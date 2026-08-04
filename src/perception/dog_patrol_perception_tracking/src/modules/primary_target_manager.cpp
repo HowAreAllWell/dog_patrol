@@ -1,11 +1,11 @@
-#include "vision_demo_host/modules/primary_target_manager.hpp"
+#include "dog_patrol_perception_tracking/modules/primary_target_manager.hpp"
 
 #include <algorithm>
 #include <utility>
 
-#include "vision_demo_host/modules/association_utils.hpp"
+#include "dog_patrol_perception_tracking/modules/association_utils.hpp"
 
-namespace vision_demo_host {
+namespace dog_patrol_perception_tracking {
 
 PrimaryTargetManager::PrimaryTargetManager(Config config) : config_(std::move(config)) {
   if (config_.lost_threshold_frames < 1) {
@@ -368,4 +368,4 @@ PrimaryTargetResult PrimaryTargetManager::UpdateInternal(const std::vector<Ident
 
 PrimaryTargetResult PrimaryTargetManager::GetState() const { return state_; }
 
-}  // namespace vision_demo_host
+}  // namespace dog_patrol_perception_tracking

@@ -1,6 +1,6 @@
-#include "vision_demo_host/modules/det_filter.hpp"
+#include "dog_patrol_perception_tracking/modules/det_filter.hpp"
 
-namespace vision_demo_host {
+namespace dog_patrol_perception_tracking {
 
 DetFilter::DetFilter(Config config) : config_(config) {}
 
@@ -19,4 +19,4 @@ std::vector<Detection> DetFilter::Filter(const std::vector<Detection> &detection
   return filtered;
 }
 
-}  // namespace vision_demo_host
+}  // namespace dog_patrol_perception_tracking

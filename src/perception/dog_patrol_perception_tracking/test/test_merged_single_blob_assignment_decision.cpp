@@ -6,8 +6,8 @@
 
 namespace {
 
-using vision_demo_host::InactiveRecoverySolver;
-using vision_demo_host::MergedSingleBlobAssignmentDecision;
+using dog_patrol_perception_tracking::InactiveRecoverySolver;
+using dog_patrol_perception_tracking::MergedSingleBlobAssignmentDecision;
 
 MergedSingleBlobAssignmentDecision::CandidateRow ActiveCandidate(
     const int semantic_id,

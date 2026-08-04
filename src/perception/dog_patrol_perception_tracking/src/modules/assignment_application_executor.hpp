@@ -10,10 +10,10 @@
 #include "identity_runtime_record.hpp"
 #include "identity_runtime_store.hpp"
 #include "raw_semantic_binding_store.hpp"
-#include "vision_demo_host/modules/feature_update_policy.hpp"
-#include "vision_demo_host/types.hpp"
+#include "dog_patrol_perception_tracking/modules/feature_update_policy.hpp"
+#include "dog_patrol_perception_tracking/types.hpp"
 
-namespace vision_demo_host {
+namespace dog_patrol_perception_tracking {
 
 template <typename DebugRowT>
 class AssignmentApplicationExecutor {
@@ -121,4 +121,4 @@ class AssignmentApplicationExecutor {
   }
 };
 
-}  // namespace vision_demo_host
+}  // namespace dog_patrol_perception_tracking

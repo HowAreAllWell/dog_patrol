@@ -2,7 +2,7 @@
 
 #include "identity_runtime_lifecycle_coordinator.hpp"
 
-namespace vision_demo_host {
+namespace dog_patrol_perception_tracking {
 namespace {
 
 IdentityRuntimeRecord MakePersonRecord(const int semantic_id,
@@ -49,4 +49,4 @@ TEST(IdentityRuntimeLifecycleCoordinatorTest, IgnoresNullRuntimeStore) {
 }
 
 }  // namespace
-}  // namespace vision_demo_host
+}  // namespace dog_patrol_perception_tracking

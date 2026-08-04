@@ -8,12 +8,12 @@
 
 namespace {
 
-using vision_demo_host::BirthCandidateDecision;
-using vision_demo_host::BirthManager;
-using vision_demo_host::ClassId;
-using vision_demo_host::IdentityRuntimeRecord;
-using vision_demo_host::Track;
-using vision_demo_host::UnresolvedTrackFinalResolutionCoordinator;
+using dog_patrol_perception_tracking::BirthCandidateDecision;
+using dog_patrol_perception_tracking::BirthManager;
+using dog_patrol_perception_tracking::ClassId;
+using dog_patrol_perception_tracking::IdentityRuntimeRecord;
+using dog_patrol_perception_tracking::Track;
+using dog_patrol_perception_tracking::UnresolvedTrackFinalResolutionCoordinator;
 
 Track PersonTrack(const int raw_track_id, const cv::Rect2f &bbox, const bool occlusion_suspect = false) {
   Track track;
@@ -101,7 +101,7 @@ UnresolvedTrackFinalResolutionCoordinator::Input BaseInput(
     const auto it = identities.find(semantic_id);
     return it == identities.end() ? nullptr : &it->second;
   };
-  input.active_assignment_max_cost = [](const IdentityRuntimeRecord &, const vision_demo_host::AssociationEvidence &) {
+  input.active_assignment_max_cost = [](const IdentityRuntimeRecord &, const dog_patrol_perception_tracking::AssociationEvidence &) {
     return 0.55F;
   };
   input.score_evidence = [](const Track &, const IdentityRuntimeRecord &identity, const std::vector<float> &feature) {

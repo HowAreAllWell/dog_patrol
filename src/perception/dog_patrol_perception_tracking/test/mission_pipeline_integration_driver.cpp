@@ -19,31 +19,31 @@
 #include <rclcpp/executors/single_threaded_executor.hpp>
 #include <rclcpp/rclcpp.hpp>
 
-#include "vision_demo_host/modules/det_filter.hpp"
-#include "vision_demo_host/modules/identity_manager.hpp"
-#include "vision_demo_host/modules/mission_ros_adapter.hpp"
-#include "vision_demo_host/modules/mot_tracker.hpp"
-#include "vision_demo_host/modules/preprocess_infer.hpp"
-#include "vision_demo_host/modules/primary_target_manager.hpp"
+#include "dog_patrol_perception_tracking/modules/det_filter.hpp"
+#include "dog_patrol_perception_tracking/modules/identity_manager.hpp"
+#include "dog_patrol_perception_tracking/modules/mission_ros_adapter.hpp"
+#include "dog_patrol_perception_tracking/modules/mot_tracker.hpp"
+#include "dog_patrol_perception_tracking/modules/preprocess_infer.hpp"
+#include "dog_patrol_perception_tracking/modules/primary_target_manager.hpp"
 
 namespace {
 
 using namespace std::chrono_literals;
-using vision_demo_host::ClassId;
-using vision_demo_host::IdentityObservation;
-using vision_demo_host::IdentityState;
-using vision_demo_host::MissionBlockCause;
-using vision_demo_host::MissionCoordinator;
-using vision_demo_host::MissionFrameTransaction;
-using vision_demo_host::MissionPhase;
-using vision_demo_host::MissionRosAdapter;
-using vision_demo_host::MissionSnapshot;
-using vision_demo_host::MutableReadinessContributor;
-using vision_demo_host::PerceptionMissionEvent;
-using vision_demo_host::PerceptionReadiness;
-using vision_demo_host::PrimaryState;
-using vision_demo_host::PrimaryTargetManager;
-using vision_demo_host::SourceFrameMetadata;
+using dog_patrol_perception_tracking::ClassId;
+using dog_patrol_perception_tracking::IdentityObservation;
+using dog_patrol_perception_tracking::IdentityState;
+using dog_patrol_perception_tracking::MissionBlockCause;
+using dog_patrol_perception_tracking::MissionCoordinator;
+using dog_patrol_perception_tracking::MissionFrameTransaction;
+using dog_patrol_perception_tracking::MissionPhase;
+using dog_patrol_perception_tracking::MissionRosAdapter;
+using dog_patrol_perception_tracking::MissionSnapshot;
+using dog_patrol_perception_tracking::MutableReadinessContributor;
+using dog_patrol_perception_tracking::PerceptionMissionEvent;
+using dog_patrol_perception_tracking::PerceptionReadiness;
+using dog_patrol_perception_tracking::PrimaryState;
+using dog_patrol_perception_tracking::PrimaryTargetManager;
+using dog_patrol_perception_tracking::SourceFrameMetadata;
 
 using MissionEventMessage = dog_patrol_interfaces::msg::MissionEvent;
 using TargetBoundingBoxMessage = dog_patrol_interfaces::msg::TargetBoundingBox;
@@ -112,7 +112,7 @@ constexpr std::size_t SlotIndex(const EvidenceSlot slot) {
   return static_cast<std::size_t>(slot);
 }
 
-#ifdef VISION_DEMO_HOST_ENABLE_ORIN_RUNTIME
+#ifdef DOG_PATROL_PERCEPTION_TRACKING_ENABLE_ORIN_RUNTIME
 SourceFrameMetadata ReplayMetadata(const std::size_t frame_index, const double fps,
                                    const int width, const int height,
                                    const std::string &frame_id) {
@@ -140,7 +140,7 @@ const IdentityObservation *VisiblePersonWithSemanticId(
   return nullptr;
 }
 
-#ifdef VISION_DEMO_HOST_ENABLE_ORIN_RUNTIME
+#ifdef DOG_PATROL_PERCEPTION_TRACKING_ENABLE_ORIN_RUNTIME
 std::vector<const IdentityObservation *> VisiblePeople(
     const std::vector<IdentityObservation> &identities) {
   std::vector<const IdentityObservation *> people;
@@ -203,7 +203,7 @@ MissionEvidence BuildSyntheticEvidence() {
   return evidence;
 }
 
-#ifdef VISION_DEMO_HOST_ENABLE_ORIN_RUNTIME
+#ifdef DOG_PATROL_PERCEPTION_TRACKING_ENABLE_ORIN_RUNTIME
 std::optional<MissionEvidence> FindVisualMissionEvidence(
     const std::vector<EvidenceFrame> &frames, std::string *error) {
   for (std::size_t selection = 0U; selection + 1U < frames.size(); ++selection) {
@@ -285,30 +285,30 @@ std::optional<MissionEvidence> FindVisualMissionEvidence(
 
 std::optional<MissionEvidence> BuildVisualEvidence(const VisualReplayConfig &config,
                                                    std::string *error) {
-#ifndef VISION_DEMO_HOST_ENABLE_ORIN_RUNTIME
+#ifndef DOG_PATROL_PERCEPTION_TRACKING_ENABLE_ORIN_RUNTIME
   (void)config;
   if (error != nullptr) {
     *error = "visual replay requires a build with TRACKING_ENABLE_ORIN_RUNTIME=ON";
   }
   return std::nullopt;
 #else
-  vision_demo_host::PreprocessInfer::Config infer_config;
+  dog_patrol_perception_tracking::PreprocessInfer::Config infer_config;
   infer_config.detector_runtime_path = config.detector_engine_path;
   infer_config.raw_conf_threshold = 0.10F;
-  vision_demo_host::PreprocessInfer infer(infer_config);
+  dog_patrol_perception_tracking::PreprocessInfer infer(infer_config);
   if (!infer.Initialize(error)) {
     return std::nullopt;
   }
 
-  vision_demo_host::DetFilter det_filter({0.10F, 0.10F});
-  vision_demo_host::MotTracker::Config tracker_config;
+  dog_patrol_perception_tracking::DetFilter det_filter({0.10F, 0.10F});
+  dog_patrol_perception_tracking::MotTracker::Config tracker_config;
   tracker_config.tracker_yaml_path = config.tracker_config_path;
-  vision_demo_host::MotTracker tracker(tracker_config);
+  dog_patrol_perception_tracking::MotTracker tracker(tracker_config);
   if (!tracker.Initialize(error)) {
     return std::nullopt;
   }
 
-  vision_demo_host::IdentityManager identity_manager;
+  dog_patrol_perception_tracking::IdentityManager identity_manager;
   if (!identity_manager.Initialize(error)) {
     return std::nullopt;
   }
@@ -336,7 +336,7 @@ std::optional<MissionEvidence> BuildVisualEvidence(const VisualReplayConfig &con
     const auto tracks = tracker.Update(det_filter.Filter(detections), image);
     const auto previous_primary = visual_primary.GetState();
     const auto identities = identity_manager.Update(
-        vision_demo_host::TrackletObservationsFromTracks(tracks),
+        dog_patrol_perception_tracking::TrackletObservationsFromTracks(tracks),
         tracker.LastTrackletHypotheses(), previous_primary, &image);
     (void)visual_primary.Update(identities.identities);
 

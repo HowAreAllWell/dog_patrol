@@ -4,7 +4,7 @@
 #include <fstream>
 #include <string>
 
-#include "vision_demo_host/tools/offline_eval_input.hpp"
+#include "dog_patrol_perception_tracking/tools/offline_eval_input.hpp"
 
 namespace {
 
@@ -53,11 +53,11 @@ TEST_F(OfflineEvalInputTest, DiscoversCompletedFfv1TakeAndValidatesTimestampSide
   const auto take_dir = root_ / "capture" / "take_001";
   WriteCompletedFfv1Take(take_dir);
 
-  const auto discovery = vision_demo_host::tools::DiscoverOfflineEvalInput({take_dir, {}});
+  const auto discovery = dog_patrol_perception_tracking::tools::DiscoverOfflineEvalInput({take_dir, {}});
 
   ASSERT_TRUE(discovery.ok) << discovery.error;
   EXPECT_EQ(discovery.input.video_path, take_dir / "video.mkv");
-  EXPECT_EQ(discovery.input.source_kind, vision_demo_host::tools::OfflineEvalSourceKind::kFfv1Capture);
+  EXPECT_EQ(discovery.input.source_kind, dog_patrol_perception_tracking::tools::OfflineEvalSourceKind::kFfv1Capture);
   ASSERT_TRUE(discovery.input.capture.has_value());
   EXPECT_EQ(discovery.input.capture->written_frames, 2U);
   EXPECT_EQ(discovery.input.timestamp_validation.rows, 2U);
@@ -68,7 +68,7 @@ TEST_F(OfflineEvalInputTest, MakesCompletedCaptureMetadataMismatchExplicit) {
   const auto take_dir = root_ / "capture" / "take_001";
   WriteCompletedFfv1Take(take_dir, 3U);
 
-  const auto discovery = vision_demo_host::tools::DiscoverOfflineEvalInput({take_dir, {}});
+  const auto discovery = dog_patrol_perception_tracking::tools::DiscoverOfflineEvalInput({take_dir, {}});
 
   EXPECT_FALSE(discovery.ok);
   EXPECT_NE(discovery.error.find("written_frames"), std::string::npos);
@@ -80,29 +80,29 @@ TEST_F(OfflineEvalInputTest, ExplicitVideoPathWinsOverDatasetDefault) {
   const auto explicit_video = root_ / "external" / "clip.mkv";
   WriteFile(explicit_video, "explicit video placeholder");
 
-  const auto discovery = vision_demo_host::tools::DiscoverOfflineEvalInput({dataset_dir, explicit_video});
+  const auto discovery = dog_patrol_perception_tracking::tools::DiscoverOfflineEvalInput({dataset_dir, explicit_video});
 
   ASSERT_TRUE(discovery.ok) << discovery.error;
   EXPECT_EQ(discovery.input.video_path, explicit_video);
-  EXPECT_EQ(discovery.input.source_kind, vision_demo_host::tools::OfflineEvalSourceKind::kExplicitVideo);
+  EXPECT_EQ(discovery.input.source_kind, dog_patrol_perception_tracking::tools::OfflineEvalSourceKind::kExplicitVideo);
 }
 
 TEST_F(OfflineEvalInputTest, ExplicitHistoricalMp4UsesMigrationSourceKind) {
   const auto historical_video = root_ / "orin_hik_h264_MOT" / "03" / "video.mp4";
   WriteFile(historical_video, "historical H264 placeholder");
 
-  const auto discovery = vision_demo_host::tools::DiscoverOfflineEvalInput({{}, historical_video});
+  const auto discovery = dog_patrol_perception_tracking::tools::DiscoverOfflineEvalInput({{}, historical_video});
 
   ASSERT_TRUE(discovery.ok) << discovery.error;
   EXPECT_EQ(discovery.input.source_kind,
-            vision_demo_host::tools::OfflineEvalSourceKind::kHistoricalH264);
+            dog_patrol_perception_tracking::tools::OfflineEvalSourceKind::kHistoricalH264);
 }
 
 TEST_F(OfflineEvalInputTest, RejectsMp4OutsideHistoricalMigrationDataset) {
   const auto unrelated_mp4 = root_ / "external" / "clip.mp4";
   WriteFile(unrelated_mp4, "unrelated MP4 placeholder");
 
-  const auto discovery = vision_demo_host::tools::DiscoverOfflineEvalInput({{}, unrelated_mp4});
+  const auto discovery = dog_patrol_perception_tracking::tools::DiscoverOfflineEvalInput({{}, unrelated_mp4});
 
   EXPECT_FALSE(discovery.ok);
   EXPECT_NE(discovery.error.find("orin_hik_h264_MOT migration data"), std::string::npos);
@@ -113,7 +113,7 @@ TEST_F(OfflineEvalInputTest, RejectsUnsupportedExplicitVideoExtension) {
   WriteFile(unsupported_video, "unsupported video placeholder");
 
   const auto discovery =
-      vision_demo_host::tools::DiscoverOfflineEvalInput({{}, unsupported_video});
+      dog_patrol_perception_tracking::tools::DiscoverOfflineEvalInput({{}, unsupported_video});
 
   EXPECT_FALSE(discovery.ok);
   EXPECT_NE(discovery.error.find("must be FFV1/MKV or historical MP4"),
@@ -124,11 +124,11 @@ TEST_F(OfflineEvalInputTest, RetainsHistoricalMp4FallbackForMigrationRegression)
   const auto dataset_dir = root_ / "orin_hik_h264_MOT" / "01";
   WriteFile(dataset_dir / "video.mp4", "historical H264 placeholder");
 
-  const auto discovery = vision_demo_host::tools::DiscoverOfflineEvalInput({dataset_dir, {}});
+  const auto discovery = dog_patrol_perception_tracking::tools::DiscoverOfflineEvalInput({dataset_dir, {}});
 
   ASSERT_TRUE(discovery.ok) << discovery.error;
   EXPECT_EQ(discovery.input.video_path, dataset_dir / "video.mp4");
-  EXPECT_EQ(discovery.input.source_kind, vision_demo_host::tools::OfflineEvalSourceKind::kHistoricalH264);
+  EXPECT_EQ(discovery.input.source_kind, dog_patrol_perception_tracking::tools::OfflineEvalSourceKind::kHistoricalH264);
 }
 
 TEST_F(OfflineEvalInputTest, RetainsHistoricalMp4WhenLegacyMetadataIsNotACaptureSidecar) {
@@ -136,20 +136,20 @@ TEST_F(OfflineEvalInputTest, RetainsHistoricalMp4WhenLegacyMetadataIsNotACapture
   WriteFile(dataset_dir / "video.mp4", "historical H264 placeholder");
   WriteFile(dataset_dir / "metadata.json", "{\"legacy_recording\": true, \"frame_count\": 42}\n");
 
-  const auto discovery = vision_demo_host::tools::DiscoverOfflineEvalInput({dataset_dir, {}});
+  const auto discovery = dog_patrol_perception_tracking::tools::DiscoverOfflineEvalInput({dataset_dir, {}});
 
   ASSERT_TRUE(discovery.ok) << discovery.error;
-  EXPECT_EQ(discovery.input.source_kind, vision_demo_host::tools::OfflineEvalSourceKind::kHistoricalH264);
+  EXPECT_EQ(discovery.input.source_kind, dog_patrol_perception_tracking::tools::OfflineEvalSourceKind::kHistoricalH264);
   EXPECT_FALSE(discovery.input.capture.has_value());
 }
 
 TEST_F(OfflineEvalInputTest, ReplayFrameCountMustMatchCompletedCaptureMetadata) {
   const auto take_dir = root_ / "capture" / "take_001";
   WriteCompletedFfv1Take(take_dir);
-  const auto discovery = vision_demo_host::tools::DiscoverOfflineEvalInput({take_dir, {}});
+  const auto discovery = dog_patrol_perception_tracking::tools::DiscoverOfflineEvalInput({take_dir, {}});
   ASSERT_TRUE(discovery.ok) << discovery.error;
 
-  const auto replay = vision_demo_host::tools::ValidateOfflineEvalReplay(discovery.input, 1U);
+  const auto replay = dog_patrol_perception_tracking::tools::ValidateOfflineEvalReplay(discovery.input, 1U);
 
   EXPECT_FALSE(replay.ok);
   EXPECT_NE(replay.error.find("decoded frame count"), std::string::npos);
@@ -158,10 +158,10 @@ TEST_F(OfflineEvalInputTest, ReplayFrameCountMustMatchCompletedCaptureMetadata) 
 TEST_F(OfflineEvalInputTest, OverlayArtifactsCannotBePlacedInsideSourceDataset) {
   const auto take_dir = root_ / "capture" / "take_001";
   WriteCompletedFfv1Take(take_dir);
-  const auto discovery = vision_demo_host::tools::DiscoverOfflineEvalInput({take_dir, {}});
+  const auto discovery = dog_patrol_perception_tracking::tools::DiscoverOfflineEvalInput({take_dir, {}});
   ASSERT_TRUE(discovery.ok) << discovery.error;
 
-  const auto plan = vision_demo_host::tools::PlanOfflineEvalOverlayArtifacts(
+  const auto plan = dog_patrol_perception_tracking::tools::PlanOfflineEvalOverlayArtifacts(
       discovery.input, take_dir / "eval_result", false, "eval_overlay.mkv");
 
   EXPECT_FALSE(plan.ok);
@@ -179,10 +179,10 @@ TEST_F(OfflineEvalInputTest, OverlayArtifactsCannotReachSourceDatasetThroughSyml
     GTEST_SKIP() << "Cannot create temporary symlink: " << filesystem_error.message();
   }
 
-  const auto discovery = vision_demo_host::tools::DiscoverOfflineEvalInput({take_dir, {}});
+  const auto discovery = dog_patrol_perception_tracking::tools::DiscoverOfflineEvalInput({take_dir, {}});
   ASSERT_TRUE(discovery.ok) << discovery.error;
 
-  const auto plan = vision_demo_host::tools::PlanOfflineEvalOverlayArtifacts(
+  const auto plan = dog_patrol_perception_tracking::tools::PlanOfflineEvalOverlayArtifacts(
       discovery.input, results_link / "issue82_run" / "s01", true, "eval_overlay.mkv");
 
   EXPECT_FALSE(plan.ok);
@@ -195,12 +195,12 @@ TEST_F(OfflineEvalInputTest, SourceBoundaryStillRejectsArtifactsForAnInvalidCapt
   WriteFile(take_dir / "video.mkv", "incomplete capture placeholder");
   WriteFile(take_dir / "metadata.json", "{\"state\": \"incomplete\"}\n");
 
-  const auto discovery = vision_demo_host::tools::DiscoverOfflineEvalInput({take_dir, {}});
+  const auto discovery = dog_patrol_perception_tracking::tools::DiscoverOfflineEvalInput({take_dir, {}});
   EXPECT_FALSE(discovery.ok);
 
-  vision_demo_host::tools::OfflineEvalInput source_boundary;
+  dog_patrol_perception_tracking::tools::OfflineEvalInput source_boundary;
   source_boundary.dataset_directory = take_dir;
-  const auto plan = vision_demo_host::tools::PlanOfflineEvalOverlayArtifacts(
+  const auto plan = dog_patrol_perception_tracking::tools::PlanOfflineEvalOverlayArtifacts(
       source_boundary, take_dir / "eval_result", false, "eval_overlay.mkv");
 
   EXPECT_FALSE(plan.ok);
@@ -208,11 +208,11 @@ TEST_F(OfflineEvalInputTest, SourceBoundaryStillRejectsArtifactsForAnInvalidCapt
 }
 
 TEST(OfflineEvalInputModesTest, SupportsAllFourIndependentOverlayCombinations) {
-  using vision_demo_host::tools::OfflineEvalOverlayMode;
-  EXPECT_EQ(vision_demo_host::tools::OfflineEvalOverlayModeFor(false, false), OfflineEvalOverlayMode::kHeadless);
-  EXPECT_EQ(vision_demo_host::tools::OfflineEvalOverlayModeFor(true, false), OfflineEvalOverlayMode::kPreviewOnly);
-  EXPECT_EQ(vision_demo_host::tools::OfflineEvalOverlayModeFor(false, true), OfflineEvalOverlayMode::kRecordOnly);
-  EXPECT_EQ(vision_demo_host::tools::OfflineEvalOverlayModeFor(true, true), OfflineEvalOverlayMode::kPreviewAndRecord);
+  using dog_patrol_perception_tracking::tools::OfflineEvalOverlayMode;
+  EXPECT_EQ(dog_patrol_perception_tracking::tools::OfflineEvalOverlayModeFor(false, false), OfflineEvalOverlayMode::kHeadless);
+  EXPECT_EQ(dog_patrol_perception_tracking::tools::OfflineEvalOverlayModeFor(true, false), OfflineEvalOverlayMode::kPreviewOnly);
+  EXPECT_EQ(dog_patrol_perception_tracking::tools::OfflineEvalOverlayModeFor(false, true), OfflineEvalOverlayMode::kRecordOnly);
+  EXPECT_EQ(dog_patrol_perception_tracking::tools::OfflineEvalOverlayModeFor(true, true), OfflineEvalOverlayMode::kPreviewAndRecord);
 }
 
 }  // namespace

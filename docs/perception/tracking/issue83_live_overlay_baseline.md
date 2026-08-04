@@ -5,7 +5,7 @@
 
 ## 合同与配置
 
-`vision_demo_node` 的 live mode 由两个独立开关组成：
+`dog_patrol_perception_tracking_node` 的 live mode 由两个独立开关组成：
 
 | mode | `visualization.enable` | `recording.enable` | 行为 |
 | --- | --- | --- | --- |
@@ -63,7 +63,7 @@ SIGINT 后输出 `overlay_metrics phase=final`。
 | `record` | 35 s | acquisition 0.031/7.756/11.016; conversion 4.161/6.928/8.681; copy 0.498/1.449/2.244 | 20.118/28.808/34.839 | queue wait 11.070/54.370/73.652; render 0.672/0.901/1.188; write 30.690/43.824/48.656 | `submitted/enqueued/rendered/written=977/977/977/977` (29.36 FPS), all queue/render/write drops and errors 0. |
 | `preview_record` | 45 s | acquisition 0.030/5.975/9.763; conversion 4.565/7.799/9.876; copy 0.518/1.921/2.904 | 22.140/31.573/35.660 | queue wait 149.243/175.680/186.616; render 0.681/0.905/1.161; write 32.903/46.837/52.067 | `submitted/enqueued/rendered/previewed/written=1202/1011/1011/1011/1011`; 191 bounded queue drops, no render/write drop or error. |
 
-`preview` 的 X11 窗口 `vision_demo_host` 已实际映射并用屏幕截图目检；画布持续刷新，当前现场画面的
+`preview` 的 X11 窗口 `dog_patrol_perception_tracking` 已实际映射并用屏幕截图目检；画布持续刷新，当前现场画面的
 primary line 为 `IDLE id=-1 raw=-1`。`preview_record` 的第一个 decoded FFV1 frame 有相同的当前画布和
 primary line，因此未把 preview 与 recording 当作两套 overlay 实现。
 
@@ -94,7 +94,7 @@ data/diagnostics/live_overlays/issue83_{record_only,preview_record}_20260731_*.m
 `preview_record`。两个模式的 `runtime_monitor` 都连续出现
 `det=1 filtered=1 tracks=1 state=LOCKED primary_id=1 raw_track_id=1`。
 
-- `preview` 的实际 X11 `vision_demo_host` 窗口显示真人红色 box、`id=1 ACTIVE raw=1` 标签和
+- `preview` 的实际 X11 `dog_patrol_perception_tracking` 窗口显示真人红色 box、`id=1 ACTIVE raw=1` 标签和
   `LOCKED id=1 raw=1` primary line。60 秒运行 final 为 submitted/enqueued `1519/1519`，
   queue/render/write drops 和 errors 全为 0，previewed FPS 26.17；queue wait p50/p95/p99 为
   0.054/0.305/2.526 ms，render 为 0.972/1.301/1.957 ms。相机最后采样的
@@ -136,15 +136,15 @@ source install/setup.bash
 export DISPLAY=:1
 export XAUTHORITY=/run/user/1000/gdm/Xauthority
 
-ros2 run vision_demo_host vision_demo_node --ros-args \
-  --params-file src/vision_demo_host/config/demo_params.yaml \
+ros2 run dog_patrol_perception_tracking dog_patrol_perception_tracking_node --ros-args \
+  --params-file src/dog_patrol_perception_tracking/config/perception_tracking_params.yaml \
   -p detector.runtime_path:="$PWD/assets/models/engines/orin_jp621_trt_local/yolo26n_fp16_640.engine" \
-  -p tracker.config_path:="$PWD/src/vision_demo_host/config/bot_sort.yaml" \
+  -p tracker.config_path:="$PWD/src/dog_patrol_perception_tracking/config/bot_sort.yaml" \
   -p visualization.enable:=true -p recording.enable:=false
-ros2 run vision_demo_host vision_demo_node --ros-args \
-  --params-file src/vision_demo_host/config/demo_params.yaml \
+ros2 run dog_patrol_perception_tracking dog_patrol_perception_tracking_node --ros-args \
+  --params-file src/dog_patrol_perception_tracking/config/perception_tracking_params.yaml \
   -p detector.runtime_path:="$PWD/assets/models/engines/orin_jp621_trt_local/yolo26n_fp16_640.engine" \
-  -p tracker.config_path:="$PWD/src/vision_demo_host/config/bot_sort.yaml" \
+  -p tracker.config_path:="$PWD/src/dog_patrol_perception_tracking/config/bot_sort.yaml" \
   -p visualization.enable:=true -p recording.enable:=true \
   -p recording.path:="data/diagnostics/live_overlays/issue83_preview_record_$(date +%Y%m%d_%H%M%S).mkv"
 ```

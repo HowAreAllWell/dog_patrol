@@ -6,7 +6,7 @@
 
 #include "active_assignment_solver.hpp"
 
-namespace vision_demo_host {
+namespace dog_patrol_perception_tracking {
 namespace {
 
 float RecoveryMaxCost(const InactiveRecoverySolver::Config &config) {
@@ -142,4 +142,4 @@ InactiveRecoverySolver::Result InactiveRecoverySolver::SolveHungarian(
   return result;
 }
 
-}  // namespace vision_demo_host
+}  // namespace dog_patrol_perception_tracking

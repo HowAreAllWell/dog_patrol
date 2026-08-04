@@ -1,9 +1,9 @@
 <?xml version="1.0"?>
 <package format="3">
-  <name>vision_demo_host</name>
+  <name>dog_patrol_perception_tracking</name>
   <version>0.1.0</version>
-  <description>Host-side visual acceptance demo skeleton for Orin.</description>
-  <maintainer email="user@example.com">vision_demo</maintainer>
+  <description>Camera, detection, tracking, semantic identity, and primary-target perception for dog patrol.</description>
+  <maintainer email="user@example.com">dog_patrol</maintainer>
   <license>Apache-2.0</license>
 
   <buildtool_depend>ament_cmake</buildtool_depend>
