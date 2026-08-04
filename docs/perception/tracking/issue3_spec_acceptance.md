@@ -8,9 +8,9 @@ detection/tracking 正式迁入 `dog_patrol`、建立后续 face/voice seam、�
 远端状态支撑，可以关闭。
 
 真实人脸、真实语音、导航算法和最终导航 Orin 整机验收没有完成，也不在本 Spec 的完成声明中。
-orchestrator 当前拥有 readiness 聚合和 ROS-independent 授权会话规则；真实 face/voice 结果 adapter
-及其最终 `AUTHORIZED`、`UNAUTHORIZED`、`EXECUTION_ERROR` 发布路径随真实 provider 后续接入，
-不得用测试 provider 或生产 placeholder 伪造。
+orchestrator 当前拥有 readiness 聚合、ROS-independent 授权会话规则及通用结果 adapter；真实
+face/voice provider 后续通过 `AuthorizationEvidence` 接入，不得用测试 provider 或生产 placeholder
+伪造 evidence、整体 READY 或授权结论。
 
 ## 父 Spec 核对
 
@@ -19,8 +19,8 @@ orchestrator 当前拥有 readiness 聚合和 ROS-independent 授权会话规则
 | tracking 正式迁入并保留历史 | `src/perception/dog_patrol_perception_tracking/`；annotated tag `tracking-import/vision-demo-ws-7878d70` 固定 116 个过滤提交，tip `6faaed42` | 通过；无 submodule、旧 overlay 或旧仓构建依赖 |
 | portable / Orin 构建边界 | tracking `CMakeLists.txt` 的 `TRACKING_ENABLE_ORIN_RUNTIME`；PR #18、#24 | 通过；portable 核心与 production runtime 共用实现，开启硬件 runtime 时依赖缺失会在配置期失败 |
 | 默认 light / 可选 ONNX | tracking 默认参数、ReID backend 规范化和感知环境检查器 | 通过；tracker/SID 默认 `light` 且空模型路径合法，仅 `osnet_onnx` 及其 alias 要求并实际加载 ONNX |
-| orchestrator 与 Fake 退役 | `dog_patrol_perception_orchestrator` 的 `AuthorizationCoordinator`、`ReadinessCoordinator` 和 `perception_readiness`；PR #16、#20 | 通过；正式安装面无 Fake 节点、launch、控制入口或 readiness placeholder |
-| 感知内部 interfaces | `CapabilityStatus.msg`、`TrackedTargetImage.msg` | 通过；与公共 `dog_patrol_interfaces` 分离，可生成 C++/Python 类型 |
+| orchestrator 与 Fake 退役 | `AuthorizationCoordinator`、`perception_authorization`、`ReadinessCoordinator` 和 `perception_readiness`；PR #16、#20 及本次闭环 | 通过；授权证据只在匹配且未阻塞的 VERIFY_IDENTITY 会话映射为 `AUTHORIZED`、`UNAUTHORIZED`、`EXECUTION_ERROR`，正式安装面无 Fake/placeholder |
+| 感知内部 interfaces | `AuthorizationEvidence.msg`、`CapabilityStatus.msg`、`TrackedTargetImage.msg` | 通过；与公共 `dog_patrol_interfaces` 分离，可生成 C++/Python 类型 |
 | mission 公共合同 | `mission_contract_integration.md` 和真实 `mission_supervisor` 集成测试；PR #19 | 通过；覆盖确认、fresh bbox、丢失/重获和错误输入门禁，tracking 不发布授权结论 |
 | standalone 与 observation | `PrimaryTargetObservation`、standalone launch 和 runtime strategy；PR #21 | 通过；不创建 mission adapter，不要求导航/激光雷达，不伪造公共任务状态 |
 | crop transport | `TargetImageRosAdapter` 和 `TrackedTargetImage` transport/smoke；PR #22 | 通过；同帧、自持有、可配置、有界异步丢旧，失效后停发，慢消费者不反压 |
@@ -57,17 +57,20 @@ portable CI、部署门禁和两台 Orin 验收分工均由上表闭合。Implem
 ## 本次独立复验
 
 - 当前复验基点：`main` / `origin/main` 均为 `19c4b659d4af7a9efe3c26f3368406ac26959990`。
-- 独立 `/tmp` build/install/log、未 source 旧视觉工作区：portable 五包 build 通过；399 tests，
+- 独立 `/tmp` build/install/log、未 source 旧视觉工作区：portable 五包 build 通过；400 tests，
   0 errors、0 failures、0 skipped。
 - 感知环境检查器 13 项 Python 单测通过；覆盖默认 light 空模型路径、ONNX alias 与实际加载失败门禁、
   模块状态事实源及 PASS/FAIL 行为。
+- orchestrator 的真实 DDS 外部-interface 测试覆盖旧 sequence、错误 target、早于当前会话的结果时间、
+  两轮未通过、通过、技术错误、取消、阻塞和重复 evidence；只产生 `UNAUTHORIZED`、`AUTHORIZED`、
+  `EXECUTION_ERROR` 三个预期事件。
 - 仓库扫描未发现 submodule、被提交的模型/engine/录像/rosbag，活动代码与正式运行面未发现
   `vision_demo_host`、`vision_demo_node`、Fake provider 或 authorization placeholder。
 
 ## 明确保留的后续状态
 
-- face：`not-integrated`；真实识别、模型、白名单、阈值策略和结果 adapter 待后续问题。
-- voice：`not-integrated`；真实识别、音频设备、口令流程、模型和结果 adapter 待后续问题。
+- face：`not-integrated`；真实识别、模型、白名单、阈值策略和 evidence producer 待后续问题。
+- voice：`not-integrated`；真实识别、音频设备、口令流程、模型和 evidence producer 待后续问题。
 - orchestrator：`integrating`；不得在 face/voice provider 缺失时发布生产整体 READY。
 - navigation：实现尚未迁入；最终导航 Orin 的精确环境、雷达/TF/外参、资源竞争、完整任务和长稳验收待后续问题。
 

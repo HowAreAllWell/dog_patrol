@@ -18,13 +18,12 @@ setup(
     zip_safe=True,
     maintainer="HowAreAllWell",
     maintainer_email="77225398+HowAreAllWell@users.noreply.github.com",
-    description=(
-        "ROS-independent perception business orchestration for dog_patrol."
-    ),
+    description="Perception business orchestration and ROS adapters for dog_patrol.",
     license="BSD-3-Clause",
     tests_require=["pytest"],
     entry_points={
         "console_scripts": [
+            "perception_authorization = dog_patrol_perception_orchestrator.authorization_node:main",
             "perception_readiness = dog_patrol_perception_orchestrator.readiness_node:main",
         ],
     },

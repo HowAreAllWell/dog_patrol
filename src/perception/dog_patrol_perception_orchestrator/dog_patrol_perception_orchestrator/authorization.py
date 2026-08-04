@@ -46,6 +46,10 @@ class AuthorizationCoordinator:
         self._active_session = session
         self._not_passed_count = 0
 
+    def reset(self) -> None:
+        self._active_session = None
+        self._not_passed_count = 0
+
     def record(
         self,
         session: AuthorizationSession,
