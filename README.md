@@ -10,6 +10,8 @@
 - `navigation/`：只保留模块入口说明，导航实现尚未迁入。
 - `dog_patrol_perception_tracking`：已从视觉准备仓保留必要历史导入；普通环境构建
   portable tracking 核心和 ROS adapter，Orin runtime 由部署端显式开启。
+- 本仓是 tracking 后续开发、构建、测试和部署的唯一权威入口；旧 `vision_demo_ws` 在本票
+  门禁全部通过后设为只读归档，仅用于迁移前历史追溯和紧急回退，不是可构建依赖。
 - tracking 公共 mission tracer 已接入同工作区安装后的真实 `mission_supervisor`，无资产路径纳入普通
   CI，覆盖目标确认、fresh bbox、丢失/重获及无效状态输入门禁。
 - tracking 已提供不创建 mission ROS adapter 的正式 standalone Orin 启动方式，并通过
@@ -21,6 +23,8 @@
   真人 semantic primary、主目标 crop/离场停发和慢消费者不反压验收；verified baseline 见
   [`docs/perception/tracking/issue14_tracking_hardware_acceptance.md`](docs/perception/tracking/issue14_tracking_hardware_acceptance.md)。
 - 人脸实现尚未建立。
+- 语音实现和导航整机验收尚未完成；它们与人脸接入继续作为后续工作，不属于 tracking
+  迁入和仓库切换的完成证据。
 - 目标公开远程：`https://github.com/HowAreAllWell/dog_patrol`
 
 ## 目录
@@ -77,6 +81,8 @@ Apache-2.0。具体范围和许可证副本见 [`LICENSES/README.md`](LICENSES/R
 感知编排模块说明见 [`src/perception/README.md`](src/perception/README.md)。
 tracking 的 portable/Orin 构建、运行和配置说明见
 [`src/perception/dog_patrol_perception_tracking/README.md`](src/perception/dog_patrol_perception_tracking/README.md)。
+旧仓归档、追溯和回退锚点见
+[`docs/perception/tracking/issue15_authoritative_entry_archive.md`](docs/perception/tracking/issue15_authoritative_entry_archive.md)。
 
 ## 协作方式
 

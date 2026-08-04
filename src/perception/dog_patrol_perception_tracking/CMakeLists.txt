@@ -351,6 +351,8 @@ if(BUILD_TESTING)
     target_link_libraries(test_mission_ros_adapter ${PROJECT_NAME}_ros_adapter)
     ament_target_dependencies(test_mission_ros_adapter
       rclcpp dog_patrol_interfaces dog_patrol_perception_interfaces)
+    set_tests_properties(test_mission_ros_adapter PROPERTIES
+      ENVIRONMENT "ROS_DOMAIN_ID=186;ROS_LOCALHOST_ONLY=1")
   endif()
 
   ament_add_gtest(test_target_image_ros_adapter test/test_target_image_ros_adapter.cpp)

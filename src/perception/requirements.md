@@ -52,6 +52,31 @@ face 和 voice 的模型、隐私数据与设备需求要在实现接入时由�
 
 ## 统一环境检查
 
+### Full-runtime 构建和测试
+
+当前感知 Orin 直接从本仓根目录构建，不 source 或引用旧视觉工作区：
+
+```bash
+cd /absolute/path/to/dog_patrol
+source /opt/ros/humble/setup.bash
+colcon build --packages-select \
+  dog_patrol_interfaces dog_patrol_perception_interfaces \
+  dog_patrol_manager \
+  dog_patrol_perception_orchestrator \
+  dog_patrol_perception_tracking \
+  --cmake-args -DTRACKING_ENABLE_ORIN_RUNTIME=ON
+source install/setup.bash
+colcon test --packages-select \
+  dog_patrol_interfaces dog_patrol_perception_interfaces \
+  dog_patrol_manager \
+  dog_patrol_perception_orchestrator \
+  dog_patrol_perception_tracking \
+  --event-handlers console_direct+
+colcon test-result --verbose
+```
+
+### 部署门禁
+
 在仓库根目录运行：
 
 ```bash
@@ -75,6 +100,27 @@ colcon 安装结果、完整 Orin runtime 构建开关、测试结果和上表�
 
 对 `navigation-orin` 的第一次成功检查只证明落在已支持系列；还需将输出中的精确版本
 回填到本文档，经现场验收后才能从“待核验”改为“已核验”。
+
+### 启动完整 tracking runtime
+
+统一检查为 `PASS` 后，从本仓安装产物启动 production standalone tracking；它使用完整 Hik
+camera、TensorRT detector、tracker、semantic identity、primary observation 和异步 crop transport，
+但不要求尚未接入的 face/voice provider、mission supervisor、导航或激光雷达：
+
+```bash
+cd /absolute/path/to/dog_patrol
+source /opt/ros/humble/setup.bash
+source install/setup.bash
+ros2 launch dog_patrol_perception_tracking \
+  dog_patrol_perception_tracking_standalone.launch.py \
+  params_file:=/absolute/path/to/orin_tracking.yaml \
+  tracker_config:=/absolute/path/to/bot_sort.yaml
+```
+
+运行后以 production 节点的 `runtime_monitor` 日志、`ros2 topic hz /perception/tracked_target_image` 和
+`ros2 topic bw /perception/tracked_target_image` 核验相机、推理、tracking FPS 和 crop transport。
+需要 mission 模式时改为运行 `dog_patrol_perception_tracking_node`，并同时启动主仓内的 supervisor
+和 orchestrator；在 face/voice 真实 provider 接入前，感知整体 READY 仍应保持未就绪。
 
 ## Tracking verified baseline
 
