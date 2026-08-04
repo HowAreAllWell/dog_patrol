@@ -63,7 +63,8 @@ class MissionRosAdapter {
   std::optional<MissionSnapshot> PreviousMission() const;
   PrimaryTargetResult CurrentPrimary() const;
 
-  DetectionTrackingReadiness &detection_tracking_readiness();
+  void ReportDetectionTrackingRuntimeStatus(
+      DetectionTrackingReadiness::RuntimeStatus status);
 
   // Call after detector/tracker initialization and periodically while the
   // live loop is running. This publishes only tracking's own current status,

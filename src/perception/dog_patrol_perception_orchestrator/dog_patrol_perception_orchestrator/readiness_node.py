@@ -61,30 +61,29 @@ class PerceptionReadinessNode(Node):
 
     def _on_mission(self, msg: MissionState) -> None:
         with self._lock:
-            action = self._coordinator.observe_mission(
-                int(msg.state_seq), int(msg.state), MissionState.STARTUP
+            ready_startup_seq = self._coordinator.observe_mission(
+                int(msg.state_seq), int(msg.state)
             )
-            self._publish_if_ready(action)
+            self._publish_if_ready(ready_startup_seq)
 
     def _on_capability(self, msg: CapabilityStatus) -> None:
         with self._lock:
-            action = self._coordinator.observe_capability(
+            ready_startup_seq = self._coordinator.observe_capability(
                 CapabilitySample(
                     capability=str(msg.capability),
                     status=int(msg.status),
                     observed_startup_state_seq=int(msg.observed_startup_state_seq),
                     diagnostic=str(msg.diagnostic),
-                ),
-                MissionState.STARTUP,
+                )
             )
-            self._publish_if_ready(action)
+            self._publish_if_ready(ready_startup_seq)
 
-    def _publish_if_ready(self, action: Optional[int]) -> None:
-        if action is None:
+    def _publish_if_ready(self, ready_startup_seq: Optional[int]) -> None:
+        if ready_startup_seq is None:
             return
         msg = MissionEvent()
         msg.header.stamp = self.get_clock().now().to_msg()
-        msg.observed_state_seq = action
+        msg.observed_state_seq = ready_startup_seq
         msg.target_id = 0
         msg.source = MissionEvent.SOURCE_PERCEPTION
         msg.event = MissionEvent.READY

@@ -7,6 +7,7 @@ from typing import Dict, Iterable, Optional, Tuple
 NOT_READY = 0
 READY = 1
 ERROR = 2
+MISSION_STARTUP = 0
 VALID_STATUSES = frozenset((NOT_READY, READY, ERROR))
 UINT32_MASK = (1 << 32) - 1
 UINT32_HALF_RANGE = 1 << 31
@@ -44,7 +45,7 @@ class ReadinessCoordinator:
     def required_capabilities(self) -> Tuple[str, ...]:
         return self._required
 
-    def observe_mission(self, state_seq: int, state: int, startup_state: int) -> Optional[int]:
+    def observe_mission(self, state_seq: int, state: int) -> Optional[int]:
         state_seq = int(state_seq) & UINT32_MASK
         state = int(state)
         if self._mission_seq is not None:
@@ -54,9 +55,9 @@ class ReadinessCoordinator:
                 return None
         self._mission_seq = state_seq
         self._mission_state = state
-        return self._ready_action(startup_state)
+        return self._ready_startup_sequence()
 
-    def observe_capability(self, sample: CapabilitySample, startup_state: int) -> Optional[int]:
+    def observe_capability(self, sample: CapabilitySample) -> Optional[int]:
         if (
             sample.capability not in self._required
             or int(sample.status) not in VALID_STATUSES
@@ -76,10 +77,10 @@ class ReadinessCoordinator:
         ):
             return None
         self._samples[normalized.capability] = normalized
-        return self._ready_action(startup_state)
+        return self._ready_startup_sequence()
 
-    def _ready_action(self, startup_state: int) -> Optional[int]:
-        if self._mission_seq is None or self._mission_state != int(startup_state):
+    def _ready_startup_sequence(self) -> Optional[int]:
+        if self._mission_seq is None or self._mission_state != MISSION_STARTUP:
             return None
         if self._emitted_startup_seq == self._mission_seq:
             return None

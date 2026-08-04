@@ -69,6 +69,9 @@ ready、not-ready 或 error；现有 live node 的 detector/tracker 初始化、
 failure 和 detector/tracker frame-processing exception 会更新它。`MissionRosAdapter` 只在
 当前 `STARTUP state_seq` 将该状态发布为感知内部 `CapabilityStatus`，使用 reliable +
 transient-local QoS；它不再持有其他 capability placeholder，也不发布感知整体 READY。
+若 camera、detector 或 tracker 初始化失败，节点保持运行但不进入 frame pipeline，以便在收到
+STARTUP 后持续发布 ERROR；运行期取帧或 detector/tracker 处理异常也会先发布 ERROR，再等待
+后续帧恢复并重新报告 READY。
 `detection_tracking`、`face`、`voice` 的 required 聚合和每个 STARTUP sequence 的一次性
 `SOURCE_PERCEPTION/READY` 由 `dog_patrol_perception_orchestrator perception_readiness` 拥有。
 

@@ -371,7 +371,7 @@ TEST_F(MissionRosAdapterTest, PublishesOnlyTrackingCapabilityStatusForCurrentSta
   config.target_bbox_topic = "/issue10/capability/perception/selected_target_bbox";
   config.capability_status_topic = "/issue10/capability/perception/capability_status";
   MissionRosAdapter adapter(*adapter_node, config);
-  adapter.detection_tracking_readiness().ReportRuntimeStatus({true, true, {}});
+  adapter.ReportDetectionTrackingRuntimeStatus({true, true, {}});
 
   auto probe = std::make_shared<rclcpp::Node>("mission_ros_adapter_capability_probe");
   auto state_publisher = probe->create_publisher<MissionStateMessage>(
@@ -400,6 +400,14 @@ TEST_F(MissionRosAdapterTest, PublishesOnlyTrackingCapabilityStatusForCurrentSta
   EXPECT_EQ(statuses.front().status, CapabilityStatusMessage::READY);
   EXPECT_EQ(statuses.front().observed_startup_state_seq, 110U);
 
+  adapter.ReportDetectionTrackingRuntimeStatus(
+      {true, true, "tracker runtime stopped accepting frames"});
+  adapter.PublishCapabilityStatus();
+  ASSERT_TRUE(SpinUntil(executor, [&statuses] { return statuses.size() == 2U; }));
+  EXPECT_EQ(statuses.back().status, CapabilityStatusMessage::ERROR);
+  EXPECT_EQ(statuses.back().diagnostic, "tracker runtime stopped accepting frames");
+  EXPECT_EQ(statuses.back().observed_startup_state_seq, 110U);
+
   executor.remove_node(probe);
   executor.remove_node(adapter_node);
   (void)event_subscription;
@@ -413,7 +421,7 @@ TEST_F(MissionRosAdapterTest, HeadlessRosSmokeForReadyTargetAndLossReacquisition
   config.mission_event_topic = "/issue84/smoke/mission/event";
   config.target_bbox_topic = "/issue84/smoke/perception/selected_target_bbox";
   MissionRosAdapter adapter(*adapter_node, config);
-  adapter.detection_tracking_readiness().ReportRuntimeStatus({true, true, {}});
+  adapter.ReportDetectionTrackingRuntimeStatus({true, true, {}});
 
   auto probe = std::make_shared<rclcpp::Node>("mission_ros_adapter_probe");
   auto state_publisher = probe->create_publisher<MissionStateMessage>(

@@ -213,8 +213,10 @@ PrimaryTargetResult MissionRosAdapter::CurrentPrimary() const {
   return frame_transaction_.CurrentPrimary();
 }
 
-DetectionTrackingReadiness &MissionRosAdapter::detection_tracking_readiness() {
-  return detection_tracking_readiness_;
+void MissionRosAdapter::ReportDetectionTrackingRuntimeStatus(
+    DetectionTrackingReadiness::RuntimeStatus status) {
+  std::lock_guard<std::mutex> lock(mission_mutex_);
+  detection_tracking_readiness_.ReportRuntimeStatus(std::move(status));
 }
 
 dog_patrol_interfaces::msg::MissionEvent MissionRosAdapter::EventMessage(

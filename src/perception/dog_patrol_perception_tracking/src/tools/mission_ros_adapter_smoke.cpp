@@ -59,7 +59,7 @@ class MissionRosAdapterSmoke final : public rclcpp::Node {
         std::chrono::duration<double>(get_parameter("smoke.reacquire_retention_sec").as_double()));
     optical_frame_id_ = get_parameter("perception.camera_optical_frame_id").as_string();
     adapter_ = std::make_unique<MissionRosAdapter>(*this, std::move(config));
-    adapter_->detection_tracking_readiness().ReportRuntimeStatus({true, true, {}});
+    adapter_->ReportDetectionTrackingRuntimeStatus({true, true, {}});
     timer_ = create_wall_timer(std::chrono::milliseconds{100}, [this] { Tick(); });
     RCLCPP_INFO(
         get_logger(),

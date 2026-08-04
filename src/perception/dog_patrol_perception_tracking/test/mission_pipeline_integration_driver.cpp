@@ -417,7 +417,7 @@ class MissionPipelineIntegrationDriver final : public rclcpp::Node {
     config.capability_status_topic = "/dog_patrol/integration/perception/capability_status";
     config.primary = PrimaryConfig();
     adapter_ = std::make_unique<MissionRosAdapter>(*this, config);
-    adapter_->detection_tracking_readiness().ReportRuntimeStatus({true, true, {}});
+    adapter_->ReportDetectionTrackingRuntimeStatus({true, true, {}});
 
     external_event_publisher_ =
         create_publisher<MissionEventMessage>(config.mission_event_topic, MissionRosAdapter::MissionEventQos());

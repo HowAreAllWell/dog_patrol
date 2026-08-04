@@ -29,7 +29,7 @@ def volatile_qos(depth=10):
     )
 
 
-def test_late_orchestrator_receives_each_adapters_retained_status_and_emits_once():
+def test_late_orchestrator_applies_retained_adapter_error_and_not_ready_before_recovery():
     rclpy.init()
     suffix = f"t{time.monotonic_ns()}"
     state_topic = f"/issue10/{suffix}/mission/state"
@@ -56,9 +56,17 @@ def test_late_orchestrator_receives_each_adapters_retained_status_and_emits_once
     ):
         status = CapabilityStatus()
         status.capability = capability
-        status.status = CapabilityStatus.READY
+        status.status = (
+            CapabilityStatus.ERROR
+            if capability == "face"
+            else CapabilityStatus.READY
+        )
         status.observed_startup_state_seq = 77
-        status.diagnostic = "test adapter ready"
+        status.diagnostic = (
+            "test face adapter failed"
+            if capability == "face"
+            else "test adapter ready"
+        )
         publisher.publish(status)
 
     orchestrator = PerceptionReadinessNode(
@@ -72,6 +80,28 @@ def test_late_orchestrator_receives_each_adapters_retained_status_and_emits_once
     for node in (provider, probe, orchestrator):
         executor.add_node(node)
     deadline = time.monotonic() + 3.0
+    settle_deadline = time.monotonic() + 0.5
+    while time.monotonic() < settle_deadline:
+        executor.spin_once(timeout_sec=0.05)
+    assert events == []
+
+    face_not_ready = CapabilityStatus()
+    face_not_ready.capability = "face"
+    face_not_ready.status = CapabilityStatus.NOT_READY
+    face_not_ready.observed_startup_state_seq = 77
+    face_not_ready.diagnostic = "test adapter still initializing"
+    status_pubs[1].publish(face_not_ready)
+    settle_deadline = time.monotonic() + 0.25
+    while time.monotonic() < settle_deadline:
+        executor.spin_once(timeout_sec=0.05)
+    assert events == []
+
+    face_ready = CapabilityStatus()
+    face_ready.capability = "face"
+    face_ready.status = CapabilityStatus.READY
+    face_ready.observed_startup_state_seq = 77
+    face_ready.diagnostic = "test adapter ready"
+    status_pubs[1].publish(face_ready)
     while not events and time.monotonic() < deadline:
         executor.spin_once(timeout_sec=0.05)
     for _ in range(5):
