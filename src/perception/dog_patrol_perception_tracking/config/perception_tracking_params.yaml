@@ -54,8 +54,7 @@ dog_patrol_perception_tracking_node:
 
     perception:
       camera_optical_frame_id: "hik_camera_optical_frame"
-      authorization_placeholder_ready: false
-      authorization_placeholder_detail: "authorization capability has not been integrated"
+      capability_status_topic: "/perception/capability_status"
 
     sid:
       feat_bank_size: 30

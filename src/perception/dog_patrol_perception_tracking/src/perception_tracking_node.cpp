@@ -131,12 +131,10 @@ class PerceptionTrackingNode : public rclcpp::Node {
     this->declare_parameter<std::string>("mission.event_topic", "/mission/event");
     this->declare_parameter<std::string>("mission.selected_target_bbox_topic",
                                          "/perception/selected_target_bbox");
+    this->declare_parameter<std::string>("perception.capability_status_topic",
+                                         "/perception/capability_status");
     this->declare_parameter<std::string>("perception.camera_optical_frame_id",
                                          "hik_camera_optical_frame");
-    this->declare_parameter<bool>("perception.authorization_placeholder_ready", false);
-    this->declare_parameter<std::string>(
-        "perception.authorization_placeholder_detail",
-        "authorization capability has not been integrated");
 
     this->declare_parameter<int>("sid.feat_bank_size", identity_defaults.feat_bank_size);
     this->declare_parameter<double>("sid.recover_sim_thresh_strict", identity_defaults.recover_sim_thresh_strict);
@@ -223,13 +221,11 @@ class PerceptionTrackingNode : public rclcpp::Node {
     mission_config.mission_event_topic = this->get_parameter("mission.event_topic").as_string();
     mission_config.target_bbox_topic =
         this->get_parameter("mission.selected_target_bbox_topic").as_string();
+    mission_config.capability_status_topic =
+        this->get_parameter("perception.capability_status_topic").as_string();
     mission_state_callback_group_ = this->create_callback_group(
         rclcpp::CallbackGroupType::MutuallyExclusive);
     mission_config.mission_state_callback_group = mission_state_callback_group_;
-    mission_config.authorization_placeholder_ready =
-        this->get_parameter("perception.authorization_placeholder_ready").as_bool();
-    mission_config.authorization_placeholder_detail =
-        this->get_parameter("perception.authorization_placeholder_detail").as_string();
     mission_config.primary = target_cfg;
     mission_config.coordinator.lost_event_timeout = std::chrono::duration_cast<
         dog_patrol_perception_tracking::MissionCoordinator::Duration>(std::chrono::duration<double>(lost_timeout_sec));
@@ -538,7 +534,7 @@ class PerceptionTrackingNode : public rclcpp::Node {
     // the complete camera/detector/tracker/identity/coordinator chain stays
     // serialized here.
     std::lock_guard<std::mutex> pipeline_lock(pipeline_mutex_);
-    mission_ros_adapter_->PublishReadiness();
+    mission_ros_adapter_->PublishCapabilityStatus();
 
     std::string error;
     dog_patrol_perception_tracking::CameraIngest::AcquiredFrame acquired_frame;

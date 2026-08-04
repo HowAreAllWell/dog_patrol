@@ -8,6 +8,7 @@ endif()
 find_package(ament_cmake REQUIRED)
 find_package(rclcpp REQUIRED)
 find_package(dog_patrol_interfaces REQUIRED)
+find_package(dog_patrol_perception_interfaces REQUIRED)
 find_package(OpenCV REQUIRED)
 option(
   TRACKING_ENABLE_ORIN_RUNTIME
@@ -79,7 +80,8 @@ target_include_directories(${PROJECT_NAME}_ros_adapter PUBLIC
   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
   $<INSTALL_INTERFACE:include>)
 target_compile_features(${PROJECT_NAME}_ros_adapter PUBLIC cxx_std_17)
-ament_target_dependencies(${PROJECT_NAME}_ros_adapter rclcpp dog_patrol_interfaces)
+ament_target_dependencies(${PROJECT_NAME}_ros_adapter
+  rclcpp dog_patrol_interfaces dog_patrol_perception_interfaces)
 target_link_libraries(${PROJECT_NAME}_ros_adapter ${PROJECT_NAME}_core)
 
 # Deterministic, headless transport fixture for the issue #84 deployment
@@ -87,7 +89,8 @@ target_link_libraries(${PROJECT_NAME}_ros_adapter ${PROJECT_NAME}_core)
 # publisher/subscriber drives the same adapter boundary over DDS.
 add_executable(mission_ros_adapter_smoke src/tools/mission_ros_adapter_smoke.cpp)
 target_compile_features(mission_ros_adapter_smoke PUBLIC cxx_std_17)
-ament_target_dependencies(mission_ros_adapter_smoke rclcpp dog_patrol_interfaces)
+ament_target_dependencies(mission_ros_adapter_smoke
+  rclcpp dog_patrol_interfaces dog_patrol_perception_interfaces)
 target_link_libraries(mission_ros_adapter_smoke ${PROJECT_NAME}_ros_adapter)
 
 set(INSTALL_TARGETS
@@ -306,7 +309,8 @@ if(BUILD_TESTING)
     target_compile_features(test_mission_ros_adapter PUBLIC cxx_std_17)
     target_include_directories(test_mission_ros_adapter PRIVATE include)
     target_link_libraries(test_mission_ros_adapter ${PROJECT_NAME}_ros_adapter)
-    ament_target_dependencies(test_mission_ros_adapter rclcpp dog_patrol_interfaces)
+    ament_target_dependencies(test_mission_ros_adapter
+      rclcpp dog_patrol_interfaces dog_patrol_perception_interfaces)
   endif()
 
   add_executable(test_mission_pipeline_integration_driver
@@ -321,7 +325,8 @@ if(BUILD_TESTING)
     target_link_libraries(test_mission_pipeline_integration_driver
       ${PROJECT_NAME}_orin_runtime)
   endif()
-  ament_target_dependencies(test_mission_pipeline_integration_driver rclcpp dog_patrol_interfaces)
+  ament_target_dependencies(test_mission_pipeline_integration_driver
+    rclcpp dog_patrol_interfaces dog_patrol_perception_interfaces)
   add_test(
     NAME test_mission_pipeline_integration
     COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/test/test_mission_pipeline_integration.sh

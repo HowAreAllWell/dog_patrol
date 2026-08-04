@@ -6,26 +6,39 @@
 mission ROS 2 adapter，以及录制和离线评估工具。普通开发和 CI 显式关闭 Orin runtime，
 只构建可移植核心；CUDA、TensorRT、Hik MVS 和 FFmpeg runtime 由 Orin 部署显式开启。
 
-`dog_patrol_perception_orchestrator` 当前只提供 ROS-independent 的感知业务编排：
+`dog_patrol_perception_interfaces` 是感知团队内部 ROS 2 interface package，当前提供
+`CapabilityStatus`：表达 capability 名称、ready/not-ready/error、诊断信息和关联的
+`STARTUP state_seq`。该 topic 使用 reliable + transient-local QoS，使晚启动的 orchestrator
+可以获得各真实 provider 保留的当前状态。
+
+`dog_patrol_perception_orchestrator` 提供 ROS-independent 的感知业务编排和 readiness ROS adapter：
 
 - `AuthorizationCoordinator`：维护与 `state_seq + target_id` 绑定的授权会话；
 - 两轮未通过、立即通过、技术错误、取消和旧会话结果拒绝规则；
 - 不依赖 ROS 2、具体人脸算法或语音算法的纯 Python 测试面。
+- `ReadinessCoordinator`：将 `detection_tracking`、`face`、`voice` 固定为 required capability；
+- `perception_readiness` 节点：只在三者状态都匹配当前 STARTUP sequence 时发布一次
+  `SOURCE_PERCEPTION/READY`。
 
-当前 package 不安装 ROS 节点、console executable 或 launch。后续接入 readiness、真实人脸和语音结果时，由独立 ROS adapter 调用编排核心；检测、跟踪和现有视觉链路保持在感知实现内部。与主状态机交互只使用 `dog_patrol_interfaces`，感知内部的人脸、语音和授权流程不直接暴露给主状态机。
+tracking 只发布自身 `detection_tracking` 状态，不再聚合或发布整体 READY。人脸和语音当前没有
+生产 provider，因此保持 not-ready；测试通过独立 adapter publisher 注入它们的状态。与主状态机
+交互只使用 `dog_patrol_interfaces`，感知内部 capability transport 使用
+`dog_patrol_perception_interfaces`。
 
 ## 构建和测试
 
 ```bash
 source /opt/ros/humble/setup.bash
 colcon build --packages-select \
-  dog_patrol_interfaces dog_patrol_manager \
+  dog_patrol_interfaces dog_patrol_perception_interfaces \
+  dog_patrol_manager \
   dog_patrol_perception_orchestrator \
   dog_patrol_perception_tracking \
   --cmake-args -DTRACKING_ENABLE_ORIN_RUNTIME=OFF
 source install/setup.bash
 colcon test --packages-select \
-  dog_patrol_interfaces dog_patrol_manager \
+  dog_patrol_interfaces dog_patrol_perception_interfaces \
+  dog_patrol_manager \
   dog_patrol_perception_orchestrator \
   dog_patrol_perception_tracking \
   --event-handlers console_direct+

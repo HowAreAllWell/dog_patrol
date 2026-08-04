@@ -27,26 +27,17 @@ MissionRosAdapter::MissionRosAdapter(rclcpp::Node &node, Config config)
       config_(std::move(config)),
       frame_transaction_(config_.primary, config_.coordinator) {
   if (config_.mission_state_topic.empty() || config_.mission_event_topic.empty() ||
-      config_.target_bbox_topic.empty()) {
+      config_.target_bbox_topic.empty() || config_.capability_status_topic.empty()) {
     throw std::invalid_argument("mission ROS topic names must not be empty");
   }
-
-  auto detection_tracking = std::make_unique<DetectionTrackingReadinessContributor>();
-  detection_tracking_readiness_ = detection_tracking.get();
-  readiness_aggregator_.AddRequiredContributor(std::move(detection_tracking));
-  readiness_aggregator_.AddRequiredContributor(std::make_unique<PlaceholderReadinessContributor>(
-      "authorization", "dog_patrol authorization module",
-      "MissionRosAdapter::ReplaceRequiredReadinessContributor(authorization, provider)",
-      config_.authorization_placeholder_ready ? PerceptionReadiness::kReady
-                                              : PerceptionReadiness::kNotReady,
-      config_.authorization_placeholder_detail.empty()
-          ? "authorization capability has not been integrated"
-          : config_.authorization_placeholder_detail));
 
   mission_event_publisher_ = node_.create_publisher<MissionEventMessage>(
       config_.mission_event_topic, MissionEventQos());
   target_bbox_publisher_ = node_.create_publisher<dog_patrol_interfaces::msg::TargetBoundingBox>(
       config_.target_bbox_topic, TargetBoundingBoxQos());
+  capability_status_publisher_ =
+      node_.create_publisher<dog_patrol_perception_interfaces::msg::CapabilityStatus>(
+          config_.capability_status_topic, CapabilityStatusQos());
   rclcpp::SubscriptionOptions mission_state_subscription_options;
   mission_state_subscription_options.callback_group = config_.mission_state_callback_group;
   mission_state_subscription_ = node_.create_subscription<MissionStateMessage>(
@@ -65,6 +56,10 @@ rclcpp::QoS MissionRosAdapter::MissionEventQos() {
 
 rclcpp::QoS MissionRosAdapter::TargetBoundingBoxQos() {
   return rclcpp::QoS(rclcpp::KeepLast{5}).best_effort().durability_volatile();
+}
+
+rclcpp::QoS MissionRosAdapter::CapabilityStatusQos() {
+  return rclcpp::QoS(rclcpp::KeepLast{1}).reliable().transient_local();
 }
 
 std::optional<MissionPhase> MissionRosAdapter::MissionPhaseFromMessage(const std::uint8_t state) {
@@ -218,22 +213,8 @@ PrimaryTargetResult MissionRosAdapter::CurrentPrimary() const {
   return frame_transaction_.CurrentPrimary();
 }
 
-DetectionTrackingReadinessContributor &MissionRosAdapter::detection_tracking_readiness() {
-  if (detection_tracking_readiness_ == nullptr) {
-    throw std::logic_error("detection/tracking readiness contributor is unavailable");
-  }
-  return *detection_tracking_readiness_;
-}
-
-void MissionRosAdapter::AddRequiredReadinessContributor(
-    std::unique_ptr<PerceptionReadinessContributor> contributor) {
-  readiness_aggregator_.AddRequiredContributor(std::move(contributor));
-}
-
-bool MissionRosAdapter::ReplaceRequiredReadinessContributor(
-    std::string capability, std::unique_ptr<PerceptionReadinessContributor> contributor) {
-  return readiness_aggregator_.ReplaceRequiredContributor(std::move(capability),
-                                                           std::move(contributor));
+DetectionTrackingReadiness &MissionRosAdapter::detection_tracking_readiness() {
+  return detection_tracking_readiness_;
 }
 
 dog_patrol_interfaces::msg::MissionEvent MissionRosAdapter::EventMessage(
@@ -261,23 +242,29 @@ dog_patrol_interfaces::msg::MissionEvent MissionRosAdapter::EventMessage(
   return message;
 }
 
-void MissionRosAdapter::PublishReadiness() {
+void MissionRosAdapter::PublishCapabilityStatus() {
   std::lock_guard<std::mutex> lock(mission_mutex_);
-  if (!latest_mission_.has_value()) {
+  if (!latest_mission_.has_value() || latest_mission_->phase != MissionPhase::kStartup) {
     return;
   }
-  const auto output = readiness_aggregator_.Update(latest_mission_.value());
-  if (!output.ready.has_value()) {
-    return;
-  }
-  dog_patrol_interfaces::msg::MissionEvent message;
+  const auto contribution = detection_tracking_readiness_.Contribution();
+  dog_patrol_perception_interfaces::msg::CapabilityStatus message;
   message.header.stamp = node_.get_clock()->now();
-  message.observed_state_seq = output.ready->observed_state_seq;
-  message.target_id = 0U;
-  message.source = MissionEventMessage::SOURCE_PERCEPTION;
-  message.event = MissionEventMessage::READY;
-  message.detail = "aggregate perception readiness: required contributors ready";
-  mission_event_publisher_->publish(message);
+  message.capability = contribution.capability;
+  message.observed_startup_state_seq = latest_mission_->state_seq;
+  message.diagnostic = contribution.detail;
+  switch (contribution.readiness) {
+    case PerceptionReadiness::kNotReady:
+      message.status = dog_patrol_perception_interfaces::msg::CapabilityStatus::NOT_READY;
+      break;
+    case PerceptionReadiness::kReady:
+      message.status = dog_patrol_perception_interfaces::msg::CapabilityStatus::READY;
+      break;
+    case PerceptionReadiness::kFailure:
+      message.status = dog_patrol_perception_interfaces::msg::CapabilityStatus::ERROR;
+      break;
+  }
+  capability_status_publisher_->publish(message);
 }
 
 MissionFrameTransaction::Output MissionRosAdapter::ProcessFrame(

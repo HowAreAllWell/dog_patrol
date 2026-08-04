@@ -11,6 +11,7 @@
 #include <dog_patrol_interfaces/msg/mission_event.hpp>
 #include <dog_patrol_interfaces/msg/mission_state.hpp>
 #include <dog_patrol_interfaces/msg/target_bounding_box.hpp>
+#include <dog_patrol_perception_interfaces/msg/capability_status.hpp>
 #include <rclcpp/executors/single_threaded_executor.hpp>
 #include <rclcpp/executors/multi_threaded_executor.hpp>
 #include <rclcpp/rclcpp.hpp>
@@ -28,13 +29,12 @@ using dog_patrol_perception_tracking::MissionBlockCause;
 using dog_patrol_perception_tracking::MissionCoordinator;
 using dog_patrol_perception_tracking::MissionPhase;
 using dog_patrol_perception_tracking::MissionRosAdapter;
-using dog_patrol_perception_tracking::MutableReadinessContributor;
-using dog_patrol_perception_tracking::PerceptionReadiness;
 using dog_patrol_perception_tracking::SourceFrameMetadata;
 
 using MissionEventMessage = dog_patrol_interfaces::msg::MissionEvent;
 using MissionStateMessage = dog_patrol_interfaces::msg::MissionState;
 using TargetBoundingBoxMessage = dog_patrol_interfaces::msg::TargetBoundingBox;
+using CapabilityStatusMessage = dog_patrol_perception_interfaces::msg::CapabilityStatus;
 
 MissionStateMessage State(const std::uint32_t sequence, const std::uint8_t phase,
                           const std::uint32_t target_id = 0U, const bool blocked = false,
@@ -363,23 +363,27 @@ TEST_F(MissionRosAdapterTest, TreatsAnOffImageIdentityAsMissingForTargetLoss) {
   (void)bbox_subscription;
 }
 
-TEST_F(MissionRosAdapterTest, ExplicitAuthorizationConfigurationAllowsReady) {
-  auto adapter_node = std::make_shared<rclcpp::Node>("mission_ros_adapter_explicit_authorization");
+TEST_F(MissionRosAdapterTest, PublishesOnlyTrackingCapabilityStatusForCurrentStartup) {
+  auto adapter_node = std::make_shared<rclcpp::Node>("mission_ros_adapter_capability_status");
   MissionRosAdapter::Config config;
-  config.mission_state_topic = "/issue84/explicit_authorization/mission/state";
-  config.mission_event_topic = "/issue84/explicit_authorization/mission/event";
-  config.target_bbox_topic = "/issue84/explicit_authorization/perception/selected_target_bbox";
-  config.authorization_placeholder_ready = true;
+  config.mission_state_topic = "/issue10/capability/mission/state";
+  config.mission_event_topic = "/issue10/capability/mission/event";
+  config.target_bbox_topic = "/issue10/capability/perception/selected_target_bbox";
+  config.capability_status_topic = "/issue10/capability/perception/capability_status";
   MissionRosAdapter adapter(*adapter_node, config);
   adapter.detection_tracking_readiness().ReportRuntimeStatus({true, true, {}});
 
-  auto probe = std::make_shared<rclcpp::Node>("mission_ros_adapter_explicit_authorization_probe");
+  auto probe = std::make_shared<rclcpp::Node>("mission_ros_adapter_capability_probe");
   auto state_publisher = probe->create_publisher<MissionStateMessage>(
       config.mission_state_topic, MissionRosAdapter::MissionStateQos());
   std::vector<MissionEventMessage> events;
+  std::vector<CapabilityStatusMessage> statuses;
   auto event_subscription = probe->create_subscription<MissionEventMessage>(
       config.mission_event_topic, MissionRosAdapter::MissionEventQos(),
       [&events](const MissionEventMessage::SharedPtr message) { events.push_back(*message); });
+  auto status_subscription = probe->create_subscription<CapabilityStatusMessage>(
+      config.capability_status_topic, MissionRosAdapter::CapabilityStatusQos(),
+      [&statuses](const CapabilityStatusMessage::SharedPtr message) { statuses.push_back(*message); });
 
   rclcpp::executors::SingleThreadedExecutor executor;
   executor.add_node(adapter_node);
@@ -389,14 +393,17 @@ TEST_F(MissionRosAdapterTest, ExplicitAuthorizationConfigurationAllowsReady) {
     const auto mission = adapter.CurrentMission();
     return mission.has_value() && mission->state_seq == 110U;
   }));
-  adapter.PublishReadiness();
-  ASSERT_TRUE(SpinUntil(executor, [&events] { return events.size() == 1U; }));
-  EXPECT_EQ(events.front().event, MissionEventMessage::READY);
-  EXPECT_EQ(events.front().observed_state_seq, 110U);
+  adapter.PublishCapabilityStatus();
+  ASSERT_TRUE(SpinUntil(executor, [&statuses] { return statuses.size() == 1U; }));
+  EXPECT_TRUE(events.empty());
+  EXPECT_EQ(statuses.front().capability, "detection_tracking");
+  EXPECT_EQ(statuses.front().status, CapabilityStatusMessage::READY);
+  EXPECT_EQ(statuses.front().observed_startup_state_seq, 110U);
 
   executor.remove_node(probe);
   executor.remove_node(adapter_node);
   (void)event_subscription;
+  (void)status_subscription;
 }
 
 TEST_F(MissionRosAdapterTest, HeadlessRosSmokeForReadyTargetAndLossReacquisition) {
@@ -429,18 +436,9 @@ TEST_F(MissionRosAdapterTest, HeadlessRosSmokeForReadyTargetAndLossReacquisition
     const auto mission = adapter.CurrentMission();
     return mission.has_value() && mission->state_seq == 100U;
   }));
-  adapter.PublishReadiness();
+  adapter.PublishCapabilityStatus();
   executor.spin_some();
   EXPECT_TRUE(events.empty());
-  ASSERT_TRUE(adapter.ReplaceRequiredReadinessContributor(
-      "authorization", std::make_unique<MutableReadinessContributor>(
-                           "authorization", PerceptionReadiness::kReady,
-                           "authorization runtime ready")));
-  adapter.PublishReadiness();
-  ASSERT_TRUE(SpinUntil(executor, [&events] { return events.size() == 1U; }));
-  EXPECT_EQ(events.front().event, MissionEventMessage::READY);
-  EXPECT_EQ(events.front().observed_state_seq, 100U);
-  EXPECT_EQ(events.front().source, MissionEventMessage::SOURCE_PERCEPTION);
 
   state_publisher->publish(State(101U, MissionStateMessage::PATROL));
   ASSERT_TRUE(SpinUntil(executor, [&adapter] {
@@ -451,7 +449,7 @@ TEST_F(MissionRosAdapterTest, HeadlessRosSmokeForReadyTargetAndLossReacquisition
   const auto source_time = MissionCoordinator::TimePoint{};
   adapter.ProcessFrame({trusted}, source_time, Metadata(1710000000000000000ULL));
   EXPECT_TRUE(boxes.empty());
-  ASSERT_TRUE(SpinUntil(executor, [&events] { return events.size() == 2U; }));
+  ASSERT_TRUE(SpinUntil(executor, [&events] { return events.size() == 1U; }));
   EXPECT_EQ(events.back().event, MissionEventMessage::TARGET_CONFIRMED);
   EXPECT_EQ(events.back().target_id, 42U);
 
@@ -468,7 +466,7 @@ TEST_F(MissionRosAdapterTest, HeadlessRosSmokeForReadyTargetAndLossReacquisition
 
   adapter.ProcessFrame({}, source_time + std::chrono::milliseconds{500},
                        Metadata(1710000000600000000ULL));
-  ASSERT_TRUE(SpinUntil(executor, [&events] { return events.size() == 3U; }));
+  ASSERT_TRUE(SpinUntil(executor, [&events] { return events.size() == 2U; }));
   EXPECT_EQ(events.back().event, MissionEventMessage::TARGET_LOST);
   EXPECT_EQ(events.back().target_id, 42U);
   EXPECT_EQ(events.back().observed_state_seq, 102U);
@@ -481,7 +479,7 @@ TEST_F(MissionRosAdapterTest, HeadlessRosSmokeForReadyTargetAndLossReacquisition
   }));
   adapter.ProcessFrame({trusted}, source_time + std::chrono::milliseconds{600},
                        Metadata(1710000000700000000ULL));
-  ASSERT_TRUE(SpinUntil(executor, [&events] { return events.size() == 4U; }));
+  ASSERT_TRUE(SpinUntil(executor, [&events] { return events.size() == 3U; }));
   EXPECT_EQ(events.back().event, MissionEventMessage::TARGET_REACQUIRED);
   EXPECT_EQ(events.back().target_id, 42U);
   EXPECT_EQ(events.back().observed_state_seq, 103U);

@@ -21,8 +21,6 @@ using dog_patrol_perception_tracking::MissionCoordinator;
 using dog_patrol_perception_tracking::MissionPhase;
 using dog_patrol_perception_tracking::MissionRosAdapter;
 using dog_patrol_perception_tracking::MissionSnapshot;
-using dog_patrol_perception_tracking::MutableReadinessContributor;
-using dog_patrol_perception_tracking::PerceptionReadiness;
 using dog_patrol_perception_tracking::SourceFrameMetadata;
 
 constexpr int kSmokeSemanticId = 42;
@@ -62,14 +60,6 @@ class MissionRosAdapterSmoke final : public rclcpp::Node {
     optical_frame_id_ = get_parameter("perception.camera_optical_frame_id").as_string();
     adapter_ = std::make_unique<MissionRosAdapter>(*this, std::move(config));
     adapter_->detection_tracking_readiness().ReportRuntimeStatus({true, true, {}});
-    const bool authorization_replaced = adapter_->ReplaceRequiredReadinessContributor(
-        "authorization", std::make_unique<MutableReadinessContributor>(
-                             "authorization", PerceptionReadiness::kReady,
-                             "independent issue #84 smoke authorization provider"));
-    if (!authorization_replaced) {
-      throw std::runtime_error("failed to install smoke authorization provider");
-    }
-
     timer_ = create_wall_timer(std::chrono::milliseconds{100}, [this] { Tick(); });
     RCLCPP_INFO(
         get_logger(),
@@ -90,7 +80,7 @@ class MissionRosAdapterSmoke final : public rclcpp::Node {
   void Tick() {
     source_offset_ns_ += 100000000ULL;
     source_time_ += std::chrono::milliseconds{100};
-    adapter_->PublishReadiness();
+    adapter_->PublishCapabilityStatus();
 
     const std::optional<MissionSnapshot> mission = adapter_->CurrentMission();
     if (!mission.has_value()) {

@@ -17,6 +17,7 @@
 #include <dog_patrol_interfaces/msg/mission_event.hpp>
 #include <dog_patrol_interfaces/msg/mission_state.hpp>
 #include <dog_patrol_interfaces/msg/target_bounding_box.hpp>
+#include <dog_patrol_perception_interfaces/msg/capability_status.hpp>
 #include <rclcpp/executors/single_threaded_executor.hpp>
 #include <rclcpp/rclcpp.hpp>
 
@@ -39,9 +40,7 @@ using dog_patrol_perception_tracking::MissionFrameTransaction;
 using dog_patrol_perception_tracking::MissionPhase;
 using dog_patrol_perception_tracking::MissionRosAdapter;
 using dog_patrol_perception_tracking::MissionSnapshot;
-using dog_patrol_perception_tracking::MutableReadinessContributor;
 using dog_patrol_perception_tracking::PerceptionMissionEvent;
-using dog_patrol_perception_tracking::PerceptionReadiness;
 using dog_patrol_perception_tracking::PrimaryState;
 using dog_patrol_perception_tracking::PrimaryTargetManager;
 using dog_patrol_perception_tracking::SourceFrameMetadata;
@@ -49,6 +48,7 @@ using dog_patrol_perception_tracking::SourceFrameMetadata;
 using MissionEventMessage = dog_patrol_interfaces::msg::MissionEvent;
 using MissionStateMessage = dog_patrol_interfaces::msg::MissionState;
 using TargetBoundingBoxMessage = dog_patrol_interfaces::msg::TargetBoundingBox;
+using CapabilityStatusMessage = dog_patrol_perception_interfaces::msg::CapabilityStatus;
 
 constexpr int kFirstSemanticId = 42;
 constexpr int kNextSemanticId = 99;
@@ -414,18 +414,15 @@ class MissionPipelineIntegrationDriver final : public rclcpp::Node {
     config.mission_state_topic = "/dog_patrol/integration/mission/state";
     config.mission_event_topic = "/dog_patrol/integration/mission/event";
     config.target_bbox_topic = "/dog_patrol/integration/perception/selected_target_bbox";
+    config.capability_status_topic = "/dog_patrol/integration/perception/capability_status";
     config.primary = PrimaryConfig();
     adapter_ = std::make_unique<MissionRosAdapter>(*this, config);
     adapter_->detection_tracking_readiness().ReportRuntimeStatus({true, true, {}});
-    if (!adapter_->ReplaceRequiredReadinessContributor(
-            "authorization", std::make_unique<MutableReadinessContributor>(
-                                 "authorization", PerceptionReadiness::kReady,
-                                 "mission contract integration authorization provider"))) {
-      throw std::runtime_error("failed to replace authorization readiness contributor");
-    }
 
     external_event_publisher_ =
         create_publisher<MissionEventMessage>(config.mission_event_topic, MissionRosAdapter::MissionEventQos());
+    capability_status_publisher_ = create_publisher<CapabilityStatusMessage>(
+        config.capability_status_topic, MissionRosAdapter::CapabilityStatusQos());
     event_subscription_ = create_subscription<MissionEventMessage>(
         config.mission_event_topic, MissionRosAdapter::MissionEventQos(),
         [this](const MissionEventMessage::SharedPtr message) { events_.push_back(*message); });
@@ -634,6 +631,16 @@ class MissionPipelineIntegrationDriver final : public rclcpp::Node {
     external_event_publisher_->publish(message);
   }
 
+  void PublishTestCapability(const MissionSnapshot &mission, const std::string &capability) {
+    CapabilityStatusMessage message;
+    message.header.stamp = get_clock()->now();
+    message.capability = capability;
+    message.status = CapabilityStatusMessage::READY;
+    message.diagnostic = "mission integration test adapter ready";
+    message.observed_startup_state_seq = mission.state_seq;
+    capability_status_publisher_->publish(message);
+  }
+
   std::size_t EventCount(const std::uint8_t event, const int target_id,
                          const std::optional<std::uint8_t> source = std::nullopt) const {
     std::size_t count = 0U;
@@ -668,7 +675,9 @@ class MissionPipelineIntegrationDriver final : public rclcpp::Node {
         external_event_publisher_->get_subscription_count() < 1U) {
       return;
     }
-    adapter_->PublishReadiness();
+    adapter_->PublishCapabilityStatus();
+    PublishTestCapability(mission, "face");
+    PublishTestCapability(mission, "voice");
     PublishExternalEvent(mission, MissionEventMessage::SOURCE_NAVIGATION, MissionEventMessage::READY, 0);
     Advance(Stage::kWaitFirstPatrol);
   }
@@ -965,6 +974,7 @@ class MissionPipelineIntegrationDriver final : public rclcpp::Node {
   MissionEvidence evidence_;
   std::unique_ptr<MissionRosAdapter> adapter_;
   rclcpp::Publisher<MissionEventMessage>::SharedPtr external_event_publisher_;
+  rclcpp::Publisher<CapabilityStatusMessage>::SharedPtr capability_status_publisher_;
   rclcpp::Subscription<MissionEventMessage>::SharedPtr event_subscription_;
   rclcpp::Subscription<TargetBoundingBoxMessage>::SharedPtr bbox_subscription_;
   std::vector<MissionEventMessage> events_;

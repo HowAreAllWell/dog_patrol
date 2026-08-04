@@ -28,7 +28,8 @@ jobs:
         run: |
           source /opt/ros/humble/setup.bash
           colcon build --packages-select \
-            dog_patrol_interfaces dog_patrol_manager \
+            dog_patrol_interfaces dog_patrol_perception_interfaces \
+            dog_patrol_manager \
             dog_patrol_perception_orchestrator \
             dog_patrol_perception_tracking \
             --cmake-args -DTRACKING_ENABLE_ORIN_RUNTIME=OFF
@@ -39,7 +40,8 @@ jobs:
           source /opt/ros/humble/setup.bash
           source install/setup.bash
           colcon test --packages-select \
-            dog_patrol_interfaces dog_patrol_manager \
+            dog_patrol_interfaces dog_patrol_perception_interfaces \
+            dog_patrol_manager \
             dog_patrol_perception_orchestrator \
             dog_patrol_perception_tracking \
             --event-handlers console_direct+
