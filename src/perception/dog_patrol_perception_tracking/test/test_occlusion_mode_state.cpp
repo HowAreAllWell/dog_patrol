@@ -2,7 +2,7 @@
 
 #include "occlusion_mode_state.hpp"
 
-namespace vision_demo_host {
+namespace dog_patrol_perception_tracking {
 namespace {
 
 OcclusionModeState::Config DefaultConfig() {
@@ -123,4 +123,4 @@ TEST(OcclusionModeStateTest, FreezeTracksMergedSplitAndOverlapStates) {
 }
 
 }  // namespace
-}  // namespace vision_demo_host
+}  // namespace dog_patrol_perception_tracking

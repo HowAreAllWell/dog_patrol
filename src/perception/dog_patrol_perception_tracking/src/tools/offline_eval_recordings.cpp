@@ -4,14 +4,14 @@
 #include <string>
 #include <vector>
 
-#include "vision_demo_host/modules/perception_config_materializer.hpp"
-#include "vision_demo_host/tools/identity_offline_metrics.hpp"
-#include "vision_demo_host/tools/offline_eval_schema.hpp"
-#include "vision_demo_host/tools/offline_replay_run.hpp"
+#include "dog_patrol_perception_tracking/modules/perception_config_materializer.hpp"
+#include "dog_patrol_perception_tracking/tools/identity_offline_metrics.hpp"
+#include "dog_patrol_perception_tracking/tools/offline_eval_schema.hpp"
+#include "dog_patrol_perception_tracking/tools/offline_replay_run.hpp"
 
 namespace {
 
-using PerceptionConfigMaterializer = vision_demo_host::PerceptionConfigMaterializer;
+using PerceptionConfigMaterializer = dog_patrol_perception_tracking::PerceptionConfigMaterializer;
 
 struct Options {
   std::filesystem::path recordings_root{"data/captures"};
@@ -22,7 +22,7 @@ struct Options {
   float det_raw_conf_threshold{0.10F};
   float det_person_conf_threshold{0.10F};
   float det_car_conf_threshold{0.10F};
-  std::string tracker_config_path{"/path/to/my_workplace/vision_demo_ws/src/vision_demo_host/config/bot_sort.yaml"};
+  std::string tracker_config_path{"/path/to/my_workplace/vision_demo_ws/src/dog_patrol_perception_tracking/config/bot_sort.yaml"};
   bool tracker_gmc_enabled{PerceptionConfigMaterializer::TrackerInput{}.gmc_enabled};
   std::string tracker_reid_backend{PerceptionConfigMaterializer::kDefaultReidBackend};
   std::string tracker_reid_model_path{};
@@ -169,10 +169,10 @@ void PrintUsage() {
       << "  --sid-reid-input-height <n>            (default: "
       << defaults.sid_reid_input_height << ")\n"
       << "  --help\n\n"
-      << vision_demo_host::tools::PerFrameCsvHelp() << "\n"
-      << vision_demo_host::tools::TrackletHypothesesCsvHelp() << "\n"
-      << vision_demo_host::tools::Phase3ShadowStateCsvHelp() << "\n"
-      << vision_demo_host::tools::IdentityOfflineMetricsHelp();
+      << dog_patrol_perception_tracking::tools::PerFrameCsvHelp() << "\n"
+      << dog_patrol_perception_tracking::tools::TrackletHypothesesCsvHelp() << "\n"
+      << dog_patrol_perception_tracking::tools::Phase3ShadowStateCsvHelp() << "\n"
+      << dog_patrol_perception_tracking::tools::IdentityOfflineMetricsHelp();
 }
 
 bool ParseBool(const std::string &v, bool *out) {
@@ -636,7 +636,7 @@ int main(int argc, char **argv) {
     return 0;
   }
 
-  vision_demo_host::tools::OfflineReplayRun::Request request;
+  dog_patrol_perception_tracking::tools::OfflineReplayRun::Request request;
   request.recordings_root = opt.recordings_root;
   request.results_root = opt.results_root;
   request.run_name = opt.run_name;
@@ -691,6 +691,6 @@ int main(int argc, char **argv) {
   request.identity.reid_input_width = opt.sid_reid_input_width;
   request.identity.reid_input_height = opt.sid_reid_input_height;
 
-  const auto result = vision_demo_host::tools::OfflineReplayRun::Run(request);
+  const auto result = dog_patrol_perception_tracking::tools::OfflineReplayRun::Run(request);
   return result.exit_code;
 }

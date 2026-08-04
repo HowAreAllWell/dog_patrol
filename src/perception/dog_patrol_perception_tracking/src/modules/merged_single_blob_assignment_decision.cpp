@@ -2,7 +2,7 @@
 
 #include <algorithm>
 
-namespace vision_demo_host {
+namespace dog_patrol_perception_tracking {
 
 MergedSingleBlobAssignmentDecision::Result MergedSingleBlobAssignmentDecision::Decide(
     const Input &input,
@@ -102,4 +102,4 @@ MergedSingleBlobAssignmentDecision::Result MergedSingleBlobAssignmentDecision::D
   return result;
 }
 
-}  // namespace vision_demo_host
+}  // namespace dog_patrol_perception_tracking

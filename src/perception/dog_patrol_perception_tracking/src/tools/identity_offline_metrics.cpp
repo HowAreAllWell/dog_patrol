@@ -1,4 +1,4 @@
-#include "vision_demo_host/tools/identity_offline_metrics.hpp"
+#include "dog_patrol_perception_tracking/tools/identity_offline_metrics.hpp"
 
 #include "identity_observation_projection.hpp"
 
@@ -8,7 +8,7 @@
 #include <string>
 #include <vector>
 
-namespace vision_demo_host::tools {
+namespace dog_patrol_perception_tracking::tools {
 namespace {
 
 constexpr const char *kPerFrameCsv = "per_frame.csv";
@@ -465,4 +465,4 @@ std::string IdentityOfflineMetricsHelp() {
       "  Phase 4 handoff event counts, and tracklet hypothesis status/reason distributions.\n";
 }
 
-}  // namespace vision_demo_host::tools
+}  // namespace dog_patrol_perception_tracking::tools

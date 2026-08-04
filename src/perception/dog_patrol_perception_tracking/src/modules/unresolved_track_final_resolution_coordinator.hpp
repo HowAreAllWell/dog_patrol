@@ -7,9 +7,9 @@
 
 #include "birth_manager.hpp"
 #include "identity_runtime_record.hpp"
-#include "vision_demo_host/types.hpp"
+#include "dog_patrol_perception_tracking/types.hpp"
 
-namespace vision_demo_host {
+namespace dog_patrol_perception_tracking {
 
 class UnresolvedTrackFinalResolutionCoordinator {
  public:
@@ -71,4 +71,4 @@ class UnresolvedTrackFinalResolutionCoordinator {
   static Result Resolve(const Input &input);
 };
 
-}  // namespace vision_demo_host
+}  // namespace dog_patrol_perception_tracking

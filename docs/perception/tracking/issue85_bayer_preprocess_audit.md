@@ -160,13 +160,13 @@ headless pipeline 或退出。
 source /opt/ros/humble/setup.bash
 source install/setup.bash
 
-ros2 run vision_demo_host benchmark_bayer_input \
+ros2 run dog_patrol_perception_tracking benchmark_bayer_input \
   --output-dir data/audit/issue85_bayer_identical_20260730_161800 \
   --detector-engine assets/models/engines/orin_jp621_trt_local/yolo26n_fp16_640.engine \
   --mvs-model MV-CU013-A0UC --mvs-serial CAMERA_SERIAL \
   --warmup-frames 30 --frames 60 --width 1280 --height 1024 --fps 30
 
-ros2 run vision_demo_host benchmark_bayer_input \
+ros2 run dog_patrol_perception_tracking benchmark_bayer_input \
   --output-dir data/audit/issue85_synthetic_people_20260731_002000 \
   --input-video data/datasets/orin_hik_h264_MOT/03/video.mp4 \
   --detector-engine assets/models/engines/orin_jp621_trt_local/yolo26n_fp16_640.engine \
@@ -188,12 +188,12 @@ SHA-256 分别为
 `issue85_synthetic_balanced_20260731_001703`、`issue85_synthetic_optimal_plus_20260731_001707`）：
 
 ```bash
-ros2 run vision_demo_host offline_eval_recordings \
+ros2 run dog_patrol_perception_tracking offline_eval_recordings \
   --video data/audit/issue85_synthetic_people_20260731_002000/bayer_${mode}/video.mkv \
   --results-root data/eval_results --run-name issue85_synthetic_${mode}_rerun \
   --detector-engine assets/models/engines/orin_jp621_trt_local/yolo26n_fp16_640.engine \
   --det-raw-conf 0.10 --det-person-conf 0.10 --det-car-conf 0.10 \
-  --tracker-config src/vision_demo_host/config/bot_sort.yaml \
+  --tracker-config src/dog_patrol_perception_tracking/config/bot_sort.yaml \
   --tracker-reid-backend light --tracker-reid-input-width 128 --tracker-reid-input-height 256 \
   --save-frame-csv true --save-sid-scores true --save-tracks-csv true \
   --overlay-preview false --overlay-record false
@@ -213,7 +213,7 @@ WS_DIR="$PWD" MVS_MODEL=MV-CU013-A0UC MVS_SERIAL=CAMERA_SERIAL \
 CAMERA_WIDTH=1280 CAMERA_HEIGHT=1024 CAMERA_FPS=30.0 \
 BAYER_INTERPOLATION=balanced BAYER_SMOOTHING=false RUN_SECONDS=35 \
 OUT_DIR="$PWD/log/issue85_balanced_live_20260731_002300" \
-"$PWD/src/vision_demo_host/scripts/bench_hik_mvs_camera.sh"
+"$PWD/src/dog_patrol_perception_tracking/scripts/bench_hik_mvs_camera.sh"
 ```
 
 核对 `summary.txt` 的 `BayerGB8` / `0x0108000a`、982 frames、0 acquisition failure / 0 MVS lost

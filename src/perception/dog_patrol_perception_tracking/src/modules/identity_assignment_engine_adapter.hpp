@@ -6,11 +6,11 @@
 
 #include <opencv2/core/mat.hpp>
 
-#include "vision_demo_host/modules/appearance_feature_service.hpp"
-#include "vision_demo_host/modules/feature_geometry_update_state.hpp"
-#include "vision_demo_host/modules/feature_update_policy.hpp"
-#include "vision_demo_host/modules/reliable_geometry_cost.hpp"
-#include "vision_demo_host/types.hpp"
+#include "dog_patrol_perception_tracking/modules/appearance_feature_service.hpp"
+#include "dog_patrol_perception_tracking/modules/feature_geometry_update_state.hpp"
+#include "dog_patrol_perception_tracking/modules/feature_update_policy.hpp"
+#include "dog_patrol_perception_tracking/modules/reliable_geometry_cost.hpp"
+#include "dog_patrol_perception_tracking/types.hpp"
 #include "assignment_candidate_builder.hpp"
 #include "birth_manager.hpp"
 #include "birth_candidate_store.hpp"
@@ -22,7 +22,7 @@
 #include "raw_semantic_binding_store.hpp"
 #include "semantic_id_allocator.hpp"
 
-namespace vision_demo_host {
+namespace dog_patrol_perception_tracking {
 
 class IdentityAssignmentFrameTransaction;
 
@@ -182,4 +182,4 @@ class IdentityAssignmentEngineAdapter {
   bool initialized_{false};
 };
 
-}  // namespace vision_demo_host
+}  // namespace dog_patrol_perception_tracking

@@ -11,7 +11,7 @@ CAMERA_FPS="${CAMERA_FPS:-30.0}"
 BAYER_INTERPOLATION="${BAYER_INTERPOLATION:-fast}"
 BAYER_SMOOTHING="${BAYER_SMOOTHING:-false}"
 ENGINE_PATH="${ENGINE_PATH:-${WS_DIR}/assets/models/engines/orin_jp621_trt_local/yolo26n_fp16_640.engine}"
-TRACKER_CONFIG="${TRACKER_CONFIG:-${WS_DIR}/src/vision_demo_host/config/bot_sort.yaml}"
+TRACKER_CONFIG="${TRACKER_CONFIG:-${WS_DIR}/src/dog_patrol_perception_tracking/config/bot_sort.yaml}"
 RUN_SECONDS="${RUN_SECONDS:-60}"
 OUT_DIR="${OUT_DIR:-${WS_DIR}/log/bench_hik_mvs_camera}"
 
@@ -53,7 +53,7 @@ fi
 echo "[bench] running Hik MVS live inference for ${RUN_SECONDS}s; recording disabled"
 set +e
 timeout --signal=INT "${RUN_SECONDS}s" \
-  ros2 run vision_demo_host vision_demo_node --ros-args "${ROS_ARGS[@]}" \
+  ros2 run dog_patrol_perception_tracking dog_patrol_perception_tracking_node --ros-args "${ROS_ARGS[@]}" \
   2>&1 | tee "$LOG_FILE"
 status=${PIPESTATUS[0]}
 set -e

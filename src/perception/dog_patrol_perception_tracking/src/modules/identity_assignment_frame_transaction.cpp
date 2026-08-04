@@ -17,7 +17,7 @@
 #include "raw_continuity_decision.hpp"
 #include "unresolved_track_final_resolution_coordinator.hpp"
 
-namespace vision_demo_host {
+namespace dog_patrol_perception_tracking {
 namespace {
 
 bool AssociationEvidenceWeakForIdentity(const AssociationEvidence &association) {
@@ -505,4 +505,4 @@ IdentityAssignmentFrameTransaction::Result IdentityAssignmentFrameTransaction::E
   return result;
 }
 
-}  // namespace vision_demo_host
+}  // namespace dog_patrol_perception_tracking

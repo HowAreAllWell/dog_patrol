@@ -5,8 +5,8 @@
 #include <sstream>
 #include <string>
 
-#include "vision_demo_host/modules/perception_config_materializer.hpp"
-#include "vision_demo_host/tools/offline_replay_run.hpp"
+#include "dog_patrol_perception_tracking/modules/perception_config_materializer.hpp"
+#include "dog_patrol_perception_tracking/tools/offline_replay_run.hpp"
 
 namespace {
 
@@ -31,13 +31,13 @@ class OfflineReplayRunTest : public ::testing::Test {
 };
 
 TEST_F(OfflineReplayRunTest, WritesRunArtifactsWhenInputValidationFailsBeforeInference) {
-  vision_demo_host::tools::OfflineReplayRun::Request request;
+  dog_patrol_perception_tracking::tools::OfflineReplayRun::Request request;
   request.recordings_root = root_ / "captures";
   request.results_root = root_ / "results";
   request.run_name = "artifact";
   request.datasets = {"missing_take"};
 
-  const auto result = vision_demo_host::tools::OfflineReplayRun::Run(request);
+  const auto result = dog_patrol_perception_tracking::tools::OfflineReplayRun::Run(request);
 
   EXPECT_EQ(result.exit_code, 1);
   EXPECT_FALSE(result.all_ok);
@@ -62,13 +62,13 @@ TEST_F(OfflineReplayRunTest, RejectsResultDirectoryInsideSourceBeforeCreatingRun
   const auto source_dir = root_ / "captures" / "take_001";
   std::filesystem::create_directories(source_dir);
 
-  vision_demo_host::tools::OfflineReplayRun::Request request;
+  dog_patrol_perception_tracking::tools::OfflineReplayRun::Request request;
   request.recordings_root = root_ / "captures";
   request.results_root = source_dir / "results";
   request.run_name = "preflight";
   request.datasets = {"take_001"};
 
-  const auto result = vision_demo_host::tools::OfflineReplayRun::Run(request);
+  const auto result = dog_patrol_perception_tracking::tools::OfflineReplayRun::Run(request);
 
   EXPECT_EQ(result.exit_code, 2);
   EXPECT_FALSE(result.all_ok);
@@ -76,9 +76,9 @@ TEST_F(OfflineReplayRunTest, RejectsResultDirectoryInsideSourceBeforeCreatingRun
 }
 
 TEST_F(OfflineReplayRunTest, RequestDefaultsUsePerceptionMaterializerInputs) {
-  const vision_demo_host::tools::OfflineReplayRun::Request request;
-  const vision_demo_host::PerceptionConfigMaterializer::TrackerInput tracker_defaults;
-  const vision_demo_host::PerceptionConfigMaterializer::IdentityInput identity_defaults;
+  const dog_patrol_perception_tracking::tools::OfflineReplayRun::Request request;
+  const dog_patrol_perception_tracking::PerceptionConfigMaterializer::TrackerInput tracker_defaults;
+  const dog_patrol_perception_tracking::PerceptionConfigMaterializer::IdentityInput identity_defaults;
 
   EXPECT_EQ(request.tracker.gmc_enabled, tracker_defaults.gmc_enabled);
   EXPECT_EQ(request.tracker.reid_backend, tracker_defaults.reid_backend);

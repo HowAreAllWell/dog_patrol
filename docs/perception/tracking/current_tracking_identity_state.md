@@ -6,7 +6,7 @@
 
 ## 1. 当前主链路
 
-当前运行主链路在 `src/vision_demo_host/src/main.cpp` 中组织，大致为：
+当前运行主链路在 `src/dog_patrol_perception_tracking/src/perception_tracking_node.cpp` 中组织，大致为：
 
 ```text
 camera_ingest

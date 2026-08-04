@@ -7,7 +7,7 @@
 #include "identity_assignment_engine_adapter.hpp"
 #include "phase4_direct_apply_helper.hpp"
 
-namespace vision_demo_host {
+namespace dog_patrol_perception_tracking {
 
 class IdentityRuntimeMutationApplier {
  public:
@@ -77,4 +77,4 @@ class IdentityRuntimeMutationApplier {
   AppearanceFeatureService *appearance_features_{nullptr};
 };
 
-}  // namespace vision_demo_host
+}  // namespace dog_patrol_perception_tracking

@@ -7,7 +7,7 @@
 
 #include "identity_assignment_engine_adapter.hpp"
 
-namespace vision_demo_host {
+namespace dog_patrol_perception_tracking {
 
 // Owns the ordered decisions and mutations for one prepared identity frame.
 // The adapter remains responsible for frame preparation and public accessors.
@@ -46,4 +46,4 @@ class IdentityAssignmentFrameTransaction {
   static Result Execute(const Input &input);
 };
 
-}  // namespace vision_demo_host
+}  // namespace dog_patrol_perception_tracking

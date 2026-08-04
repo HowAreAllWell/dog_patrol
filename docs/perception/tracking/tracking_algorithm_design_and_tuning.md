@@ -39,7 +39,7 @@ CameraIngest
 
 ## 3. Detector 层
 
-关键参数在 `config/demo_params.yaml`：
+关键参数在 `config/perception_tracking_params.yaml`：
 
 - `detector.raw_conf_threshold`
 - `detector.person_conf_threshold`
@@ -64,7 +64,7 @@ CameraIngest
 配置入口：
 
 ```text
-src/vision_demo_host/config/bot_sort.yaml
+src/dog_patrol_perception_tracking/config/bot_sort.yaml
 ```
 
 核心思想：
@@ -190,7 +190,7 @@ hidden candidate 的规则：
 ```bash
 REID_MODEL="/path/to/my_workplace/vision_demo_ws/assets/models/reid/osnet_x1_0_market1501_256x128.onnx"
 
-ros2 run vision_demo_host vision_demo_node --ros-args \
+ros2 run dog_patrol_perception_tracking dog_patrol_perception_tracking_node --ros-args \
   -p tracker.reid_backend:=osnet_onnx \
   -p tracker.reid_model_path:="$REID_MODEL" \
   -p sid.reid_backend:=osnet_onnx \
@@ -236,7 +236,7 @@ ros2 run vision_demo_host vision_demo_node --ros-args \
 2. 只改一组参数，记录改动原因。
 3. 先看视频叠字 ID，再看 mission event/bbox 中的 `target_id`。
 4. 再看 FPS 和资源占用。
-5. 通过后把参数写回 `config/demo_params.yaml` 或单独保存现场配置。
+5. 通过后把参数写回 `config/perception_tracking_params.yaml` 或单独保存现场配置。
 
 不要同时改 detector、tracker、identity、primary 四层，否则无法判断收益和副作用来自哪里。
 

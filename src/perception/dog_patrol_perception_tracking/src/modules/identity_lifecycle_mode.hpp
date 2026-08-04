@@ -2,7 +2,7 @@
 
 #include <string>
 
-namespace vision_demo_host {
+namespace dog_patrol_perception_tracking {
 
 enum class IdentityLifecycleMode {
   kNormal,
@@ -13,4 +13,4 @@ enum class IdentityLifecycleMode {
 
 std::string IdentityLifecycleModeToString(IdentityLifecycleMode mode);
 
-}  // namespace vision_demo_host
+}  // namespace dog_patrol_perception_tracking

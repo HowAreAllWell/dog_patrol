@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.8)
-project(vision_demo_host)
+project(dog_patrol_perception_tracking)
 
 if(CMAKE_COMPILER_IS_GNUCXX OR CMAKE_CXX_COMPILER_ID MATCHES "Clang")
   add_compile_options(-Wall -Wextra -Wpedantic)
@@ -149,7 +149,7 @@ if(TRACKING_ENABLE_ORIN_RUNTIME)
     ${TENSORRT_INCLUDE_DIR})
   target_include_directories(${PROJECT_NAME}_orin_runtime PRIVATE ${MVS_INCLUDE_DIR})
   target_compile_features(${PROJECT_NAME}_orin_runtime PUBLIC cxx_std_17)
-  target_compile_definitions(${PROJECT_NAME}_orin_runtime PRIVATE VISION_DEMO_HOST_ENABLE_HIK_MVS=1)
+  target_compile_definitions(${PROJECT_NAME}_orin_runtime PRIVATE DOG_PATROL_PERCEPTION_TRACKING_ENABLE_HIK_MVS=1)
   target_link_libraries(${PROJECT_NAME}_orin_runtime PUBLIC
     ${PROJECT_NAME}_core ${TENSORRT_LIB} CUDA::cudart ${MVS_LIB})
   set_property(TARGET ${PROJECT_NAME}_orin_runtime APPEND PROPERTY BUILD_RPATH "${MVS_LIB_DIR}")
@@ -176,10 +176,10 @@ if(TRACKING_ENABLE_ORIN_RUNTIME)
   target_link_libraries(${PROJECT_NAME}_offline_runtime PUBLIC
     ${PROJECT_NAME}_core ${PROJECT_NAME}_orin_runtime)
 
-  add_executable(vision_demo_node src/main.cpp)
-  target_compile_features(vision_demo_node PUBLIC cxx_std_17)
-  ament_target_dependencies(vision_demo_node rclcpp dog_patrol_interfaces)
-  target_link_libraries(vision_demo_node
+  add_executable(dog_patrol_perception_tracking_node src/perception_tracking_node.cpp)
+  target_compile_features(dog_patrol_perception_tracking_node PUBLIC cxx_std_17)
+  ament_target_dependencies(dog_patrol_perception_tracking_node rclcpp dog_patrol_interfaces)
+  target_link_libraries(dog_patrol_perception_tracking_node
     ${PROJECT_NAME}_core
     ${PROJECT_NAME}_ros_adapter
     ${PROJECT_NAME}_orin_runtime
@@ -204,7 +204,7 @@ if(TRACKING_ENABLE_ORIN_RUNTIME)
     ${PROJECT_NAME}_orin_runtime
     ${PROJECT_NAME}_recording
     ${PROJECT_NAME}_offline_runtime
-    vision_demo_node
+    dog_patrol_perception_tracking_node
     capture_ffv1
     offline_eval_recordings
     benchmark_bayer_input)
@@ -233,7 +233,7 @@ if(BUILD_TESTING)
     add_test(
       NAME test_retired_media_cli
       COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/test/test_retired_media_cli.sh
-              $<TARGET_FILE:vision_demo_node>
+              $<TARGET_FILE:dog_patrol_perception_tracking_node>
               $<TARGET_FILE:offline_eval_recordings>)
 
     ament_add_gtest(test_camera_ingest_contract test/test_camera_ingest_contract.cpp)
@@ -317,7 +317,7 @@ if(BUILD_TESTING)
     ${PROJECT_NAME}_core ${PROJECT_NAME}_ros_adapter)
   if(TRACKING_ENABLE_ORIN_RUNTIME)
     target_compile_definitions(test_mission_pipeline_integration_driver PRIVATE
-      VISION_DEMO_HOST_ENABLE_ORIN_RUNTIME=1)
+      DOG_PATROL_PERCEPTION_TRACKING_ENABLE_ORIN_RUNTIME=1)
     target_link_libraries(test_mission_pipeline_integration_driver
       ${PROJECT_NAME}_orin_runtime)
   endif()

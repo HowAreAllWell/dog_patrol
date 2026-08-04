@@ -3,17 +3,17 @@
 
 #include <gtest/gtest.h>
 
-#include "vision_demo_host/modules/perception_readiness.hpp"
+#include "dog_patrol_perception_tracking/modules/perception_readiness.hpp"
 
 namespace {
 
-using vision_demo_host::DetectionTrackingReadinessContributor;
-using vision_demo_host::MissionPhase;
-using vision_demo_host::MissionSnapshot;
-using vision_demo_host::MutableReadinessContributor;
-using vision_demo_host::PerceptionReadiness;
-using vision_demo_host::PerceptionReadinessAggregator;
-using vision_demo_host::PlaceholderReadinessContributor;
+using dog_patrol_perception_tracking::DetectionTrackingReadinessContributor;
+using dog_patrol_perception_tracking::MissionPhase;
+using dog_patrol_perception_tracking::MissionSnapshot;
+using dog_patrol_perception_tracking::MutableReadinessContributor;
+using dog_patrol_perception_tracking::PerceptionReadiness;
+using dog_patrol_perception_tracking::PerceptionReadinessAggregator;
+using dog_patrol_perception_tracking::PlaceholderReadinessContributor;
 
 MissionSnapshot StartupMission(const std::uint32_t state_seq) {
   MissionSnapshot mission;

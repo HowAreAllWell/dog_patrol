@@ -1,6 +1,6 @@
 #include "active_assignment_input_collector.hpp"
 
-namespace vision_demo_host {
+namespace dog_patrol_perception_tracking {
 
 ActiveAssignmentInputCollector::Result ActiveAssignmentInputCollector::Collect(const Input &input) {
   Result result;
@@ -85,4 +85,4 @@ ActiveAssignmentInputCollector::Result ActiveAssignmentInputCollector::Collect(c
   return result;
 }
 
-}  // namespace vision_demo_host
+}  // namespace dog_patrol_perception_tracking

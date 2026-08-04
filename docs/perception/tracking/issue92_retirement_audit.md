@@ -19,7 +19,7 @@
 - live node 不声明或读取 `bearing.*`、`udp.*` 参数，也不创建 socket、估算方位或发送 JSON。
 - `offline_eval_recordings` 不再接受 `--enable-udp`、`--udp-ip`、`--udp-port`，也不生成 bearing
   overlay、per-frame CSV 字段或 summary 指标。已移除的选项会按未知命令行参数失败。
-- 删除 `config/demo_params.yaml` 的 bearing/UDP 配置、`live_bearing_test.sh` 和
+- 删除 `config/perception_tracking_params.yaml` 的 bearing/UDP 配置、`live_bearing_test.sh` 和
   `docs/downstream_bearing_udp.md`。
 
 ## Search Boundary
@@ -28,12 +28,12 @@
 
 ```bash
 rg -n -i "udp|bearing|Detection2DArray|vision_msgs" \
-  README.md docs src/vision_demo_host --glob '!worklog.md'
+  README.md docs src/dog_patrol_perception_tracking --glob '!worklog.md'
 ```
 
 允许的剩余命中只用于明确退役结论或历史追溯：
 
-- `README.md` 和 `src/vision_demo_host/README.md`：明确声明旧面不受支持；
+- `README.md` 和 `src/dog_patrol_perception_tracking/README.md`：明确声明旧面不受支持；
 - 本文档：审计结论；
 - `docs/tracking_identity_refactor_plan.md`：2026-06-30 标记为草案的重构历史；
 - `docs/orin_hik_h264_MOT_01_02_issue_resolution.md`：2026-06-24 的历史问题复盘；

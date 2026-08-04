@@ -2,7 +2,7 @@
 
 #include "identity_runtime_record_lifecycle.hpp"
 
-namespace vision_demo_host {
+namespace dog_patrol_perception_tracking {
 namespace {
 
 Track MakeTrack(const int raw_id, const cv::Rect2f &bbox, const float confidence = 0.85F) {
@@ -147,4 +147,4 @@ TEST(IdentityRuntimeRecordLifecycleTest, BuildsSnapshotWithActiveBBoxAndReliable
 }
 
 }  // namespace
-}  // namespace vision_demo_host
+}  // namespace dog_patrol_perception_tracking

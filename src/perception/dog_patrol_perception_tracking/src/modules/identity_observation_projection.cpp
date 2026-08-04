@@ -2,7 +2,7 @@
 
 #include <algorithm>
 
-namespace vision_demo_host {
+namespace dog_patrol_perception_tracking {
 namespace {
 
 const IdentityManager::ScoreDebugRow *FindBestDebugRow(
@@ -219,4 +219,4 @@ std::string TargetLifecycleToString(const IdentityObservationProjection::TargetL
   return "LostIdentity";
 }
 
-}  // namespace vision_demo_host
+}  // namespace dog_patrol_perception_tracking

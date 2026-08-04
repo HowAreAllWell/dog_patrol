@@ -1,8 +1,8 @@
-#include "vision_demo_host/modules/feature_geometry_update_state.hpp"
+#include "dog_patrol_perception_tracking/modules/feature_geometry_update_state.hpp"
 
 #include <algorithm>
 
-namespace vision_demo_host {
+namespace dog_patrol_perception_tracking {
 namespace {
 
 cv::Point2f BBoxCenter(const cv::Rect2f &bbox) {
@@ -49,4 +49,4 @@ void FeatureGeometryUpdateState::Apply(const FeatureUpdatePolicy::Decision &deci
   }
 }
 
-}  // namespace vision_demo_host
+}  // namespace dog_patrol_perception_tracking

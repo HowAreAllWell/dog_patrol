@@ -1,4 +1,4 @@
-#include "vision_demo_host/modules/mot_tracker.hpp"
+#include "dog_patrol_perception_tracking/modules/mot_tracker.hpp"
 
 #include <opencv2/calib3d.hpp>
 #include <opencv2/imgproc.hpp>
@@ -16,11 +16,11 @@
 #include <utility>
 #include <vector>
 
-#include "vision_demo_host/modules/association_utils.hpp"
+#include "dog_patrol_perception_tracking/modules/association_utils.hpp"
 
 #include "mot_tracker_observability.hpp"
 
-namespace vision_demo_host {
+namespace dog_patrol_perception_tracking {
 namespace {
 
 constexpr float kLargeCost = 1e6F;
@@ -1900,4 +1900,4 @@ std::vector<Track> MotTracker::Update(const std::vector<Detection> &detections, 
   return UpdateNewCore(detections, frame);
 }
 
-}  // namespace vision_demo_host
+}  // namespace dog_patrol_perception_tracking

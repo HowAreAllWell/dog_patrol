@@ -9,21 +9,21 @@
 
 #include <rclcpp/rclcpp.hpp>
 
-#include "vision_demo_host/modules/mission_ros_adapter.hpp"
+#include "dog_patrol_perception_tracking/modules/mission_ros_adapter.hpp"
 
 namespace {
 
-using vision_demo_host::ClassId;
-using vision_demo_host::IdentityObservation;
-using vision_demo_host::IdentityState;
-using vision_demo_host::MissionBlockCause;
-using vision_demo_host::MissionCoordinator;
-using vision_demo_host::MissionPhase;
-using vision_demo_host::MissionRosAdapter;
-using vision_demo_host::MissionSnapshot;
-using vision_demo_host::MutableReadinessContributor;
-using vision_demo_host::PerceptionReadiness;
-using vision_demo_host::SourceFrameMetadata;
+using dog_patrol_perception_tracking::ClassId;
+using dog_patrol_perception_tracking::IdentityObservation;
+using dog_patrol_perception_tracking::IdentityState;
+using dog_patrol_perception_tracking::MissionBlockCause;
+using dog_patrol_perception_tracking::MissionCoordinator;
+using dog_patrol_perception_tracking::MissionPhase;
+using dog_patrol_perception_tracking::MissionRosAdapter;
+using dog_patrol_perception_tracking::MissionSnapshot;
+using dog_patrol_perception_tracking::MutableReadinessContributor;
+using dog_patrol_perception_tracking::PerceptionReadiness;
+using dog_patrol_perception_tracking::SourceFrameMetadata;
 
 constexpr int kSmokeSemanticId = 42;
 constexpr int kSmokeRawTrackId = 7;

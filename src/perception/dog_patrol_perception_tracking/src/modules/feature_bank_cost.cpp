@@ -1,9 +1,9 @@
-#include "vision_demo_host/modules/feature_bank_cost.hpp"
+#include "dog_patrol_perception_tracking/modules/feature_bank_cost.hpp"
 
 #include <algorithm>
 #include <cmath>
 
-namespace vision_demo_host {
+namespace dog_patrol_perception_tracking {
 
 float FeatureBankCost::CosineDistance(const std::vector<float> &query,
                                       const std::vector<float> &reference) {
@@ -40,4 +40,4 @@ float FeatureBankCost::AppearanceCost(const std::vector<float> &query,
   return std::clamp(best, 0.0F, 1.0F);
 }
 
-}  // namespace vision_demo_host
+}  // namespace dog_patrol_perception_tracking

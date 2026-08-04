@@ -7,7 +7,7 @@
 
 namespace {
 
-using vision_demo_host::InactiveRecoverySolver;
+using dog_patrol_perception_tracking::InactiveRecoverySolver;
 
 InactiveRecoverySolver::TrackInput TrackInput(const int row) {
   InactiveRecoverySolver::TrackInput track;

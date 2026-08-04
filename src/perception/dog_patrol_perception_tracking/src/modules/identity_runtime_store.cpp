@@ -4,7 +4,7 @@
 
 #include "identity_runtime_record_lifecycle.hpp"
 
-namespace vision_demo_host {
+namespace dog_patrol_perception_tracking {
 
 void IdentityRuntimeStore::Reset() { identities_by_semantic_id_.clear(); }
 
@@ -107,4 +107,4 @@ std::vector<IdentityRuntimeSnapshot> IdentityRuntimeStore::Snapshots() const {
   return snapshots;
 }
 
-}  // namespace vision_demo_host
+}  // namespace dog_patrol_perception_tracking

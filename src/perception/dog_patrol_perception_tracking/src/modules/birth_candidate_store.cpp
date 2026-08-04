@@ -1,6 +1,6 @@
 #include "birth_candidate_store.hpp"
 
-namespace vision_demo_host {
+namespace dog_patrol_perception_tracking {
 
 int BirthCandidateStore::UpdateObservation(const int raw_track_id, const int frame_index) {
   Candidate &candidate = candidates_by_raw_id_[raw_track_id];
@@ -20,4 +20,4 @@ void BirthCandidateStore::Clear() {
   candidates_by_raw_id_.clear();
 }
 
-}  // namespace vision_demo_host
+}  // namespace dog_patrol_perception_tracking

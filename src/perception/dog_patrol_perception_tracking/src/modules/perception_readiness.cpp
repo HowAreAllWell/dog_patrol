@@ -1,10 +1,10 @@
-#include "vision_demo_host/modules/perception_readiness.hpp"
+#include "dog_patrol_perception_tracking/modules/perception_readiness.hpp"
 
 #include <algorithm>
 #include <stdexcept>
 #include <utility>
 
-namespace vision_demo_host {
+namespace dog_patrol_perception_tracking {
 namespace {
 
 void ValidateCapabilityName(const std::string &capability) {
@@ -145,4 +145,4 @@ std::vector<PerceptionReadinessContribution> PerceptionReadinessAggregator::Requ
   return contributions;
 }
 
-}  // namespace vision_demo_host
+}  // namespace dog_patrol_perception_tracking

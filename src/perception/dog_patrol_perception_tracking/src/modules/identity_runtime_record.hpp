@@ -2,10 +2,10 @@
 
 #include <opencv2/core/types.hpp>
 
-#include "vision_demo_host/modules/feature_geometry_update_state.hpp"
-#include "vision_demo_host/types.hpp"
+#include "dog_patrol_perception_tracking/modules/feature_geometry_update_state.hpp"
+#include "dog_patrol_perception_tracking/types.hpp"
 
-namespace vision_demo_host {
+namespace dog_patrol_perception_tracking {
 
 struct IdentityRuntimeRecord {
   int semantic_id{-1};
@@ -23,4 +23,4 @@ struct IdentityRuntimeRecord {
   float confidence{0.0F};
 };
 
-}  // namespace vision_demo_host
+}  // namespace dog_patrol_perception_tracking

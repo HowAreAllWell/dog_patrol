@@ -1,4 +1,4 @@
-#include "vision_demo_host/modules/camera_ingest.hpp"
+#include "dog_patrol_perception_tracking/modules/camera_ingest.hpp"
 
 #include <algorithm>
 #include <chrono>
@@ -14,11 +14,11 @@
 
 #include <opencv2/imgproc.hpp>
 
-#ifdef VISION_DEMO_HOST_ENABLE_HIK_MVS
+#ifdef DOG_PATROL_PERCEPTION_TRACKING_ENABLE_HIK_MVS
 #include <MvCameraControl.h>
 #endif
 
-namespace vision_demo_host {
+namespace dog_patrol_perception_tracking {
 namespace {
 
 using SteadyClock = std::chrono::steady_clock;
@@ -34,7 +34,7 @@ bool Fail(std::string *error, const std::string &message) {
   return false;
 }
 
-#ifdef VISION_DEMO_HOST_ENABLE_HIK_MVS
+#ifdef DOG_PATROL_PERCEPTION_TRACKING_ENABLE_HIK_MVS
 
 constexpr unsigned int kSupportedTransportLayers =
     MV_GIGE_DEVICE | MV_USB_DEVICE | MV_GENTL_CAMERALINK_DEVICE | MV_GENTL_CXP_DEVICE |
@@ -133,7 +133,7 @@ struct CameraIngest::Impl {
     camera_lost_packets = 0;
   }
 
-#ifdef VISION_DEMO_HOST_ENABLE_HIK_MVS
+#ifdef DOG_PATROL_PERCEPTION_TRACKING_ENABLE_HIK_MVS
   void *mvs_handle{nullptr};
   bool mvs_sdk_initialized{false};
   bool mvs_grabbing{false};
@@ -232,7 +232,7 @@ CameraIngest::CameraIngest() : impl_(std::make_unique<Impl>()) {}
 CameraIngest::~CameraIngest() { Close(); }
 
 void CameraIngest::Close() {
-#ifdef VISION_DEMO_HOST_ENABLE_HIK_MVS
+#ifdef DOG_PATROL_PERCEPTION_TRACKING_ENABLE_HIK_MVS
   impl_->ResetMvs();
 #endif
 }
@@ -388,7 +388,7 @@ bool CameraIngest::Open(const Config &config, std::string *error) {
   config_ = config;
   impl_->ResetMetrics();
 
-#ifndef VISION_DEMO_HOST_ENABLE_HIK_MVS
+#ifndef DOG_PATROL_PERCEPTION_TRACKING_ENABLE_HIK_MVS
   return Fail(error, "This build does not include the Hik MVS SDK.");
 #else
   const int init_ret = MV_CC_Initialize();
@@ -524,7 +524,7 @@ bool CameraIngest::Read(AcquiredFrame *frame, std::string *error) {
   }
   *frame = AcquiredFrame{};
 
-#ifndef VISION_DEMO_HOST_ENABLE_HIK_MVS
+#ifndef DOG_PATROL_PERCEPTION_TRACKING_ENABLE_HIK_MVS
   return Fail(error, "This build does not include the Hik MVS SDK.");
 #else
   if (impl_->mvs_handle == nullptr || !impl_->mvs_grabbing) {
@@ -652,4 +652,4 @@ CameraIngest::MetricsSnapshot CameraIngest::Metrics() const {
   return result;
 }
 
-}  // namespace vision_demo_host
+}  // namespace dog_patrol_perception_tracking

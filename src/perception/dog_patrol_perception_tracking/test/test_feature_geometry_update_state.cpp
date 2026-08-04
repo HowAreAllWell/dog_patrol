@@ -1,8 +1,8 @@
 #include <gtest/gtest.h>
 
-#include "vision_demo_host/modules/feature_geometry_update_state.hpp"
+#include "dog_patrol_perception_tracking/modules/feature_geometry_update_state.hpp"
 
-namespace vision_demo_host {
+namespace dog_patrol_perception_tracking {
 namespace {
 
 FeatureUpdatePolicy::Decision AllowAllUpdates() {
@@ -153,4 +153,4 @@ TEST(FeatureGeometryUpdateStateTest, ForceGeometryStyleDecisionUpdatesGeometryWi
 }
 
 }  // namespace
-}  // namespace vision_demo_host
+}  // namespace dog_patrol_perception_tracking

@@ -2,11 +2,11 @@
 
 #include <string>
 
-#include "vision_demo_host/modules/perception_config_materializer.hpp"
+#include "dog_patrol_perception_tracking/modules/perception_config_materializer.hpp"
 
 namespace {
 
-using vision_demo_host::PerceptionConfigMaterializer;
+using dog_patrol_perception_tracking::PerceptionConfigMaterializer;
 
 }  // namespace
 

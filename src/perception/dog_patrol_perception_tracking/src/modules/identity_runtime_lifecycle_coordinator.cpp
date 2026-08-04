@@ -1,6 +1,6 @@
 #include "identity_runtime_lifecycle_coordinator.hpp"
 
-namespace vision_demo_host {
+namespace dog_patrol_perception_tracking {
 
 void IdentityRuntimeLifecycleCoordinator::ApplyEndFrameAging(const EndFrameInput &input) {
   if (input.identity_store == nullptr) {
@@ -9,4 +9,4 @@ void IdentityRuntimeLifecycleCoordinator::ApplyEndFrameAging(const EndFrameInput
   input.identity_store->AgeOneFrame();
 }
 
-}  // namespace vision_demo_host
+}  // namespace dog_patrol_perception_tracking

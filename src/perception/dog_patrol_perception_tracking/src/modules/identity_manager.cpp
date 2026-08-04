@@ -1,4 +1,4 @@
-#include "vision_demo_host/modules/identity_manager.hpp"
+#include "dog_patrol_perception_tracking/modules/identity_manager.hpp"
 
 #include <algorithm>
 #include <map>
@@ -15,7 +15,7 @@
 #include "phase4_handoff_coordinator.hpp"
 #include "phase5_birth_coordinator.hpp"
 
-namespace vision_demo_host {
+namespace dog_patrol_perception_tracking {
 namespace {
 
 IdentityAssignmentEngineAdapter::Config ToAdapterConfig(const IdentityManager::Config &config) {
@@ -662,4 +662,4 @@ std::string IdentityModeToString(const IdentityManager::Mode mode) {
   }
 }
 
-}  // namespace vision_demo_host
+}  // namespace dog_patrol_perception_tracking

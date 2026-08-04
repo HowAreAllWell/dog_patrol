@@ -1,6 +1,6 @@
 #include "inactive_recovery_input_collector.hpp"
 
-namespace vision_demo_host {
+namespace dog_patrol_perception_tracking {
 
 InactiveRecoveryInputCollector::Result InactiveRecoveryInputCollector::Collect(const Input &input) {
   Result result;
@@ -84,4 +84,4 @@ InactiveRecoveryInputCollector::Result InactiveRecoveryInputCollector::Collect(c
   return result;
 }
 
-}  // namespace vision_demo_host
+}  // namespace dog_patrol_perception_tracking

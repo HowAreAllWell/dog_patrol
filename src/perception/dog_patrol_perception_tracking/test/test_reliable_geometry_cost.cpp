@@ -2,11 +2,11 @@
 
 #include <opencv2/core/types.hpp>
 
-#include "vision_demo_host/modules/reliable_geometry_cost.hpp"
+#include "dog_patrol_perception_tracking/modules/reliable_geometry_cost.hpp"
 
 namespace {
 
-using vision_demo_host::ReliableGeometryCost;
+using dog_patrol_perception_tracking::ReliableGeometryCost;
 
 ReliableGeometryCost::State StateWithLatest(const cv::Rect2f &bbox) {
   ReliableGeometryCost::State state;

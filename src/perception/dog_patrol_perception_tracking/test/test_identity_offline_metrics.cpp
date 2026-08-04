@@ -4,8 +4,8 @@
 #include <fstream>
 #include <string>
 
-#include "vision_demo_host/tools/identity_offline_metrics.hpp"
-#include "vision_demo_host/tools/offline_eval_schema.hpp"
+#include "dog_patrol_perception_tracking/tools/identity_offline_metrics.hpp"
+#include "dog_patrol_perception_tracking/tools/offline_eval_schema.hpp"
 
 namespace {
 
@@ -26,7 +26,7 @@ void WriteText(const std::filesystem::path &path, const std::string &text) {
 TEST(IdentityOfflineMetricsTest, AggregatesIdentityAcceptanceDistributionsFromDebugCsvs) {
   const std::filesystem::path dir = MakeTempDir("vision_demo_identity_metrics_full");
   WriteText(dir / "per_frame.csv",
-            vision_demo_host::tools::PerFrameCsvHeader() +
+            dog_patrol_perception_tracking::tools::PerFrameCsvHeader() +
                 "\n"
                 "0,2,1,LOCKED,1,10,NORMAL,0,1,locked_primary,,,\n"
                 "1,2,1,PENDING_RECOVERY,1,-1,MERGED,1,1,pending_recovery_from_identity_state,"
@@ -42,7 +42,7 @@ TEST(IdentityOfflineMetricsTest, AggregatesIdentityAcceptanceDistributionsFromDe
             "missing_appearance_gate_reject\n"
             "1,3,LOST,0,12,0,0.10,1,2,3,4,12,0,0,0,0,,0,\n");
   WriteText(dir / "sid_scores.csv",
-            vision_demo_host::tools::SidScoresCsvHeader() +
+            dog_patrol_perception_tracking::tools::SidScoresCsvHeader() +
                 "\n"
                 "1,NORMAL,0,10,1,0.1,0.2,0.0,0.3,assign_candidate,1,0.2,1,,1,1,1,allowed_update,"
                 "allowed_update\n"
@@ -50,7 +50,7 @@ TEST(IdentityOfflineMetricsTest, AggregatesIdentityAcceptanceDistributionsFromDe
                 "small_new_person_pending,0,0,0,update_blocked_by_rejected_assignment,"
                 "insufficient_stable_frames\n");
   WriteText(dir / "phase3_shadow_state.csv",
-            vision_demo_host::tools::Phase3ShadowStateCsvHeader() +
+            dog_patrol_perception_tracking::tools::Phase3ShadowStateCsvHeader() +
                 "\n"
                 "1,0,split_candidate_enter,4,1|2,1,10,11,-1,0.850000,1,2,3,4,duplicate_split_hidden,10,"
                 "split_candidate,1,2,1,0.1,0.2,0.0,0.3,0.4,1,0,,,,,,,,\n"
@@ -60,12 +60,12 @@ TEST(IdentityOfflineMetricsTest, AggregatesIdentityAcceptanceDistributionsFromDe
                 "pairwise_appearance_override,10,tracked,3,2,1,0.1,0.2,0.0,0.3,0.4,1,1,1-10,2-11,"
                 "0.3,0.6,0.1,0.5,0.3,1\n");
   WriteText(dir / "tracklet_hypotheses.csv",
-            vision_demo_host::tools::TrackletHypothesesCsvHeader() +
+            dog_patrol_perception_tracking::tools::TrackletHypothesesCsvHeader() +
                 "\n"
                 "1,0,split_candidate,11,0,0.850000,1,2,3,4,duplicate_output_hidden,10,high_iou,0.2,0.8,"
                 "0.1,0.2,1,0,duplicate_output_hidden\n");
 
-  const auto metrics = vision_demo_host::tools::BuildIdentityOfflineMetrics(dir, "synthetic");
+  const auto metrics = dog_patrol_perception_tracking::tools::BuildIdentityOfflineMetrics(dir, "synthetic");
 
   EXPECT_TRUE(metrics.inputs.at("per_frame.csv").available);
   EXPECT_EQ(metrics.primary_state_counts.at("LOCKED"), 1);
@@ -91,7 +91,7 @@ TEST(IdentityOfflineMetricsTest, AggregatesIdentityAcceptanceDistributionsFromDe
   EXPECT_EQ(metrics.tracklet_hypothesis_reason_counts.at("duplicate_output_hidden"), 1);
 
   std::string error;
-  EXPECT_TRUE(vision_demo_host::tools::WriteIdentityOfflineMetricsFiles(dir, metrics, &error)) << error;
+  EXPECT_TRUE(dog_patrol_perception_tracking::tools::WriteIdentityOfflineMetricsFiles(dir, metrics, &error)) << error;
   EXPECT_TRUE(std::filesystem::exists(dir / "identity_metrics.json"));
   EXPECT_TRUE(std::filesystem::exists(dir / "identity_metrics.md"));
 }
@@ -99,11 +99,11 @@ TEST(IdentityOfflineMetricsTest, AggregatesIdentityAcceptanceDistributionsFromDe
 TEST(IdentityOfflineMetricsTest, MarksMissingOptionalDebugInputsUnavailable) {
   const std::filesystem::path dir = MakeTempDir("vision_demo_identity_metrics_missing");
   WriteText(dir / "per_frame.csv",
-            vision_demo_host::tools::PerFrameCsvHeader() +
+            dog_patrol_perception_tracking::tools::PerFrameCsvHeader() +
                 "\n"
                 "0,0,0,OCCLUDED,-1,-1,NORMAL,0,,no_primary_identity,,,\n");
 
-  const auto metrics = vision_demo_host::tools::BuildIdentityOfflineMetrics(dir, "minimal");
+  const auto metrics = dog_patrol_perception_tracking::tools::BuildIdentityOfflineMetrics(dir, "minimal");
 
   EXPECT_TRUE(metrics.inputs.at("per_frame.csv").available);
   EXPECT_FALSE(metrics.inputs.at("identities.csv").available);

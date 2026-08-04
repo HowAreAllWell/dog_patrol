@@ -2,9 +2,9 @@
 
 #include <algorithm>
 
-#include "vision_demo_host/modules/association_utils.hpp"
+#include "dog_patrol_perception_tracking/modules/association_utils.hpp"
 
-namespace vision_demo_host {
+namespace dog_patrol_perception_tracking {
 namespace {
 
 std::vector<float> FeatureForTrack(const std::vector<int> &person_track_indices,
@@ -191,4 +191,4 @@ UnresolvedTrackFinalResolutionCoordinator::Resolve(const Input &input) {
   return result;
 }
 
-}  // namespace vision_demo_host
+}  // namespace dog_patrol_perception_tracking

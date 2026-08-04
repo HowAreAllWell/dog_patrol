@@ -7,7 +7,7 @@
 #include <unordered_set>
 #include <utility>
 
-#include "vision_demo_host/modules/association_utils.hpp"
+#include "dog_patrol_perception_tracking/modules/association_utils.hpp"
 #include "active_assignment_solver.hpp"
 #include "assignment_cost.hpp"
 #include "assignment_candidate_builder.hpp"
@@ -16,7 +16,7 @@
 #include "identity_runtime_record_lifecycle.hpp"
 #include "merged_single_blob_assignment_decision.hpp"
 
-namespace vision_demo_host {
+namespace dog_patrol_perception_tracking {
 namespace {
 
 constexpr float kBigCost = ActiveAssignmentSolver::kBigCost;
@@ -691,4 +691,4 @@ int IdentityAssignmentEngineAdapter::SemanticIdForRawTrack(const int raw_track_i
   return runtime_state_->raw_semantic_bindings.SemanticIdForRawTrack(raw_track_id);
 }
 
-}  // namespace vision_demo_host
+}  // namespace dog_patrol_perception_tracking

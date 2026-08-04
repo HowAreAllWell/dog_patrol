@@ -2,10 +2,10 @@
 
 #include <algorithm>
 
-#include "vision_demo_host/modules/feature_bank_cost.hpp"
-#include "vision_demo_host/modules/reliable_geometry_cost.hpp"
+#include "dog_patrol_perception_tracking/modules/feature_bank_cost.hpp"
+#include "dog_patrol_perception_tracking/modules/reliable_geometry_cost.hpp"
 
-namespace vision_demo_host {
+namespace dog_patrol_perception_tracking {
 namespace {
 
 ReliableGeometryCost::State ReliableGeometryState(const IdentityRuntimeRecord &identity) {
@@ -39,4 +39,4 @@ AssignmentCost::Result AssignmentCost::Compute(const Track &track,
   return result;
 }
 
-}  // namespace vision_demo_host
+}  // namespace dog_patrol_perception_tracking

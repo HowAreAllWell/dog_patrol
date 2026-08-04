@@ -2,7 +2,7 @@
 
 #include <unordered_set>
 
-namespace vision_demo_host {
+namespace dog_patrol_perception_tracking {
 
 class SemanticIdAllocator {
  public:
@@ -13,4 +13,4 @@ class SemanticIdAllocator {
   int next_non_primary_semantic_id_{2};
 };
 
-}  // namespace vision_demo_host
+}  // namespace dog_patrol_perception_tracking

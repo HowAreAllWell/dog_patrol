@@ -2,7 +2,7 @@
 
 #include <algorithm>
 
-namespace vision_demo_host {
+namespace dog_patrol_perception_tracking {
 
 namespace {
 
@@ -75,4 +75,4 @@ const std::vector<AssignmentApplicationPlan::RawMapping> &RawSemanticBindingStor
   return planned_entries_;
 }
 
-}  // namespace vision_demo_host
+}  // namespace dog_patrol_perception_tracking

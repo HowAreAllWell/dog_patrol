@@ -3,7 +3,7 @@
 #include <string>
 #include <vector>
 
-namespace vision_demo_host {
+namespace dog_patrol_perception_tracking {
 
 class InactiveRecoverySolver {
  public:
@@ -73,4 +73,4 @@ class InactiveRecoverySolver {
                                const Config &config);
 };
 
-}  // namespace vision_demo_host
+}  // namespace dog_patrol_perception_tracking

@@ -4,9 +4,9 @@
 #include <set>
 #include <string>
 
-#include "vision_demo_host/modules/identity_manager.hpp"
+#include "dog_patrol_perception_tracking/modules/identity_manager.hpp"
 
-namespace vision_demo_host {
+namespace dog_patrol_perception_tracking {
 
 class OcclusionGroupShadowLifecycle {
  public:
@@ -77,4 +77,4 @@ class OcclusionGroupShadowLifecycle {
                              const ShadowRowsContext &context);
 };
 
-}  // namespace vision_demo_host
+}  // namespace dog_patrol_perception_tracking

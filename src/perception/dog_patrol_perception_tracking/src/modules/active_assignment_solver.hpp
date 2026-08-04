@@ -3,9 +3,9 @@
 #include <string>
 #include <vector>
 
-#include "vision_demo_host/types.hpp"
+#include "dog_patrol_perception_tracking/types.hpp"
 
-namespace vision_demo_host {
+namespace dog_patrol_perception_tracking {
 
 class ActiveAssignmentSolver {
  public:
@@ -72,4 +72,4 @@ class ActiveAssignmentSolver {
                                 int selected_col);
 };
 
-}  // namespace vision_demo_host
+}  // namespace dog_patrol_perception_tracking

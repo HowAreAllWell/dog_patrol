@@ -1,8 +1,8 @@
-#include "vision_demo_host/modules/feature_update_policy.hpp"
+#include "dog_patrol_perception_tracking/modules/feature_update_policy.hpp"
 
 #include <algorithm>
 
-namespace vision_demo_host {
+namespace dog_patrol_perception_tracking {
 
 FeatureUpdatePolicy::Decision FeatureUpdatePolicy::Decide(const Input &input) {
   Decision decision;
@@ -45,4 +45,4 @@ FeatureUpdatePolicy::Decision FeatureUpdatePolicy::Decide(const Input &input) {
   return decision;
 }
 
-}  // namespace vision_demo_host
+}  // namespace dog_patrol_perception_tracking

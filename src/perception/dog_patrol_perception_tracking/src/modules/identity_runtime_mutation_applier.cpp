@@ -4,12 +4,12 @@
 #include <unordered_set>
 #include <utility>
 
-#include "vision_demo_host/modules/association_utils.hpp"
-#include "vision_demo_host/modules/feature_geometry_update_state.hpp"
+#include "dog_patrol_perception_tracking/modules/association_utils.hpp"
+#include "dog_patrol_perception_tracking/modules/feature_geometry_update_state.hpp"
 #include "assignment_cost.hpp"
 #include "identity_runtime_record_lifecycle.hpp"
 
-namespace vision_demo_host {
+namespace dog_patrol_perception_tracking {
 namespace {
 
 bool AssociationEvidenceWeakForIdentity(const AssociationEvidence &association) {
@@ -354,4 +354,4 @@ bool IdentityRuntimeMutationApplier::ApplyPhase5BirthAllocation(
   return true;
 }
 
-}  // namespace vision_demo_host
+}  // namespace dog_patrol_perception_tracking

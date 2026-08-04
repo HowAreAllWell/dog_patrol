@@ -1,8 +1,8 @@
-#include "vision_demo_host/modules/perception_config_materializer.hpp"
+#include "dog_patrol_perception_tracking/modules/perception_config_materializer.hpp"
 
 #include <algorithm>
 
-namespace vision_demo_host {
+namespace dog_patrol_perception_tracking {
 
 MotTracker::Config PerceptionConfigMaterializer::MaterializeTrackerConfig(
     const TrackerInput &input,
@@ -106,4 +106,4 @@ VisualizerRecorder::Config PerceptionConfigMaterializer::MaterializeVisualizerCo
   return config;
 }
 
-}  // namespace vision_demo_host
+}  // namespace dog_patrol_perception_tracking

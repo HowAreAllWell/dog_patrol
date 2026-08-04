@@ -3,11 +3,11 @@
 #include <deque>
 #include <vector>
 
-#include "vision_demo_host/modules/feature_bank_cost.hpp"
+#include "dog_patrol_perception_tracking/modules/feature_bank_cost.hpp"
 
 namespace {
 
-using vision_demo_host::FeatureBankCost;
+using dog_patrol_perception_tracking::FeatureBankCost;
 
 }  // namespace
 

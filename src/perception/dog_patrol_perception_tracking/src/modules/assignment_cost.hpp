@@ -3,9 +3,9 @@
 #include <vector>
 
 #include "identity_runtime_record.hpp"
-#include "vision_demo_host/types.hpp"
+#include "dog_patrol_perception_tracking/types.hpp"
 
-namespace vision_demo_host {
+namespace dog_patrol_perception_tracking {
 
 class AssignmentCost {
  public:
@@ -27,4 +27,4 @@ class AssignmentCost {
                         const std::vector<float> &feature, const Config &config);
 };
 
-}  // namespace vision_demo_host
+}  // namespace dog_patrol_perception_tracking

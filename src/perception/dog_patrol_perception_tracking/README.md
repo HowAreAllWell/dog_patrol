@@ -1,6 +1,6 @@
-# vision_demo_host
+# dog_patrol_perception_tracking
 
-Orin 宿主机侧视觉验收 demo，包含检测、短期跟踪、语义身份、主目标选择、mission ROS 2 输出、录制和离线评估工具。
+Dog patrol 的正式 perception tracking 模块，包含相机接入、检测、短期跟踪、语义身份、主目标选择、mission ROS 2 输出、录制和离线评估工具。
 
 ## 当前链路状态
 
@@ -23,13 +23,13 @@ Orin 宿主机侧视觉验收 demo，包含检测、短期跟踪、语义身份�
 - 控制逻辑
 
 当前工作流分为三个独立入口：`capture_ffv1` 只采集 Hik MVS clean BGR8 并写 FFV1/MKV；
-`vision_demo_node` 执行 live inference，并可独立开启 diagnostic overlay preview/record；
+`dog_patrol_perception_tracking_node` 执行 live inference，并可独立开启 diagnostic overlay preview/record；
 `offline_eval_recordings` 只回放显式选择的 capture take 或视频并把结果写入 eval 目录。三者不共享
 录制开关，也不会把 overlay 写回 clean source dataset。
 
 ## 关键配置
 
-默认参数文件：`config/demo_params.yaml`
+默认参数文件：`config/perception_tracking_params.yaml`
 
 live ROS 参数和 `OfflineReplayRun` request 会先进入
 `PerceptionConfigMaterializer`，再生成 tracker、identity 和 visualizer 的运行态 config。该入口统一
@@ -69,7 +69,7 @@ authoritative `CONFIRM_TARGET`、`APPROACH_TARGET`、`VERIFY_IDENTITY` 或
 中所有 required contributor 都为 ready 时，才产生一次 `PerceptionReadyAction`；非
 `STARTUP`、旧 sequence、同 sequence duplicate update 都不产生 READY。视觉侧应使用
 `DetectionTrackingReadinessContributor` 报告 detector/tracker 的 ready、not-ready 或
-failure；既有 `vision_demo_node` 的 detector/tracker 初始化、camera source-frame failure 和
+failure；既有 `dog_patrol_perception_tracking_node` 的 detector/tracker 初始化、camera source-frame failure 和
 detector/tracker frame-processing exception 会更新它。尚未接入的 authorization 和任意未来能力必须使用
 `PlaceholderReadinessContributor(capability, owner, replacement_seam, readiness)`，显式
 写明 owner 与替换入口；placeholder 默认 not-ready，只有部署明确认可临时能力时才传
@@ -156,10 +156,10 @@ lifecycle。该模式不是 active H.264 runtime 入口。命令、资产哈希�
 
 ## 构建
 
-构建目标按依赖边界拆分为：`vision_demo_host_core`（tracking、identity、primary、mission
-transaction、配置及可移植 offline schema/metrics）、`vision_demo_host_ros_adapter`、
-`vision_demo_host_orin_runtime`（CUDA/TensorRT/Hik MVS）、`vision_demo_host_recording`
-（FFmpeg）和 `vision_demo_host_offline_runtime`。core 与完整 runtime 使用同一套算法实现，不存在
+构建目标按依赖边界拆分为：`dog_patrol_perception_tracking_core`（tracking、identity、primary、mission
+transaction、配置及可移植 offline schema/metrics）、`dog_patrol_perception_tracking_ros_adapter`、
+`dog_patrol_perception_tracking_orin_runtime`（CUDA/TensorRT/Hik MVS）、`dog_patrol_perception_tracking_recording`
+（FFmpeg）和 `dog_patrol_perception_tracking_offline_runtime`。core 与完整 runtime 使用同一套算法实现，不存在
 CI 专用算法分支。
 
 普通 ROS 2 Ubuntu 环境使用 portable 构建；它不查找 CUDA、TensorRT、Hik MVS 或 FFmpeg，也不
@@ -169,9 +169,9 @@ CI 专用算法分支。
 cd /path/to/vision_demo_ws
 source /opt/ros/humble/setup.bash
 source /path/to/dog_patrol/install/setup.bash
-colcon build --packages-select vision_demo_host \
+colcon build --packages-select dog_patrol_perception_tracking \
   --cmake-args -DTRACKING_ENABLE_ORIN_RUNTIME=OFF
-colcon test --packages-select vision_demo_host --event-handlers console_direct+ \
+colcon test --packages-select dog_patrol_perception_tracking --event-handlers console_direct+ \
   --return-code-on-test-failure
 colcon test-result --verbose --all
 ```
@@ -182,9 +182,9 @@ Orin 完整构建显式开启 runtime（该选项当前默认也是 `ON`，命�
 cd /path/to/vision_demo_ws
 source /opt/ros/humble/setup.bash
 source /path/to/dog_patrol/install/setup.bash
-colcon build --packages-select vision_demo_host \
+colcon build --packages-select dog_patrol_perception_tracking \
   --cmake-args -DTRACKING_ENABLE_ORIN_RUNTIME=ON
-colcon test --packages-select vision_demo_host --event-handlers console_direct+ \
+colcon test --packages-select dog_patrol_perception_tracking --event-handlers console_direct+ \
   --return-code-on-test-failure
 colcon test-result --verbose --all
 ```
@@ -203,7 +203,7 @@ cd /path/to/my_workplace/vision_demo_ws
 source /opt/ros/humble/setup.bash
 source /path/to/workspace/dog_patrol/install/setup.bash
 source install/setup.bash
-ros2 run vision_demo_host vision_demo_node --ros-args \
+ros2 run dog_patrol_perception_tracking dog_patrol_perception_tracking_node --ros-args \
   -p camera.mvs_model:='MV-CU013-A0UC' \
   -p camera.mvs_serial:='CAMERA_SERIAL' \
   -p camera.width:=1280 \
@@ -225,9 +225,9 @@ ros2 run vision_demo_host vision_demo_node --ros-args \
 
 ## 一键现场运行
 
-直接启动 `vision_demo_node`；mission ROS 2 输出由 `MissionRosAdapter` 发布。
+直接启动 `dog_patrol_perception_tracking_node`；mission ROS 2 输出由 `MissionRosAdapter` 发布。
 
-四种 live mode 独立配置（追加到 `ros2 run ... vision_demo_node`）：
+四种 live mode 独立配置（追加到 `ros2 run ... dog_patrol_perception_tracking_node`）：
 
 - inference-only：`-p visualization.enable:=false -p recording.enable:=false`（干净性能 baseline）
 - preview：`-p visualization.enable:=true -p recording.enable:=false`（需要本地图形会话）
@@ -308,7 +308,7 @@ Tracker ReID 配置（`tracker.*`）：
 离线评估对照脚本必须显式传入 capture take 的 FFV1/MKV：
 
 ```bash
-/path/to/my_workplace/vision_demo_ws/src/vision_demo_host/scripts/eval_tracker_core_round1.sh \
+/path/to/my_workplace/vision_demo_ws/src/dog_patrol_perception_tracking/scripts/eval_tracker_core_round1.sh \
   /absolute/path/to/capture_session/take_001/video.mkv
 ```
 
@@ -322,7 +322,7 @@ Tracker ReID 配置（`tracker.*`）：
 一键运行无录制 live inference，并收集实际 PixelType、吞吐、阶段 p50/p95/p99 和 frame drop：
 
 ```bash
-/path/to/my_workplace/vision_demo_ws/src/vision_demo_host/scripts/bench_hik_mvs_camera.sh
+/path/to/my_workplace/vision_demo_ws/src/dog_patrol_perception_tracking/scripts/bench_hik_mvs_camera.sh
 ```
 
 默认目标为 `1280x1024@30 FPS`、`fast` Bayer interpolation，运行 60 秒，输出到
@@ -362,7 +362,7 @@ buffers 比较全部 SDK quality、写出 FFV1 variants、检测 CSV 和分段 p
 ```bash
 source /opt/ros/humble/setup.bash
 source install/setup.bash
-ros2 run vision_demo_host capture_ffv1 \
+ros2 run dog_patrol_perception_tracking capture_ffv1 \
   --mvs-model MV-CU013-A0UC \
   --width 1280 --height 1024 --fps 30.0 \
   --session-name orin_hik_lossless_01
@@ -397,7 +397,7 @@ MKV 的 stream FPS 是 configured nominal rate；数据集真实采集/写入速
 
 ```bash
 source install/setup.bash
-ros2 run vision_demo_host capture_ffv1 \
+ros2 run dog_patrol_perception_tracking capture_ffv1 \
   --headless --auto-record --max-seconds 30 \
   --session-name headless_capture_01
 ```
@@ -420,7 +420,7 @@ ros2 run vision_demo_host capture_ffv1 \
 canonical 回放入口是 #81 格式完整 take 的显式 `video.mkv` 路径：
 
 ```bash
-ros2 run vision_demo_host offline_eval_recordings \
+ros2 run dog_patrol_perception_tracking offline_eval_recordings \
   --video /absolute/path/to/capture_session/take_001/video.mkv \
   --results-root /absolute/path/to/eval_results \
   --run-name ffv1_baseline

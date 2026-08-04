@@ -1,4 +1,4 @@
-#include "vision_demo_host/modules/ffv1_capture_workflow.hpp"
+#include "dog_patrol_perception_tracking/modules/ffv1_capture_workflow.hpp"
 
 #include <condition_variable>
 #include <deque>
@@ -8,7 +8,7 @@
 #include <thread>
 #include <utility>
 
-namespace vision_demo_host {
+namespace dog_patrol_perception_tracking {
 namespace {
 
 bool Fail(std::string *error, const std::string &message) {
@@ -346,4 +346,4 @@ void Ffv1CaptureWorkflow::RunWriter(const std::shared_ptr<ActiveTake> &take,
   }
 }
 
-}  // namespace vision_demo_host
+}  // namespace dog_patrol_perception_tracking

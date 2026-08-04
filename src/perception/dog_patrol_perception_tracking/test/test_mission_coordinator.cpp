@@ -4,22 +4,22 @@
 
 #include <gtest/gtest.h>
 
-#include "vision_demo_host/modules/mission_coordinator.hpp"
+#include "dog_patrol_perception_tracking/modules/mission_coordinator.hpp"
 
 namespace {
 
-using vision_demo_host::ClassId;
-using vision_demo_host::IdentityObservation;
-using vision_demo_host::IdentityState;
-using vision_demo_host::MissionCoordinator;
-using vision_demo_host::MissionBlockCause;
-using vision_demo_host::MissionEventAction;
-using vision_demo_host::PerceptionMissionEvent;
-using vision_demo_host::MissionPhase;
-using vision_demo_host::MissionSnapshot;
-using vision_demo_host::PrimaryState;
-using vision_demo_host::PrimaryTargetResult;
-using vision_demo_host::Track;
+using dog_patrol_perception_tracking::ClassId;
+using dog_patrol_perception_tracking::IdentityObservation;
+using dog_patrol_perception_tracking::IdentityState;
+using dog_patrol_perception_tracking::MissionCoordinator;
+using dog_patrol_perception_tracking::MissionBlockCause;
+using dog_patrol_perception_tracking::MissionEventAction;
+using dog_patrol_perception_tracking::PerceptionMissionEvent;
+using dog_patrol_perception_tracking::MissionPhase;
+using dog_patrol_perception_tracking::MissionSnapshot;
+using dog_patrol_perception_tracking::PrimaryState;
+using dog_patrol_perception_tracking::PrimaryTargetResult;
+using dog_patrol_perception_tracking::Track;
 
 IdentityObservation TrustedPerson(const int semantic_id, const int raw_track_id,
                                   const cv::Rect2f bbox = cv::Rect2f{10.0F, 20.0F, 40.0F, 80.0F}) {

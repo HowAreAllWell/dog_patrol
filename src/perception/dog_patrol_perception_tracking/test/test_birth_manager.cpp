@@ -6,7 +6,7 @@
 
 namespace {
 
-using vision_demo_host::BirthManager;
+using dog_patrol_perception_tracking::BirthManager;
 
 BirthManager::Input BaseInput() {
   BirthManager::Input input;
@@ -29,7 +29,7 @@ TEST(BirthManagerTest, AmbiguousRecoveryPendingCreatesHiddenDebugRowWithoutAlloc
     return 21;
   });
 
-  EXPECT_EQ(result.decision.action, vision_demo_host::BirthCandidateDecision::Action::kHideWithDebugRow);
+  EXPECT_EQ(result.decision.action, dog_patrol_perception_tracking::BirthCandidateDecision::Action::kHideWithDebugRow);
   EXPECT_TRUE(result.has_debug_row);
   EXPECT_EQ(result.debug_row.stage, "phase5_birth_candidate");
   EXPECT_EQ(result.debug_row.reject_reason, "ambiguous_recovery_pending");
@@ -77,7 +77,7 @@ TEST(BirthManagerTest, SmallPersonKeepsPhase5PendingRowForCoordinator) {
     ++allocation_calls;
     return 41;
   });
-  EXPECT_EQ(first.decision.action, vision_demo_host::BirthCandidateDecision::Action::kPhase5Pending);
+  EXPECT_EQ(first.decision.action, dog_patrol_perception_tracking::BirthCandidateDecision::Action::kPhase5Pending);
   EXPECT_EQ(first.stable_observation_count, 1);
   EXPECT_TRUE(first.has_debug_row);
   EXPECT_EQ(first.debug_row.stage, "phase5_birth_candidate");
@@ -89,7 +89,7 @@ TEST(BirthManagerTest, SmallPersonKeepsPhase5PendingRowForCoordinator) {
     ++allocation_calls;
     return 42;
   });
-  EXPECT_EQ(second.decision.action, vision_demo_host::BirthCandidateDecision::Action::kPhase5Pending);
+  EXPECT_EQ(second.decision.action, dog_patrol_perception_tracking::BirthCandidateDecision::Action::kPhase5Pending);
   EXPECT_EQ(second.stable_observation_count, 2);
   EXPECT_TRUE(second.has_debug_row);
   EXPECT_FALSE(second.allocated_semantic_id);
@@ -109,7 +109,7 @@ TEST(BirthManagerTest, Phase5PendingCreatesDebugRowWithoutAllocating) {
     return 51;
   });
 
-  EXPECT_EQ(result.decision.action, vision_demo_host::BirthCandidateDecision::Action::kPhase5Pending);
+  EXPECT_EQ(result.decision.action, dog_patrol_perception_tracking::BirthCandidateDecision::Action::kPhase5Pending);
   EXPECT_TRUE(result.has_debug_row);
   EXPECT_EQ(result.debug_row.stage, "phase5_birth_candidate");
   EXPECT_EQ(result.debug_row.reject_reason, "phase5_birth_manager_pending");

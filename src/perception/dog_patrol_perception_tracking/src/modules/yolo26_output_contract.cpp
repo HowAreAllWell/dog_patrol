@@ -1,8 +1,8 @@
-#include "vision_demo_host/modules/yolo26_output_contract.hpp"
+#include "dog_patrol_perception_tracking/modules/yolo26_output_contract.hpp"
 
 #include <sstream>
 
-namespace vision_demo_host {
+namespace dog_patrol_perception_tracking {
 namespace {
 
 constexpr int64_t kExpectedFieldsPerDetection = 6;
@@ -67,4 +67,4 @@ bool ValidateYolo26OutputShape(const std::vector<int64_t> &dims, Yolo26OutputCon
   return true;
 }
 
-}  // namespace vision_demo_host
+}  // namespace dog_patrol_perception_tracking

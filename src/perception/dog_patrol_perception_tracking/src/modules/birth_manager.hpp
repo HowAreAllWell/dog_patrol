@@ -7,7 +7,7 @@
 #include "birth_candidate_decision.hpp"
 #include "birth_candidate_store.hpp"
 
-namespace vision_demo_host {
+namespace dog_patrol_perception_tracking {
 
 class BirthManager {
  public:
@@ -107,4 +107,4 @@ class BirthManager {
   BirthCandidateStore pending_candidates_;
 };
 
-}  // namespace vision_demo_host
+}  // namespace dog_patrol_perception_tracking

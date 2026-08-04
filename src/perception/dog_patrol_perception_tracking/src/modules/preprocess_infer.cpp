@@ -1,10 +1,10 @@
-#include "vision_demo_host/modules/preprocess_infer.hpp"
+#include "dog_patrol_perception_tracking/modules/preprocess_infer.hpp"
 
 #include <NvInfer.h>
 #include <cuda_runtime_api.h>
 #include <opencv2/imgproc.hpp>
 
-#include "vision_demo_host/modules/yolo26_output_contract.hpp"
+#include "dog_patrol_perception_tracking/modules/yolo26_output_contract.hpp"
 
 #include <algorithm>
 #include <chrono>
@@ -21,7 +21,7 @@
 #include <utility>
 #include <vector>
 
-namespace vision_demo_host {
+namespace dog_patrol_perception_tracking {
 namespace {
 
 using SteadyClock = std::chrono::steady_clock;
@@ -631,4 +631,4 @@ void PreprocessInfer::ResetMetrics() {
   impl_->total_timing.Clear();
 }
 
-}  // namespace vision_demo_host
+}  // namespace dog_patrol_perception_tracking

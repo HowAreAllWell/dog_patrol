@@ -1,4 +1,4 @@
-#include "vision_demo_host/tools/offline_eval_input.hpp"
+#include "dog_patrol_perception_tracking/tools/offline_eval_input.hpp"
 
 #include <algorithm>
 #include <cctype>
@@ -8,7 +8,7 @@
 #include <sstream>
 #include <vector>
 
-namespace vision_demo_host::tools {
+namespace dog_patrol_perception_tracking::tools {
 namespace {
 
 constexpr const char *kTimestampHeader =
@@ -387,4 +387,4 @@ std::string OfflineEvalOverlayModeToString(const OfflineEvalOverlayMode mode) {
   return "unknown";
 }
 
-}  // namespace vision_demo_host::tools
+}  // namespace dog_patrol_perception_tracking::tools

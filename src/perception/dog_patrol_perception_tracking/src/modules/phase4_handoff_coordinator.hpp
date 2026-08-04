@@ -7,9 +7,9 @@
 #include <opencv2/core/mat.hpp>
 
 #include "occlusion_group_shadow_lifecycle.hpp"
-#include "vision_demo_host/modules/identity_manager.hpp"
+#include "dog_patrol_perception_tracking/modules/identity_manager.hpp"
 
-namespace vision_demo_host {
+namespace dog_patrol_perception_tracking {
 
 class Phase4HandoffCoordinator {
  public:
@@ -72,4 +72,4 @@ class Phase4HandoffCoordinator {
                                       const RefreshOutputsFn &refresh_outputs);
 };
 
-}  // namespace vision_demo_host
+}  // namespace dog_patrol_perception_tracking

@@ -21,7 +21,7 @@
 ## 当前三个入口
 
 - standalone capture：`capture_ffv1` 只初始化 Hik MVS，写 clean BGR8 FFV1/MKV take。
-- live inference：`vision_demo_node` 运行 detector/tracker/identity/primary 和
+- live inference：`dog_patrol_perception_tracking_node` 运行 detector/tracker/identity/primary 和
   `dog_patrol_interfaces` mission output；preview 与 FFV1 diagnostic recording 独立可选。
 - offline evaluation：`offline_eval_recordings` 回放显式选择的 take/video；preview 与 FFV1
   result recording 独立可选，结果不写入 clean source dataset。
@@ -40,7 +40,7 @@ discovery，并统一标记为 `historical_h264`。其他 MP4 和非 MKV 显式�
 
 定向实现搜索未发现 `rtspsrc`、H.264 parser/encoder、`CAP_GSTREAMER`、`mp4v` 或旧 pipeline
 builder。源码树与 CMake 不再含 `record_test_set` / `bench_gmc_rtsp`，构建 target 和
-`ros2 pkg executables vision_demo_host` 均只列当前入口。
+`ros2 pkg executables dog_patrol_perception_tracking` 均只列当前入口。
 
 `test_retired_media_cli` 通过：三个 retired ROS 参数各自以 exit 1 明确失败；
 `offline_eval_recordings` 无输入和 `--rtsp-url` 分别以 exit 2 明确失败。

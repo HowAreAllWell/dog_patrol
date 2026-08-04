@@ -1,10 +1,10 @@
-#include "vision_demo_host/modules/camera_ingest.hpp"
+#include "dog_patrol_perception_tracking/modules/camera_ingest.hpp"
 
 #include <gtest/gtest.h>
 
 #include <string>
 
-namespace vision_demo_host {
+namespace dog_patrol_perception_tracking {
 namespace {
 
 TEST(CameraIngestContractTest, ValidatesExplicitBayerConfiguration) {
@@ -116,4 +116,4 @@ TEST(CameraIngestContractTest, ReportsStageLatencyPercentiles) {
 }
 
 }  // namespace
-}  // namespace vision_demo_host
+}  // namespace dog_patrol_perception_tracking

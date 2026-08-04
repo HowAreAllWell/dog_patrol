@@ -1,3 +1,3 @@
 #include "assignment_application_executor.hpp"
 
-namespace vision_demo_host {}  // namespace vision_demo_host
+namespace dog_patrol_perception_tracking {}  // namespace dog_patrol_perception_tracking

@@ -2,7 +2,7 @@
 
 #include <gtest/gtest.h>
 
-using vision_demo_host::BirthCandidateStore;
+using dog_patrol_perception_tracking::BirthCandidateStore;
 
 TEST(BirthCandidateStoreTest, ConsecutiveHitsIncrementForSameRawTrackOnAdjacentFrames) {
   BirthCandidateStore store;

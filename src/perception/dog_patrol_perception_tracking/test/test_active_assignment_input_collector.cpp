@@ -8,12 +8,12 @@
 
 namespace {
 
-using vision_demo_host::ActiveAssignmentInputCollector;
-using vision_demo_host::ActiveAssignmentSolver;
-using vision_demo_host::AssignmentCandidateBuilder;
-using vision_demo_host::ClassId;
-using vision_demo_host::IdentityRuntimeRecord;
-using vision_demo_host::Track;
+using dog_patrol_perception_tracking::ActiveAssignmentInputCollector;
+using dog_patrol_perception_tracking::ActiveAssignmentSolver;
+using dog_patrol_perception_tracking::AssignmentCandidateBuilder;
+using dog_patrol_perception_tracking::ClassId;
+using dog_patrol_perception_tracking::IdentityRuntimeRecord;
+using dog_patrol_perception_tracking::Track;
 
 Track PersonTrack(const int raw_track_id, const bool occlusion_suspect = false) {
   Track track;

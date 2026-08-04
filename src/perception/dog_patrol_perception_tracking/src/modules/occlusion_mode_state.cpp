@@ -2,7 +2,7 @@
 
 #include <algorithm>
 
-namespace vision_demo_host {
+namespace dog_patrol_perception_tracking {
 
 OcclusionModeState::State OcclusionModeState::Advance(const Config &config, const State &previous, const Input &input) {
   State next = previous;
@@ -48,4 +48,4 @@ OcclusionModeState::State OcclusionModeState::Advance(const Config &config, cons
   return next;
 }
 
-}  // namespace vision_demo_host
+}  // namespace dog_patrol_perception_tracking

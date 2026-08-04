@@ -2,7 +2,7 @@
 
 #include "identity_lifecycle_mode.hpp"
 
-namespace vision_demo_host {
+namespace dog_patrol_perception_tracking {
 
 class OcclusionModeState {
  public:
@@ -29,4 +29,4 @@ class OcclusionModeState {
   static State Advance(const Config &config, const State &previous, const Input &input);
 };
 
-}  // namespace vision_demo_host
+}  // namespace dog_patrol_perception_tracking

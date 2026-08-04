@@ -10,8 +10,8 @@
 
 namespace {
 
-using vision_demo_host::AssignmentApplicationPlan;
-using vision_demo_host::SemanticIdAllocator;
+using dog_patrol_perception_tracking::AssignmentApplicationPlan;
+using dog_patrol_perception_tracking::SemanticIdAllocator;
 
 AssignmentApplicationPlan::TrackApplicationCandidate Candidate(const int track_idx,
                                                               const int raw_track_id,

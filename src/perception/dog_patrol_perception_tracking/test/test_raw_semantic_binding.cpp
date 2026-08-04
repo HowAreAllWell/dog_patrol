@@ -7,8 +7,8 @@
 
 #include "assignment_application_plan.hpp"
 
-using vision_demo_host::AssignmentApplicationPlan;
-using vision_demo_host::RawSemanticBindingStore;
+using dog_patrol_perception_tracking::AssignmentApplicationPlan;
+using dog_patrol_perception_tracking::RawSemanticBindingStore;
 
 namespace {
 

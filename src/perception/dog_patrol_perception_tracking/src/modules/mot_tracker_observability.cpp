@@ -4,7 +4,7 @@
 #include <fstream>
 #include <utility>
 
-namespace vision_demo_host {
+namespace dog_patrol_perception_tracking {
 namespace {
 
 float StateVal(const cv::Mat &state, const int idx) {
@@ -306,4 +306,4 @@ void MotTrackerObservability::WritePair(const int frame_id, const MotTrackerPair
   }
 }
 
-}  // namespace vision_demo_host
+}  // namespace dog_patrol_perception_tracking

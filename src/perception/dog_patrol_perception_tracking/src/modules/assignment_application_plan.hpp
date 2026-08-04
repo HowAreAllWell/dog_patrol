@@ -7,7 +7,7 @@
 
 #include "semantic_id_allocator.hpp"
 
-namespace vision_demo_host {
+namespace dog_patrol_perception_tracking {
 
 class AssignmentApplicationPlan {
  public:
@@ -56,4 +56,4 @@ class AssignmentApplicationPlan {
                       const std::vector<int> &raw_map_track_order = {});
 };
 
-}  // namespace vision_demo_host
+}  // namespace dog_patrol_perception_tracking
