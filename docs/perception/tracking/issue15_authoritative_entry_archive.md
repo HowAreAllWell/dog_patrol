@@ -8,7 +8,8 @@
 或资产目录。
 
 本次切换只完成 tracking 的仓库入口收口。face、voice 尚未接入生产实现，导航实现尚未迁入且
-最终导航 Orin 的整机验收仍待现场完成。父 Spec #3 的状态由后续整体验收决定，不由 #15 修改。
+最终导航 Orin 的整机验收仍待现场完成。#15 关闭时没有自行关闭父 Spec #3；父 Spec 后续独立验收见
+[`issue3_spec_acceptance.md`](issue3_spec_acceptance.md)。
 
 ## 权威入口
 
@@ -54,7 +55,7 @@ git log --follow tracking-import/vision-demo-ws-7878d70 -- \
 - 当前 Orin 的 full-runtime build/test、统一环境检查、standalone/Hik/真人/crop/反压验收已有
   #14 证据，`requirements.md` 提供从构建到启动的连续入口；
 - #15 的主仓 PR 已通过 CI 并合入 `main`，主仓 `main` 与 `origin/main` 同步且干净；
-- face、voice 和导航整机验收继续明确保留为后续，父 Spec #3 保持开放。
+- face、voice 和导航整机验收继续明确保留为后续，父 Spec #3 由独立整体验收决定状态。
 
 归档只改变 GitHub 仓库的写入状态，不删除旧仓历史，也不触碰本机 ignored 的模型、engine、录像、
 日志或部署参数。
@@ -70,4 +71,4 @@ git log --follow tracking-import/vision-demo-ws-7878d70 -- \
   `4f3df1505a05e8b4bd3d1498cec22caa5b769c10`。
 - 旧仓本地停留在同步且干净的 `deploy/dog_patrol-integration`；ignored 的 MVS 日志、模型、
   engine、ReID 和录像/数据目录仍在，未删除或纳入 Git。
-- face、voice 和导航整机验收继续保留为后续；父 Spec #3 保持开放。
+- face、voice 和导航整机验收继续保留为后续；它们未被父 Spec #3 的独立验收标记为完成。

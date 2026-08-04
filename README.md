@@ -22,6 +22,8 @@
 - tracking 已在当前感知 Orin 完成 full-runtime build/test、真实 Hik 30 FPS、standalone 隔离、
   真人 semantic primary、主目标 crop/离场停发和慢消费者不反压验收；verified baseline 见
   [`docs/perception/tracking/issue14_tracking_hardware_acceptance.md`](docs/perception/tracking/issue14_tracking_hardware_acceptance.md)。
+- detection/tracking 接入父 Spec #3 已完成独立整体验收；子票、合并、CI、现场证据与明确后续边界见
+  [`docs/perception/tracking/issue3_spec_acceptance.md`](docs/perception/tracking/issue3_spec_acceptance.md)。
 - 人脸实现尚未建立。
 - 语音实现和导航整机验收尚未完成；它们与人脸接入继续作为后续工作，不属于 tracking
   迁入和仓库切换的完成证据。
@@ -83,6 +85,8 @@ tracking 的 portable/Orin 构建、运行和配置说明见
 [`src/perception/dog_patrol_perception_tracking/README.md`](src/perception/dog_patrol_perception_tracking/README.md)。
 旧仓归档、追溯和回退锚点见
 [`docs/perception/tracking/issue15_authoritative_entry_archive.md`](docs/perception/tracking/issue15_authoritative_entry_archive.md)。
+父 Spec 的整体验收矩阵见
+[`docs/perception/tracking/issue3_spec_acceptance.md`](docs/perception/tracking/issue3_spec_acceptance.md)。
 
 ## 协作方式
 

@@ -1,5 +1,14 @@
 # worklog
 
+## 2026-08-04 20:14 - 完成 detection/tracking 接入父 Spec 整体验收
+
+- 目标：独立验收 #3 的 Problem/Solution、实现与测试决定、Out of Scope 及 #4–#15 的实际关闭/合并证据，确认是否可以关闭父 Spec。
+- 完成：逐项核对代码、稳定文档、12 个子票、主仓 PR #16–#27、旧仓 PR #95/#96、CI、116-commit 迁移 tag、当前 Orin/Hik 现场记录、旧仓 archive API 和分支锚点；新增稳定验收矩阵，并修正 #15 文档中父票状态的历史表述。未修改运行代码。
+- 关键结论：detection/tracking 正式迁入、默认 light/可选 ONNX、orchestrator/interfaces、mission/standalone、crop/readiness、部署 requirements、真实 Orin/Hik 和权威仓库切换均已闭环。真实 face、voice、对应结果 adapter、导航算法和导航 Orin 整机验收仍明确保留为后续，不属于本 Spec 的完成声明；生产整体 READY 仍不能绕过缺失能力。
+- 涉及文件：`README.md`、`docs/perception/tracking/issue3_spec_acceptance.md`、`docs/perception/tracking/issue15_authoritative_entry_archive.md`、`worklog.md`。
+- 验证：当前 `main=origin/main=19c4b65`；隔离 portable 五包 build 通过，399 tests、0 errors/failures/skipped；环境检查器 13 项单测通过；主仓 PR #16–#27 对应检查均为 SUCCESS；旧仓 `archived=true` 且默认/冻结分支锚点可读；仓库资产/submodule/Fake/demo 活动入口扫描无异常。
+- 后续：完成双轴 code review、PR/CI/合并，在 #3 留下可追溯结论并关闭；随后确认本地 `main` 与 `origin/main` 同步且工作区干净。
+
 ## 2026-08-04 19:59 - 切换 tracking 权威入口并归档旧视觉仓库
 
 - 目标：完成 #15，使 dog_patrol 成为 tracking 后续开发、构建、测试和部署的唯一权威入口，并在保留历史、回退锚点和本机资产的前提下归档旧视觉仓库。
