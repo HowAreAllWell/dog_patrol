@@ -663,6 +663,10 @@ class MissionPipelineIntegrationDriver final : public rclcpp::Node {
   }
 
   void StartMission(const MissionSnapshot &mission) {
+    if (mission.phase == MissionPhase::kPatrol && last_readiness_publish_at_.has_value()) {
+      Advance(Stage::kWaitFirstPatrol);
+      return;
+    }
     if (mission.phase != MissionPhase::kStartup) {
       return;
     }
@@ -676,11 +680,16 @@ class MissionPipelineIntegrationDriver final : public rclcpp::Node {
         capability_status_publisher_->get_subscription_count() < 1U) {
       return;
     }
+    const auto now = std::chrono::steady_clock::now();
+    if (last_readiness_publish_at_.has_value() &&
+        now - last_readiness_publish_at_.value() < 200ms) {
+      return;
+    }
     adapter_->PublishCapabilityStatus();
     PublishTestCapability(mission, "face");
     PublishTestCapability(mission, "voice");
     PublishExternalEvent(mission, MissionEventMessage::SOURCE_NAVIGATION, MissionEventMessage::READY, 0);
-    Advance(Stage::kWaitFirstPatrol);
+    last_readiness_publish_at_ = now;
   }
 
   void SelectFirstTarget(const MissionSnapshot &mission) {
@@ -984,6 +993,7 @@ class MissionPipelineIntegrationDriver final : public rclcpp::Node {
   Stage stage_{Stage::kWaitStartup};
   std::chrono::steady_clock::time_point stage_entered_at_{};
   std::optional<std::chrono::steady_clock::time_point> startup_observed_at_;
+  std::optional<std::chrono::steady_clock::time_point> last_readiness_publish_at_;
   bool finished_{false};
   bool success_{false};
   std::string failure_;
