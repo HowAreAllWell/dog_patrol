@@ -70,7 +70,7 @@ TEST(PrimaryTargetObserverTest, ReturnsCurrentSemanticTargetWithOwnedImageAndSou
 TEST(PrimaryTargetObserverTest, ConfiguredPaddingExpandsCropAndClampsToSourceFrame) {
   PrimaryTargetManager::Config primary_config;
   primary_config.min_person_area_px = 1.0F;
-  PrimaryTargetObserver::CropConfig crop_config;
+  dog_patrol_perception_tracking::PrimaryTargetCropConfig crop_config;
   crop_config.padding_ratio = 0.5F;
   PrimaryTargetObserver observer(primary_config, nullptr, crop_config);
   cv::Mat frame(8, 10, CV_8UC3, cv::Scalar{10, 20, 30});

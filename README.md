@@ -13,8 +13,8 @@
 - tracking 公共 mission tracer 已接入同工作区安装后的真实 `mission_supervisor`，无资产路径纳入普通
   CI，覆盖目标确认、fresh bbox、丢失/重获及无效状态输入门禁。
 - tracking 已提供不创建 mission ROS adapter 的正式 standalone Orin 启动方式，并通过
-  ROS-independent `PrimaryTargetObservation` 返回当前可信语义主目标及自持有目标图像；standalone
-  通过有界异步 ROS adapter 以 `TrackedTargetImage` 向独立人脸进程交付同帧 crop。
+  ROS-independent `PrimaryTargetObservation` 返回当前可信语义主目标及自持有目标图像；mission 与
+  standalone 均通过有界异步 ROS adapter 以 `TrackedTargetImage` 向独立人脸进程交付同帧 crop。
 - `dog_patrol_perception_orchestrator`：已实现授权编排和 capability readiness ROS 节点；真实人脸、语音 provider 尚未接入，因此生产环境不会提前发布感知 READY。
 - 人脸实现尚未建立。
 - 目标公开远程：`https://github.com/HowAreAllWell/dog_patrol`

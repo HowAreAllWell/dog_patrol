@@ -15,18 +15,25 @@ TargetImageRosAdapter::TargetImageRosAdapter(rclcpp::Node &node, Config config)
   publish_ = [publisher = publisher_](Message::UniquePtr message) {
     publisher->publish(std::move(message));
   };
+  convert_ = ToMessage;
   Start();
 }
 
-TargetImageRosAdapter::TargetImageRosAdapter(Config config, PublishFunction publish)
-    : config_(std::move(config)), publish_(std::move(publish)) {
+TargetImageRosAdapter::TargetImageRosAdapter(
+    Config config, PublishFunction publish)
+    : TargetImageRosAdapter(std::move(config), std::move(publish), ToMessage) {}
+
+TargetImageRosAdapter::TargetImageRosAdapter(
+    Config config, PublishFunction publish, ConvertFunction convert)
+    : config_(std::move(config)), publish_(std::move(publish)),
+      convert_(std::move(convert)) {
   Start();
 }
 
 void TargetImageRosAdapter::Start() {
   if (config_.topic.empty() || config_.queue_capacity == 0U ||
       !std::isfinite(config_.max_publish_hz) || config_.max_publish_hz <= 0.0 ||
-      !publish_) {
+      !publish_ || !convert_) {
     throw std::invalid_argument(
         "target image topic/publisher must be set, queue_capacity must be positive, "
         "and max_publish_hz must be finite and positive");
@@ -54,6 +61,7 @@ void TargetImageRosAdapter::Consume(
     std::optional<PrimaryTargetObservation> observation) {
   {
     std::lock_guard<std::mutex> lock(mutex_);
+    ++generation_;
     current_observation_ = observation.has_value();
     if (!observation.has_value()) {
       queue_.clear();
@@ -64,7 +72,7 @@ void TargetImageRosAdapter::Consume(
       queue_.pop_front();
       ++metrics_.queue_dropped;
     }
-    queue_.push_back(std::move(*observation));
+    queue_.push_back({std::move(*observation), generation_});
   }
   wake_.notify_one();
 }
@@ -117,30 +125,40 @@ void TargetImageRosAdapter::Run() {
   const auto minimum_period_ns = static_cast<std::uint64_t>(
       std::ceil(1000000000.0 / config_.max_publish_hz));
   for (;;) {
-    PrimaryTargetObservation observation;
+    PendingObservation pending;
     {
       std::unique_lock<std::mutex> lock(mutex_);
       wake_.wait(lock, [this] { return stopping_ || !queue_.empty(); });
       if (stopping_) {
         return;
       }
-      observation = std::move(queue_.back());
+      pending = std::move(queue_.back());
       if (queue_.size() > 1U) {
         metrics_.queue_dropped += queue_.size() - 1U;
       }
       queue_.clear();
       if (last_published_source_ns_ != 0U &&
-          observation.source.source_timestamp_ns <
+          pending.observation.source.source_timestamp_ns <
               last_published_source_ns_ + minimum_period_ns) {
         ++metrics_.rate_limited;
         continue;
       }
-      last_published_source_ns_ = observation.source.source_timestamp_ns;
     }
     try {
-      publish_(ToMessage(observation));
-      std::lock_guard<std::mutex> lock(mutex_);
-      ++metrics_.published;
+      auto message = convert_(pending.observation);
+      {
+        std::lock_guard<std::mutex> lock(mutex_);
+        if (!current_observation_ || pending.generation != generation_) {
+          ++metrics_.queue_dropped;
+          continue;
+        }
+        last_published_source_ns_ = pending.observation.source.source_timestamp_ns;
+      }
+      publish_(std::move(message));
+      {
+        std::lock_guard<std::mutex> lock(mutex_);
+        ++metrics_.published;
+      }
     } catch (...) {
       // A middleware failure must never unwind onto or stop the tracking
       // pipeline. The next current observation remains eligible for publish.

@@ -8,31 +8,18 @@
 #include <rclcpp/rclcpp.hpp>
 
 #include "dog_patrol_perception_interfaces/msg/tracked_target_image.hpp"
+#include "dog_patrol_perception_tracking/modules/primary_target_observer.hpp"
 #include "dog_patrol_perception_tracking/modules/target_image_ros_adapter.hpp"
 
 namespace {
 
 constexpr const char *kTopic = "/test/tracked_target_image";
 
-dog_patrol_perception_tracking::PrimaryTargetObservation Observation(
-    std::uint64_t timestamp_ns) {
-  dog_patrol_perception_tracking::PrimaryTargetObservation observation;
-  observation.target_id = 42;
-  observation.confidence = 0.9F;
-  observation.source.source_timestamp_ns = timestamp_ns;
-  observation.source.camera_frame_number = 9U;
-  observation.source.camera_frame_number_available = true;
-  observation.source.image_width = 8;
-  observation.source.image_height = 6;
-  observation.source.optical_frame_id = "hik_camera_optical_frame";
-  observation.bbox = cv::Rect{2, 1, 3, 4};
-  observation.target_image = cv::Mat(4, 3, CV_8UC3, cv::Scalar{10, 20, 30}).clone();
-  return observation;
-}
-
 int Subscribe() {
   auto node = std::make_shared<rclcpp::Node>("target_image_smoke_subscriber");
   bool valid = false;
+  std::uint32_t latest_frame = 0U;
+  std::size_t received = 0U;
   auto subscription = node->create_subscription<
       dog_patrol_perception_interfaces::msg::TrackedTargetImage>(
       kTopic, dog_patrol_perception_tracking::TargetImageRosAdapter::Qos(),
@@ -44,14 +31,18 @@ int Subscribe() {
                 message.encoding == "bgr8" && message.crop_width == 3U &&
                 message.crop_height == 4U && message.crop_step == 9U &&
                 message.crop_data.size() == 36U && message.crop_data[0] == 10U;
+        latest_frame = message.source_frame_number;
+        ++received;
+        std::this_thread::sleep_for(std::chrono::milliseconds(50));
       });
   (void)subscription;
   const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(8);
-  while (rclcpp::ok() && !valid && std::chrono::steady_clock::now() < deadline) {
+  while (rclcpp::ok() && latest_frame < 90U &&
+         std::chrono::steady_clock::now() < deadline) {
     rclcpp::spin_some(node);
     std::this_thread::sleep_for(std::chrono::milliseconds(10));
   }
-  return valid ? 0 : 1;
+  return valid && latest_frame >= 90U && received < 100U ? 0 : 1;
 }
 
 int Publish() {
@@ -59,14 +50,54 @@ int Publish() {
   dog_patrol_perception_tracking::TargetImageRosAdapter::Config config;
   config.topic = kTopic;
   config.queue_capacity = 2U;
-  config.max_publish_hz = 20.0;
-  dog_patrol_perception_tracking::TargetImageRosAdapter adapter(*node, config);
-  std::this_thread::sleep_for(std::chrono::milliseconds(700));
-  for (std::uint64_t index = 0U; index < 10U; ++index) {
-    adapter.Consume(Observation(1710000000000000000ULL + index * 100000000ULL));
+  config.max_publish_hz = 1000.0;
+  auto adapter = std::make_shared<
+      dog_patrol_perception_tracking::TargetImageRosAdapter>(*node, config);
+  dog_patrol_perception_tracking::PrimaryTargetManager::Config primary_config;
+  primary_config.min_person_area_px = 1.0F;
+  dog_patrol_perception_tracking::PrimaryTargetObserver observer(
+      primary_config, adapter);
+  dog_patrol_perception_tracking::IdentityObservation identity;
+  identity.semantic_id = 42;
+  identity.state = dog_patrol_perception_tracking::IdentityState::kActive;
+  identity.supporting_raw_track_id = 7;
+  identity.class_id = dog_patrol_perception_tracking::ClassId::kPerson;
+  identity.confidence = 0.91F;
+  identity.bbox = cv::Rect2f{2.0F, 1.0F, 3.0F, 4.0F};
+  identity.visible = true;
+  cv::Mat source_image(6, 8, CV_8UC3, cv::Scalar{10, 20, 30});
+  const auto process_frame = [&](const std::uint32_t frame_number) {
+    dog_patrol_perception_tracking::SourceFrameMetadata source;
+    source.source_timestamp_ns = 1710000000000000000ULL +
+                                 static_cast<std::uint64_t>(frame_number) * 2000000ULL;
+    source.camera_frame_number = frame_number;
+    source.camera_frame_number_available = true;
+    source.image_width = source_image.cols;
+    source.image_height = source_image.rows;
+    source.optical_frame_id = "hik_camera_optical_frame";
+    observer.Update({identity}, source, source_image);
     rclcpp::spin_some(node);
-    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+  };
+  std::this_thread::sleep_for(std::chrono::milliseconds(700));
+  const auto frame_loop_start = std::chrono::steady_clock::now();
+  for (std::uint32_t index = 0U; index < 100U; ++index) {
+    process_frame(index);
   }
+  const auto frame_loop_elapsed = std::chrono::steady_clock::now() - frame_loop_start;
+  if (frame_loop_elapsed >= std::chrono::milliseconds(200)) {
+    RCLCPP_ERROR(node->get_logger(), "observer frame loop was blocked for %lld ms",
+                 static_cast<long long>(
+                     std::chrono::duration_cast<std::chrono::milliseconds>(frame_loop_elapsed)
+                         .count()));
+    return 1;
+  }
+  // Continue a short live cadence after the burst so DDS discovery timing
+  // cannot turn the slow-consumer assertion into a race.
+  for (std::uint32_t index = 100U; index < 110U; ++index) {
+    process_frame(index);
+    std::this_thread::sleep_for(std::chrono::milliseconds(20));
+  }
+  std::this_thread::sleep_for(std::chrono::milliseconds(500));
   return 0;
 }
 

@@ -15,12 +15,13 @@ PrimaryTargetObserver::PrimaryTargetObserver(PrimaryTargetManager::Config config
 PrimaryTargetObserver::PrimaryTargetObserver(
     PrimaryTargetManager::Config config,
     std::shared_ptr<PrimaryTargetObservationSink> sink)
-    : PrimaryTargetObserver(std::move(config), std::move(sink), CropConfig{}) {}
+    : PrimaryTargetObserver(
+          std::move(config), std::move(sink), PrimaryTargetCropConfig{}) {}
 
 PrimaryTargetObserver::PrimaryTargetObserver(
     PrimaryTargetManager::Config config,
     std::shared_ptr<PrimaryTargetObservationSink> sink,
-    CropConfig crop_config)
+    PrimaryTargetCropConfig crop_config)
     : primary_manager_(std::move(config)), sink_(std::move(sink)),
       crop_config_(crop_config) {
   if (!std::isfinite(crop_config_.padding_ratio) || crop_config_.padding_ratio < 0.0F) {
@@ -47,7 +48,8 @@ PrimaryTargetObserver::Output PrimaryTargetObserver::Update(
   output.primary = primary_manager_.Update(identities);
   output.primary_decision_reason = primary_manager_.LastDecisionReason();
   output.primary_reject_reason = primary_manager_.LastRejectReason();
-  output.observation = BuildObservation(output.primary, source, source_image, crop_config_);
+  output.observation = BuildPrimaryTargetObservation(
+      output.primary, source, source_image, crop_config_);
   if (sink_ != nullptr) {
     sink_->Consume(output.observation);
   }
@@ -64,11 +66,11 @@ void PrimaryTargetObserver::InvalidateCurrentObservation() {
   }
 }
 
-std::optional<PrimaryTargetObservation> PrimaryTargetObserver::BuildObservation(
+std::optional<PrimaryTargetObservation> BuildPrimaryTargetObservation(
     const PrimaryTargetResult &primary,
     const SourceFrameMetadata &source,
     const cv::Mat &source_image,
-    const CropConfig &crop_config) {
+    const PrimaryTargetCropConfig &crop_config) {
   if (!IsTrustedCurrentPrimary(primary) || source_image.empty() ||
       source.source_timestamp_ns == 0U || source.image_width != source_image.cols ||
       source.image_height != source_image.rows || source.optical_frame_id.empty()) {

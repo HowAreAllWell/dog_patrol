@@ -12,26 +12,29 @@
 
 namespace {
 
-using dog_patrol_perception_tracking::PrimaryTargetObservation;
 using dog_patrol_perception_tracking::TargetImageRosAdapter;
 
-PrimaryTargetObservation Observation(std::uint64_t timestamp_ns, int target_id = 42) {
-  PrimaryTargetObservation observation;
+dog_patrol_perception_tracking::PrimaryTargetObservation TargetImageObservation(
+    std::uint64_t timestamp_ns, int target_id = 42,
+    std::uint32_t frame_number = 7U) {
+  dog_patrol_perception_tracking::PrimaryTargetObservation observation;
   observation.target_id = target_id;
   observation.confidence = 0.91F;
   observation.source.source_timestamp_ns = timestamp_ns;
-  observation.source.camera_frame_number = 7U;
+  observation.source.camera_frame_number = frame_number;
   observation.source.camera_frame_number_available = true;
   observation.source.image_width = 8;
   observation.source.image_height = 6;
   observation.source.optical_frame_id = "hik_camera_optical_frame";
   observation.bbox = cv::Rect{2, 1, 3, 4};
-  observation.target_image = cv::Mat(4, 3, CV_8UC3, cv::Scalar{10, 20, 30}).clone();
+  observation.target_image =
+      cv::Mat(4, 3, CV_8UC3, cv::Scalar{10, 20, 30}).clone();
   return observation;
 }
 
 TEST(TargetImageRosAdapterTest, ConvertsOwnedBgrCropAndSourceCoordinates) {
-  auto message = TargetImageRosAdapter::ToMessage(Observation(1710000000123456789ULL));
+  auto message = TargetImageRosAdapter::ToMessage(
+      TargetImageObservation(1710000000123456789ULL));
 
   EXPECT_EQ(message->source_stamp.sec, 1710000000);
   EXPECT_EQ(message->source_stamp.nanosec, 123456789U);
@@ -68,7 +71,7 @@ TEST(TargetImageRosAdapterTest, SlowPublisherDropsOldCropsWithoutBlockingProduce
     std::this_thread::sleep_for(std::chrono::milliseconds(80));
   });
 
-  adapter.Consume(Observation(1000000000ULL));
+  adapter.Consume(TargetImageObservation(1000000000ULL));
   {
     std::unique_lock<std::mutex> lock(mutex);
     ASSERT_TRUE(first_publish_started.wait_for(
@@ -76,7 +79,8 @@ TEST(TargetImageRosAdapterTest, SlowPublisherDropsOldCropsWithoutBlockingProduce
   }
   const auto before = std::chrono::steady_clock::now();
   for (int index = 1; index <= 20; ++index) {
-    adapter.Consume(Observation(1000000000ULL + static_cast<std::uint64_t>(index) * 2000000ULL));
+    adapter.Consume(TargetImageObservation(
+        1000000000ULL + static_cast<std::uint64_t>(index) * 2000000ULL));
   }
   const auto producer_elapsed = std::chrono::steady_clock::now() - before;
 
@@ -103,17 +107,56 @@ TEST(TargetImageRosAdapterTest, InvalidatingTargetClearsPendingHistoricalCrop) {
     started_cv.notify_one();
     std::this_thread::sleep_for(std::chrono::milliseconds(60));
   });
-  adapter.Consume(Observation(1000000000ULL));
+  adapter.Consume(TargetImageObservation(1000000000ULL));
   {
     std::unique_lock<std::mutex> lock(mutex);
     ASSERT_TRUE(started_cv.wait_for(lock, std::chrono::seconds(1), [&] { return started; }));
   }
-  adapter.Consume(Observation(1002000000ULL));
+  adapter.Consume(TargetImageObservation(1002000000ULL));
   adapter.Consume(std::nullopt);
 
   EXPECT_FALSE(adapter.HasCurrentObservation());
   std::this_thread::sleep_for(std::chrono::milliseconds(100));
   EXPECT_EQ(adapter.GetMetrics().published, 1U);
+}
+
+TEST(TargetImageRosAdapterTest, InvalidationCancelsCropAlreadyDequeuedForConversion) {
+  std::mutex mutex;
+  std::condition_variable converting_cv;
+  std::condition_variable release_cv;
+  bool converting = false;
+  bool release = false;
+  std::atomic<int> published{0};
+  TargetImageRosAdapter::Config config;
+  config.max_publish_hz = 1000.0;
+  TargetImageRosAdapter adapter(
+      config,
+      [&](TargetImageRosAdapter::Message::UniquePtr) { ++published; },
+      [&](const dog_patrol_perception_tracking::PrimaryTargetObservation &observation) {
+        std::unique_lock<std::mutex> lock(mutex);
+        converting = true;
+        converting_cv.notify_one();
+        release_cv.wait(lock, [&] { return release; });
+        return TargetImageRosAdapter::ToMessage(observation);
+      });
+  adapter.Consume(TargetImageObservation(1000000000ULL));
+  {
+    std::unique_lock<std::mutex> lock(mutex);
+    ASSERT_TRUE(converting_cv.wait_for(
+        lock, std::chrono::seconds(1), [&] { return converting; }));
+  }
+
+  adapter.Consume(std::nullopt);
+  {
+    std::lock_guard<std::mutex> lock(mutex);
+    release = true;
+  }
+  release_cv.notify_one();
+  std::this_thread::sleep_for(std::chrono::milliseconds(50));
+
+  EXPECT_EQ(published.load(), 0);
+  EXPECT_FALSE(adapter.HasCurrentObservation());
+  EXPECT_EQ(adapter.GetMetrics().queue_dropped, 1U);
 }
 
 }  // namespace

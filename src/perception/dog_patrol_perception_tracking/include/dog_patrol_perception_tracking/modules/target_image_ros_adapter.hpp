@@ -24,6 +24,8 @@ class TargetImageRosAdapter final : public PrimaryTargetObservationSink {
  public:
   using Message = dog_patrol_perception_interfaces::msg::TrackedTargetImage;
   using PublishFunction = std::function<void(Message::UniquePtr)>;
+  using ConvertFunction =
+      std::function<Message::UniquePtr(const PrimaryTargetObservation &)>;
 
   struct Config {
     std::string topic{"/perception/tracked_target_image"};
@@ -41,6 +43,8 @@ class TargetImageRosAdapter final : public PrimaryTargetObservationSink {
   TargetImageRosAdapter(rclcpp::Node &node, Config config);
   // Test seam for deliberately slow consumers without a DDS dependency.
   TargetImageRosAdapter(Config config, PublishFunction publish);
+  TargetImageRosAdapter(Config config, PublishFunction publish,
+                        ConvertFunction convert);
   ~TargetImageRosAdapter() override;
 
   TargetImageRosAdapter(const TargetImageRosAdapter &) = delete;
@@ -54,17 +58,24 @@ class TargetImageRosAdapter final : public PrimaryTargetObservationSink {
   static rclcpp::QoS Qos();
 
  private:
+  struct PendingObservation {
+    PrimaryTargetObservation observation;
+    std::uint64_t generation{0U};
+  };
+
   void Start();
   void Run();
 
   Config config_;
   PublishFunction publish_;
+  ConvertFunction convert_;
   rclcpp::Publisher<Message>::SharedPtr publisher_;
   mutable std::mutex mutex_;
   std::condition_variable wake_;
-  std::deque<PrimaryTargetObservation> queue_;
+  std::deque<PendingObservation> queue_;
   Metrics metrics_;
   std::uint64_t last_published_source_ns_{0U};
+  std::uint64_t generation_{0U};
   bool current_observation_{false};
   bool stopping_{false};
   std::thread worker_;

@@ -83,11 +83,15 @@ class ObservationLifecycle {
 };
 
 class MissionTrackingRuntime final : public TrackingRuntime,
-                                     public DetectionTrackingStatusSink {
+                                     public DetectionTrackingStatusSink,
+                                     public ObservationLifecycle {
  public:
   explicit MissionTrackingRuntime(
-      std::unique_ptr<dog_patrol_perception_tracking::MissionRosAdapter> adapter)
-      : adapter_(std::move(adapter)) {}
+      std::unique_ptr<dog_patrol_perception_tracking::MissionRosAdapter> adapter,
+      std::shared_ptr<dog_patrol_perception_tracking::TargetImageRosAdapter> image_adapter,
+      dog_patrol_perception_tracking::PrimaryTargetCropConfig crop_config)
+      : adapter_(std::move(adapter)), image_adapter_(std::move(image_adapter)),
+        crop_config_(crop_config) {}
 
   const char *Name() const override { return "mission"; }
   bool FailFastOnInitializationError() const override { return false; }
@@ -96,21 +100,31 @@ class MissionTrackingRuntime final : public TrackingRuntime,
     adapter_->ReportDetectionTrackingRuntimeStatus(std::move(status));
   }
   void Publish() override { adapter_->PublishCapabilityStatus(); }
+  void BeforeFrame() override { image_adapter_->Consume(std::nullopt); }
+  bool Current() const override { return image_adapter_->HasCurrentObservation(); }
+  dog_patrol_perception_tracking::TargetImageRosAdapter::Metrics Metrics() const override {
+    return image_adapter_->GetMetrics();
+  }
   dog_patrol_perception_tracking::PrimaryTargetResult CurrentPrimary() const override {
     return adapter_->CurrentPrimary();
   }
   RuntimeFrameOutput ProcessFrame(
       const std::vector<dog_patrol_perception_tracking::IdentityObservation> &identities,
       const dog_patrol_perception_tracking::SourceFrameMetadata &source_metadata,
-      const cv::Mat &) override {
+      const cv::Mat &source_image) override {
     auto frame = adapter_->ProcessFrame(
         identities, dog_patrol_perception_tracking::MissionCoordinator::Clock::now(),
         source_metadata);
+    image_adapter_->Consume(
+        dog_patrol_perception_tracking::BuildPrimaryTargetObservation(
+            frame.primary, source_metadata, source_image, crop_config_));
     return {std::move(frame.primary), std::move(frame.primary_decision_reason),
             std::move(frame.primary_reject_reason)};
   }
  private:
   std::unique_ptr<dog_patrol_perception_tracking::MissionRosAdapter> adapter_;
+  std::shared_ptr<dog_patrol_perception_tracking::TargetImageRosAdapter> image_adapter_;
+  dog_patrol_perception_tracking::PrimaryTargetCropConfig crop_config_;
 };
 
 class StandaloneTrackingRuntime final : public TrackingRuntime,
@@ -119,7 +133,7 @@ class StandaloneTrackingRuntime final : public TrackingRuntime,
   explicit StandaloneTrackingRuntime(
       dog_patrol_perception_tracking::PrimaryTargetManager::Config config,
       std::shared_ptr<dog_patrol_perception_tracking::TargetImageRosAdapter> image_adapter,
-      dog_patrol_perception_tracking::PrimaryTargetObserver::CropConfig crop_config)
+      dog_patrol_perception_tracking::PrimaryTargetCropConfig crop_config)
       : image_adapter_(std::move(image_adapter)),
         observer_(std::move(config), image_adapter_, crop_config) {}
 
@@ -328,13 +342,6 @@ class PerceptionTrackingNode : public rclcpp::Node {
     }
 
     const RuntimeMode mode = ParseRuntimeMode(this->get_parameter("runtime.mode").as_string());
-    if (mode == RuntimeMode::kMission) {
-      auto runtime = std::make_unique<MissionTrackingRuntime>(
-          CreateMissionRosAdapter(target_cfg));
-      detection_tracking_status_sink_ = runtime.get();
-      runtime_ = std::move(runtime);
-      return;
-    }
     dog_patrol_perception_tracking::TargetImageRosAdapter::Config adapter_config;
     adapter_config.topic = this->get_parameter("target_image.topic").as_string();
     const auto queue_capacity = this->get_parameter("target_image.queue_capacity").as_int();
@@ -346,9 +353,17 @@ class PerceptionTrackingNode : public rclcpp::Node {
         this->get_parameter("target_image.max_publish_hz").as_double();
     auto image_adapter = std::make_shared<
         dog_patrol_perception_tracking::TargetImageRosAdapter>(*this, adapter_config);
-    dog_patrol_perception_tracking::PrimaryTargetObserver::CropConfig crop_config;
+    dog_patrol_perception_tracking::PrimaryTargetCropConfig crop_config;
     crop_config.padding_ratio = static_cast<float>(
         this->get_parameter("target_image.crop_padding_ratio").as_double());
+    if (mode == RuntimeMode::kMission) {
+      auto runtime = std::make_unique<MissionTrackingRuntime>(
+          CreateMissionRosAdapter(target_cfg), std::move(image_adapter), crop_config);
+      detection_tracking_status_sink_ = runtime.get();
+      observation_lifecycle_ = runtime.get();
+      runtime_ = std::move(runtime);
+      return;
+    }
     auto runtime = std::make_unique<StandaloneTrackingRuntime>(
         target_cfg, std::move(image_adapter), crop_config);
     observation_lifecycle_ = runtime.get();
