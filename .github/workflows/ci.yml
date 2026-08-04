@@ -23,6 +23,12 @@ jobs:
           apt-get install --no-install-recommends -y \
             libopencv-dev python3-colcon-common-extensions
 
+      - name: Test perception environment checker
+        shell: bash
+        run: |
+          python3 -m unittest src/perception/test/test_check_perception_environment.py
+          python3 src/perception/scripts/check_perception_environment.py --help
+
       - name: Build
         shell: bash
         run: |

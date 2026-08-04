@@ -1,6 +1,8 @@
 # 感知模块
 
 感知团队的实现入口。tracking 已正式迁入本仓，人脸和语音实现尚未建立。
+整个感知域的 Orin 平台、SDK、资产、参数、模块状态和统一环境检查见
+[`requirements.md`](requirements.md)。该入口不替代各 ROS package manifest 或模块内部配置。
 
 `dog_patrol_perception_tracking` 提供相机、检测、tracking、semantic identity、主目标选择、
 mission ROS 2 adapter，以及录制和离线评估工具。普通开发和 CI 显式关闭 Orin runtime，

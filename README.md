@@ -16,6 +16,7 @@
   ROS-independent `PrimaryTargetObservation` 返回当前可信语义主目标及自持有目标图像；mission 与
   standalone 均通过有界异步 ROS adapter 以 `TrackedTargetImage` 向独立人脸进程交付同帧 crop。
 - `dog_patrol_perception_orchestrator`：已实现授权编排和 capability readiness ROS 节点；真实人脸、语音 provider 尚未接入，因此生产环境不会提前发布感知 READY。
+- 感知域已提供整体部署 requirements 和统一 Orin 环境检查，显式区分 tracking、face、voice 和 orchestrator 当前状态。
 - 人脸实现尚未建立。
 - 目标公开远程：`https://github.com/HowAreAllWell/dog_patrol`
 

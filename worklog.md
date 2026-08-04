@@ -1,5 +1,14 @@
 # worklog
 
+## 2026-08-04 16:30 - 交付感知域部署检查
+
+- 目标：完成 dog_patrol #13，为感知 Orin 和最终导航 Orin 提供整个感知域的部署 requirements 与统一 PASS/FAIL 检查。
+- 完成：新增领域级 `requirements.md`，按 tracking/face/voice/orchestrator 记录 implemented/integrating/not-integrated 状态，固化两台真实 Orin 边界、平台/SDK 基线、Hik MVS 输入、本机 engine/ReID 资产和部署参数责任；新增统一 Python 检查器，覆盖架构、JetPack/L4T/CUDA/TensorRT/ROS/MVS 精确版本、USB 相机枚举、TensorRT engine 实际加载、ReID ONNX/external data 的同 OpenCV C++ runtime 实际加载、必需参数、full-runtime CMake/install/test 结果与模块状态，关键缺口统一汇总后非零退出；脚本逻辑测试接入 CI。
+- 关键结论：当前感知 Orin 实机核验为 aarch64、JetPack 6.2.1、L4T R36.4.7、CUDA 12.6、TensorRT 10.3、ROS 2 Humble、MVS SDK `0x04080003`，且 `MV-CU013-A0UC` USB ID `2bdf:0001` 可枚举；支持面为 JetPack 6.2/L4T R36.4，最终导航 Orin 精确版本待现场检查。环境检查 PASS 只表示当前已实现范围的部署前置完整，不伪造 face/voice readiness，也不替代 mission 感知整体 READY。
+- 涉及文件：`README.md`、`worklog.md`、`.github/workflows/ci.yml`、`src/perception/README.md`、`src/perception/requirements.md`、`src/perception/scripts/check_perception_environment.py`、`src/perception/test/test_check_perception_environment.py`、`src/perception/dog_patrol_perception_tracking/README.md`、`src/perception/dog_patrol_perception_tracking/CMakeLists.txt`、`src/perception/dog_patrol_perception_tracking/src/tools/validate_reid_onnx.cpp`。
+- 验证：检查器 11 项 Python 单测、`py_compile`、`ament_flake8`、CLI help 和 `git diff --check` 通过；当前默认空资产参数 + portable install 的实机检查正确汇总 6 个关键缺口并返回 1；`validate_reid_onnx` 链接 production OpenCV DNN，对缺失 ONNX 返回 1 和可操作诊断；独立目录 full Orin runtime 五包构建通过，CMake 为 `TRACKING_ENABLE_ORIN_RUNTIME=ON`且 live executable 可执行，全量 434 tests、0 errors/failures/skipped。
+- 后续：部署机提供不入库的真实 engine、ReID ONNX/external data、相机序列号和参数文件后保存首次完整 PASS 输出；最终导航 Orin 到位后用 `--target navigation-orin` 回填精确版本。人脸/语音实现与生产 provider 仍待后续问题接入。
+
 ## 2026-08-04 15:49 - 异步交付 standalone 主目标 crop
 
 - 目标：完成 dog_patrol #12，在 `PrimaryTargetObservation` 上建立可供独立人脸进程消费的 ROS 2 crop transport，且慢消费者不阻塞 tracking 主链。

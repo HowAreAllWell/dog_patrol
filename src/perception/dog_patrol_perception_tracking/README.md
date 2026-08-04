@@ -108,6 +108,10 @@ MVS `MV-CU013-A0UC`、`1280x1024@30 FPS`、`balanced` Bayer interpolation；部�
 CUDA/TensorRT 和 FFmpeg，并为 `detector.runtime_path` 配置本机 engine。环境检查和相机性能诊断仍可独立运行：
 
 ```bash
+# 整个感知域的 deployment gate（必需参数见 ../requirements.md）
+python3 src/perception/scripts/check_perception_environment.py --help
+
+# tracking package 内部低层诊断，不代表感知域 PASS
 src/perception/dog_patrol_perception_tracking/scripts/check_orin_env.sh
 src/perception/dog_patrol_perception_tracking/scripts/bench_hik_mvs_camera.sh
 ```
