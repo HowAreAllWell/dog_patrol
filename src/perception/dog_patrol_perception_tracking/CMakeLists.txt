@@ -24,6 +24,7 @@ set(CORE_SOURCES
   src/modules/mot_tracker_observability.cpp
   src/modules/mot_tracker.cpp
   src/modules/primary_target_manager.cpp
+  src/modules/primary_target_observer.cpp
   src/modules/mission_coordinator.cpp
   src/modules/mission_frame_transaction.cpp
   src/modules/perception_config_materializer.cpp
@@ -232,6 +233,19 @@ ament_export_dependencies(dog_patrol_interfaces)
 if(BUILD_TESTING)
   find_package(ament_cmake_gtest REQUIRED)
 
+  # The portable build cannot link the live executable without Orin SDKs, but
+  # it still compiles the node translation unit so mission/standalone control
+  # flow remains covered by ordinary CI.
+  if(NOT TRACKING_ENABLE_ORIN_RUNTIME)
+    add_library(${PROJECT_NAME}_live_node_compile_check OBJECT
+      src/perception_tracking_node.cpp)
+    target_compile_features(${PROJECT_NAME}_live_node_compile_check PUBLIC cxx_std_17)
+    ament_target_dependencies(${PROJECT_NAME}_live_node_compile_check
+      rclcpp dog_patrol_interfaces)
+    target_link_libraries(${PROJECT_NAME}_live_node_compile_check
+      ${PROJECT_NAME}_core ${PROJECT_NAME}_ros_adapter)
+  endif()
+
   if(TRACKING_ENABLE_ORIN_RUNTIME)
     add_test(
       NAME test_retired_media_cli
@@ -274,6 +288,13 @@ if(BUILD_TESTING)
     target_include_directories(test_primary_target_manager PRIVATE include)
     target_link_libraries(test_primary_target_manager ${PROJECT_NAME}_core)
     ament_target_dependencies(test_primary_target_manager rclcpp)
+  endif()
+
+  ament_add_gtest(test_primary_target_observer test/test_primary_target_observer.cpp)
+  if(TARGET test_primary_target_observer)
+    target_compile_features(test_primary_target_observer PUBLIC cxx_std_17)
+    target_include_directories(test_primary_target_observer PRIVATE include)
+    target_link_libraries(test_primary_target_observer ${PROJECT_NAME}_core)
   endif()
 
   ament_add_gtest(test_mission_coordinator test/test_mission_coordinator.cpp)

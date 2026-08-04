@@ -95,5 +95,6 @@ dog_patrol_perception_tracking_node:
       fps: 30.0
 
     runtime:
+      mode: "mission"
       tick_ms: 33
       inference_timing_metrics: true
