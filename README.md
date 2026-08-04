@@ -11,8 +11,9 @@
 - `dog_patrol_perception_tracking`：已从视觉准备仓保留必要历史导入；普通环境构建
   portable tracking 核心和 ROS adapter，Orin runtime 由部署端显式开启。
 - 本仓是 tracking 正式开发、构建、测试和部署的唯一权威入口；旧 `vision_demo_ws` 是非生产
-  研究仓库，其 `main` 和 `deploy/dog_patrol-integration` 为冻结基线，新实验只使用 `research/*`，
-  研究成果必须重新通过本仓 PR、CI 和评审进入正式实现；旧仓不是构建或部署依赖。
+  研究仓库，只有 `deploy/dog_patrol-integration` 是冻结部署基线；`main`、`dev` 和按需创建的
+  `research/*` 均可继续研究。研究成果必须重新通过本仓 PR、CI 和评审进入正式实现；旧仓不是
+  构建或部署依赖。
 - tracking 公共 mission tracer 已接入同工作区安装后的真实 `mission_supervisor`，无资产路径纳入普通
   CI，覆盖目标确认、fresh bbox、丢失/重获及无效状态输入门禁。
 - tracking 已提供不创建 mission ROS adapter 的正式 standalone Orin 启动方式，并通过
