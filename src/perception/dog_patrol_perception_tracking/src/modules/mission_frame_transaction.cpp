@@ -23,13 +23,8 @@ MissionFrameTransaction::MissionFrameTransaction(
 
 bool MissionFrameTransaction::IsTrustedPrimary(const PrimaryTargetResult &primary,
                                                const int semantic_id) {
-  if (semantic_id <= 0 || primary.state != PrimaryState::kLocked ||
-      primary.primary_target_id != semantic_id || !primary.primary_track.has_value()) {
-    return false;
-  }
-  const Track &track = primary.primary_track.value();
-  return track.authoritative && track.id == primary.raw_track_id && track.is_confirmed &&
-         track.class_id == ClassId::kPerson;
+  return semantic_id > 0 && primary.primary_target_id == semantic_id &&
+         IsTrustedCurrentPrimary(primary);
 }
 
 bool MissionFrameTransaction::CanRepresentTargetBox(

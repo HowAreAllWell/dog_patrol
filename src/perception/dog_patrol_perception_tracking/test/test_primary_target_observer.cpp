@@ -1,3 +1,4 @@
+#include <memory>
 #include <vector>
 
 #include <gtest/gtest.h>
@@ -10,6 +11,7 @@ namespace {
 using dog_patrol_perception_tracking::ClassId;
 using dog_patrol_perception_tracking::IdentityObservation;
 using dog_patrol_perception_tracking::IdentityState;
+using dog_patrol_perception_tracking::LatestPrimaryTargetObservation;
 using dog_patrol_perception_tracking::PrimaryState;
 using dog_patrol_perception_tracking::PrimaryTargetManager;
 using dog_patrol_perception_tracking::PrimaryTargetObserver;
@@ -66,15 +68,33 @@ TEST(PrimaryTargetObserverTest, ReturnsCurrentSemanticTargetWithOwnedImageAndSou
 }
 
 TEST(PrimaryTargetObserverTest, DoesNotReturnHistoricalObservationWhenCurrentTargetIsMissing) {
-  auto observer = Observer();
+  PrimaryTargetManager::Config config;
+  config.min_person_area_px = 1.0F;
+  auto sink = std::make_shared<LatestPrimaryTargetObservation>();
+  PrimaryTargetObserver observer(config, sink);
   cv::Mat frame(4, 5, CV_8UC3, cv::Scalar{10, 20, 30});
   const auto source = Metadata(frame);
   ASSERT_TRUE(observer.Update({TrustedPerson()}, source, frame).observation.has_value());
+  ASSERT_TRUE(sink->Current().has_value());
 
   const auto missing = observer.Update({}, source, frame);
 
   EXPECT_EQ(missing.primary.state, PrimaryState::kOccluded);
   EXPECT_FALSE(missing.observation.has_value());
+  EXPECT_FALSE(sink->Current().has_value());
+}
+
+TEST(PrimaryTargetObserverTest, UnassignedSemanticIdentityCannotBecomeAnObservation) {
+  auto observer = Observer();
+  cv::Mat frame(4, 5, CV_8UC3, cv::Scalar{10, 20, 30});
+  auto person = TrustedPerson();
+  person.semantic_id = 0;
+
+  const auto output = observer.Update({person}, Metadata(frame), frame);
+
+  EXPECT_EQ(output.primary.state, PrimaryState::kIdle);
+  EXPECT_EQ(output.primary.primary_target_id, -1);
+  EXPECT_FALSE(output.observation.has_value());
 }
 
 TEST(PrimaryTargetObserverTest, RejectsUnrepresentableCurrentFrameInsteadOfFabricatingObservation) {

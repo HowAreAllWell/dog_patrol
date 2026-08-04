@@ -13,6 +13,8 @@ Dog patrol 的正式 perception tracking 模块，包含相机接入、检测、
   运行态配置的统一 materialization 入口
 - `primary_target_manager`：`person`-only 主目标规则（首锁最大框 + continuity-first）
 - `primary_target_observer`：ROS-independent 当前主目标 observation seam；只在当前帧主目标可信时返回 semantic target ID、源帧元数据、clamped bbox 和自持有目标图像，不依赖 mission state/state sequence
+ ；可注入 `PrimaryTargetObservationSink`，standalone live 默认使用线程安全的
+  `LatestPrimaryTargetObservation` 消费并在无可信当前目标时显式清空
 - `mission_coordinator`：ROS-independent 任务输出协调 seam；按任务状态 / semantic target / state sequence 只产生当前帧可信 bbox，并负责配置化同目标 loss/reacquire event 时序
 - `mission_frame_transaction`：ROS-independent 一帧任务事务；在 identity 输出后统一执行 primary 更新、PATROL 目标确认、fresh bbox、loss/reacquire，并返回本帧 primary 诊断
 - `perception_readiness`：ROS-independent READY 聚合 seam；以 required capability contribution 和 `STARTUP state_seq` 产生至多一次 aggregate READY action
@@ -70,8 +72,9 @@ ros2 launch dog_patrol_perception_tracking \
 该入口仍使用 live 节点的同一套 `CameraIngest → PreprocessInfer → DetFilter → MotTracker →
 IdentityManager → PrimaryTargetManager` 实现；区别仅在输出边界：不创建 `MissionRosAdapter`，因此不订阅
 `MissionState`，也不发布 mission event、导航状态、selected-target bbox 或 capability status。
-`PrimaryTargetObserver::Update` 每帧产生可选的 `PrimaryTargetObservation`，其 `target_image` 是当前源图
-clamped bbox 的深拷贝；当前帧无可信 `LOCKED` 主目标时返回空值，不回放历史 observation。
+`PrimaryTargetObserver::Update` 每帧产生可选的 `PrimaryTargetObservation` 并交给 ROS-independent sink，
+其 `target_image` 是当前源图 clamped bbox 的深拷贝；当前帧无可信 `LOCKED` 主目标或 semantic ID 尚未分配时
+返回空值并清空 sink，不回放历史 observation。
 
 预览和 FFV1 diagnostic overlay 录制可独立启用：
 

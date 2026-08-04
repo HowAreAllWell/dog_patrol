@@ -32,6 +32,31 @@ namespace {
 
 const char *BoolStr(const bool value) { return value ? "true" : "false"; }
 
+enum class RuntimeMode {
+  kMission,
+  kStandalone,
+};
+
+RuntimeMode ParseRuntimeMode(const std::string &value) {
+  if (value == "mission") {
+    return RuntimeMode::kMission;
+  }
+  if (value == "standalone") {
+    return RuntimeMode::kStandalone;
+  }
+  throw std::runtime_error("runtime.mode must be 'mission' or 'standalone'");
+}
+
+const char *RuntimeModeName(const RuntimeMode mode) {
+  return mode == RuntimeMode::kStandalone ? "standalone" : "mission";
+}
+
+struct RuntimeFrameOutput {
+  dog_patrol_perception_tracking::PrimaryTargetResult primary;
+  std::string primary_decision_reason;
+  std::string primary_reject_reason;
+};
+
 }  // namespace
 
 class PerceptionTrackingNode : public rclcpp::Node {
@@ -52,7 +77,7 @@ class PerceptionTrackingNode : public rclcpp::Node {
     } catch (const std::exception &exception) {
       ReportDetectionTrackingRuntimeStatus(
           {false, false, "tracking initialization failed: " + std::string(exception.what())});
-      if (standalone_mode_) {
+      if (runtime_mode_ == RuntimeMode::kStandalone) {
         RCLCPP_ERROR(get_logger(), "standalone tracking initialization failed: %s", exception.what());
         throw;
       }
@@ -66,7 +91,7 @@ class PerceptionTrackingNode : public rclcpp::Node {
                                      std::bind(&PerceptionTrackingNode::Tick, this));
     if (runtime_operational_) {
       RCLCPP_INFO(get_logger(), "dog_patrol_perception_tracking_node started in %s mode.",
-                  standalone_mode_ ? "standalone" : "mission");
+                  RuntimeModeName(runtime_mode_));
     } else {
       RCLCPP_WARN(get_logger(),
                   "dog_patrol_perception_tracking_node started in capability-error reporting mode.");
@@ -207,18 +232,16 @@ class PerceptionTrackingNode : public rclcpp::Node {
       throw std::runtime_error("perception.camera_optical_frame_id must not be empty");
     }
 
-    const std::string mode = this->get_parameter("runtime.mode").as_string();
-    if (mode == "mission") {
+    runtime_mode_ = ParseRuntimeMode(this->get_parameter("runtime.mode").as_string());
+    if (runtime_mode_ == RuntimeMode::kMission) {
       InitializeMissionRosAdapter(target_cfg);
       return;
     }
-    if (mode == "standalone") {
-      standalone_mode_ = true;
-      primary_target_observer_ =
-          std::make_unique<dog_patrol_perception_tracking::PrimaryTargetObserver>(target_cfg);
-      return;
-    }
-    throw std::runtime_error("runtime.mode must be 'mission' or 'standalone'");
+    latest_primary_observation_ =
+        std::make_shared<dog_patrol_perception_tracking::LatestPrimaryTargetObservation>();
+    primary_target_observer_ =
+        std::make_unique<dog_patrol_perception_tracking::PrimaryTargetObserver>(
+            target_cfg, latest_primary_observation_);
   }
 
   dog_patrol_perception_tracking::PrimaryTargetManager::Config LoadPrimaryTargetConfig() {
@@ -292,8 +315,9 @@ class PerceptionTrackingNode : public rclcpp::Node {
   }
 
   dog_patrol_perception_tracking::PrimaryTargetResult CurrentPrimary() const {
-    return standalone_mode_ ? primary_target_observer_->CurrentPrimary()
-                            : mission_ros_adapter_->CurrentPrimary();
+    return runtime_mode_ == RuntimeMode::kStandalone
+               ? primary_target_observer_->CurrentPrimary()
+               : mission_ros_adapter_->CurrentPrimary();
   }
 
   void LoadConfigAndInitialize(const dog_patrol_perception_tracking::PrimaryTargetManager::Config &target_cfg) {
@@ -584,6 +608,27 @@ class PerceptionTrackingNode : public rclcpp::Node {
     return dog_patrol_perception_tracking::MissionCoordinator::Clock::now();
   }
 
+  RuntimeFrameOutput ProcessPrimaryFrame(
+      const std::vector<dog_patrol_perception_tracking::IdentityObservation> &identities,
+      const dog_patrol_perception_tracking::SourceFrameMetadata &source_metadata,
+      const cv::Mat &frame) {
+    RuntimeFrameOutput output;
+    if (runtime_mode_ == RuntimeMode::kStandalone) {
+      auto standalone_frame = primary_target_observer_->Update(identities, source_metadata, frame);
+      output.primary = std::move(standalone_frame.primary);
+      output.primary_decision_reason = std::move(standalone_frame.primary_decision_reason);
+      output.primary_reject_reason = std::move(standalone_frame.primary_reject_reason);
+      return output;
+    }
+
+    auto mission_frame = mission_ros_adapter_->ProcessFrame(
+        identities, MonotonicSourceTime(), source_metadata);
+    output.primary = std::move(mission_frame.primary);
+    output.primary_decision_reason = std::move(mission_frame.primary_decision_reason);
+    output.primary_reject_reason = std::move(mission_frame.primary_reject_reason);
+    return output;
+  }
+
   void Tick() {
     // A MultiThreadedExecutor must not run two inference frames at once. ROS
     // mission callbacks only copy a validated snapshot under their own mutex;
@@ -629,33 +674,19 @@ class PerceptionTrackingNode : public rclcpp::Node {
         dog_patrol_perception_tracking::TrackletObservationsFromTracks(tracks), tracker_.LastTrackletHypotheses(), primary_prev,
         &frame);
     const auto source_metadata = SourceMetadata(acquired_frame);
-    dog_patrol_perception_tracking::PrimaryTargetResult primary;
-    std::optional<dog_patrol_perception_tracking::PrimaryTargetObservation> observation;
-    std::string primary_decision_reason;
-    std::string primary_reject_reason;
-    if (standalone_mode_) {
-      auto standalone_frame = primary_target_observer_->Update(
-          identity_result.identities, source_metadata, frame);
-      primary = std::move(standalone_frame.primary);
-      observation = std::move(standalone_frame.observation);
-      primary_decision_reason = std::move(standalone_frame.primary_decision_reason);
-      primary_reject_reason = std::move(standalone_frame.primary_reject_reason);
-    } else {
-      auto mission_frame = mission_ros_adapter_->ProcessFrame(
-          identity_result.identities, MonotonicSourceTime(), source_metadata);
-      primary = std::move(mission_frame.primary);
-      primary_decision_reason = std::move(mission_frame.primary_decision_reason);
-      primary_reject_reason = std::move(mission_frame.primary_reject_reason);
-    }
+    auto frame_output = ProcessPrimaryFrame(identity_result.identities, source_metadata, frame);
+    auto &primary = frame_output.primary;
 
     if (monitor_.ShouldReport()) {
       const int primary_id = primary.primary_target_id;
       const auto camera_metrics = camera_.Metrics();
       RCLCPP_INFO(get_logger(),
                   "runtime_monitor mode=%s fps=%.2f state=%s primary_id=%d raw_track_id=%d observation_current=%s det=%zu filtered=%zu tracks=%zu",
-                  standalone_mode_ ? "standalone" : "mission",
+                  RuntimeModeName(runtime_mode_),
                   monitor_.CurrentFps(), dog_patrol_perception_tracking::PrimaryStateToString(primary.state).c_str(),
-                  primary_id, primary.raw_track_id, BoolStr(observation.has_value()),
+                  primary_id, primary.raw_track_id,
+                  BoolStr(latest_primary_observation_ != nullptr &&
+                          latest_primary_observation_->Current().has_value()),
                   detections.size(), filtered.size(), tracks.size());
       RCLCPP_INFO(
           get_logger(),
@@ -684,8 +715,8 @@ class PerceptionTrackingNode : public rclcpp::Node {
     if (visualizer_ != nullptr) {
       visualizer_->Submit(std::move(acquired_frame.bgr8), std::move(tracks), std::move(primary),
                           std::move(identity_result),
-                          std::move(primary_decision_reason),
-                          std::move(primary_reject_reason));
+                          std::move(frame_output.primary_decision_reason),
+                          std::move(frame_output.primary_reject_reason));
     }
   }
 
@@ -697,13 +728,15 @@ class PerceptionTrackingNode : public rclcpp::Node {
   dog_patrol_perception_tracking::MotTracker tracker_;
   std::unique_ptr<dog_patrol_perception_tracking::MissionRosAdapter> mission_ros_adapter_;
   std::unique_ptr<dog_patrol_perception_tracking::PrimaryTargetObserver> primary_target_observer_;
+  std::shared_ptr<dog_patrol_perception_tracking::LatestPrimaryTargetObservation>
+      latest_primary_observation_;
   rclcpp::CallbackGroup::SharedPtr mission_state_callback_group_;
   std::string camera_optical_frame_id_;
   std::mutex pipeline_mutex_;
   dog_patrol_perception_tracking::IdentityManager identity_manager_;
   std::unique_ptr<dog_patrol_perception_tracking::VisualizerRecorder> visualizer_;
   dog_patrol_perception_tracking::RuntimeMonitor monitor_;
-  bool standalone_mode_{false};
+  RuntimeMode runtime_mode_{RuntimeMode::kMission};
   bool runtime_operational_{false};
 };
 

@@ -54,6 +54,9 @@ std::optional<IdentityObservation> PrimaryTargetManager::SelectLargestValidPerso
     if (identity.class_id != ClassId::kPerson) {
       continue;
     }
+    if (identity.semantic_id <= 0) {
+      continue;
+    }
     if (require_mission_eligibility && !IsMissionEligible(identity)) {
       continue;
     }
@@ -343,7 +346,7 @@ PrimaryTargetResult PrimaryTargetManager::UpdateInternal(const std::vector<Ident
   auto new_identity = SelectLargestValidPersonIdentity(identities, require_mission_eligibility);
   if (new_identity.has_value()) {
     auto new_target = TrackFromIdentityObservation(new_identity.value());
-    primary_target_id_ = new_identity->semantic_id > 0 ? new_identity->semantic_id : 1;
+    primary_target_id_ = new_identity->semantic_id;
     bound_raw_track_id_ = new_target.id;
     new_target.authoritative = true;
     state_.state = PrimaryState::kLocked;

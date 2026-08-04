@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstdint>
+#include <cmath>
 #include <optional>
 #include <string>
 #include <vector>
@@ -134,6 +135,24 @@ struct PrimaryTargetResult {
   int raw_track_id{-1};       // Tracker-provided raw ID for debug/internal use.
   int missing_frames{0};
 };
+
+// Shared trust predicate for any public projection of the current primary.
+// Frame-specific representability (image bounds and metadata) remains the
+// responsibility of the projection boundary.
+inline bool IsTrustedCurrentPrimary(const PrimaryTargetResult &primary) {
+  if (primary.state != PrimaryState::kLocked || primary.primary_target_id <= 0 ||
+      !primary.primary_track.has_value()) {
+    return false;
+  }
+  const Track &track = primary.primary_track.value();
+  return track.authoritative && track.id == primary.raw_track_id && track.is_confirmed &&
+         track.class_id == ClassId::kPerson && !track.occlusion_suspect &&
+         !track.low_score_update && !track.association.low_score_detection &&
+         !track.just_recovered && !track.association.recovered_from_lost &&
+         (track.association.stage.empty() || track.association.passed_final_cost_gate) &&
+         std::isfinite(track.confidence) && track.confidence >= 0.0F &&
+         track.confidence <= 1.0F;
+}
 
 enum class IdentityState {
   kActive,

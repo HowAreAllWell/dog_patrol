@@ -9,7 +9,23 @@ namespace dog_patrol_perception_tracking {
 PrimaryTargetObserver::PrimaryTargetObserver() : PrimaryTargetObserver(PrimaryTargetManager::Config{}) {}
 
 PrimaryTargetObserver::PrimaryTargetObserver(PrimaryTargetManager::Config config)
-    : primary_manager_(std::move(config)) {}
+    : PrimaryTargetObserver(std::move(config), nullptr) {}
+
+PrimaryTargetObserver::PrimaryTargetObserver(
+    PrimaryTargetManager::Config config,
+    std::shared_ptr<PrimaryTargetObservationSink> sink)
+    : primary_manager_(std::move(config)), sink_(std::move(sink)) {}
+
+void LatestPrimaryTargetObservation::Consume(
+    std::optional<PrimaryTargetObservation> observation) {
+  std::lock_guard<std::mutex> lock(mutex_);
+  current_ = std::move(observation);
+}
+
+std::optional<PrimaryTargetObservation> LatestPrimaryTargetObservation::Current() const {
+  std::lock_guard<std::mutex> lock(mutex_);
+  return current_;
+}
 
 PrimaryTargetObserver::Output PrimaryTargetObserver::Update(
     const std::vector<IdentityObservation> &identities,
@@ -20,6 +36,9 @@ PrimaryTargetObserver::Output PrimaryTargetObserver::Update(
   output.primary_decision_reason = primary_manager_.LastDecisionReason();
   output.primary_reject_reason = primary_manager_.LastRejectReason();
   output.observation = BuildObservation(output.primary, source, source_image);
+  if (sink_ != nullptr) {
+    sink_->Consume(output.observation);
+  }
   return output;
 }
 
@@ -31,22 +50,14 @@ std::optional<PrimaryTargetObservation> PrimaryTargetObserver::BuildObservation(
     const PrimaryTargetResult &primary,
     const SourceFrameMetadata &source,
     const cv::Mat &source_image) {
-  if (primary.state != PrimaryState::kLocked || primary.primary_target_id <= 0 ||
-      !primary.primary_track.has_value() || source_image.empty() ||
+  if (!IsTrustedCurrentPrimary(primary) || source_image.empty() ||
       source.source_timestamp_ns == 0U || source.image_width != source_image.cols ||
       source.image_height != source_image.rows || source.optical_frame_id.empty()) {
     return std::nullopt;
   }
 
   const Track &track = primary.primary_track.value();
-  if (!track.authoritative || track.id != primary.raw_track_id || !track.is_confirmed ||
-      track.class_id != ClassId::kPerson || track.occlusion_suspect ||
-      track.low_score_update || track.association.low_score_detection ||
-      track.just_recovered || track.association.recovered_from_lost ||
-      (!track.association.stage.empty() && !track.association.passed_final_cost_gate) ||
-      !std::isfinite(track.confidence) ||
-      track.confidence < 0.0F || track.confidence > 1.0F ||
-      !std::isfinite(track.bbox.x) || !std::isfinite(track.bbox.y) ||
+  if (!std::isfinite(track.bbox.x) || !std::isfinite(track.bbox.y) ||
       !std::isfinite(track.bbox.width) || !std::isfinite(track.bbox.height) ||
       track.bbox.width <= 0.0F || track.bbox.height <= 0.0F) {
     return std::nullopt;

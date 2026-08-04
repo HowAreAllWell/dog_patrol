@@ -22,6 +22,25 @@ struct PrimaryTargetObservation {
   cv::Mat target_image;
 };
 
+// In-process consumer boundary for standalone integrations. Receiving
+// std::nullopt explicitly clears the current-frame value, preventing a sink
+// from accidentally replaying a historical target.
+class PrimaryTargetObservationSink {
+ public:
+  virtual ~PrimaryTargetObservationSink() = default;
+  virtual void Consume(std::optional<PrimaryTargetObservation> observation) = 0;
+};
+
+class LatestPrimaryTargetObservation final : public PrimaryTargetObservationSink {
+ public:
+  void Consume(std::optional<PrimaryTargetObservation> observation) override;
+  std::optional<PrimaryTargetObservation> Current() const;
+
+ private:
+  mutable std::mutex mutex_;
+  std::optional<PrimaryTargetObservation> current_;
+};
+
 class PrimaryTargetObserver {
  public:
   struct Output {
@@ -33,6 +52,8 @@ class PrimaryTargetObserver {
 
   PrimaryTargetObserver();
   explicit PrimaryTargetObserver(PrimaryTargetManager::Config config);
+  PrimaryTargetObserver(PrimaryTargetManager::Config config,
+                        std::shared_ptr<PrimaryTargetObservationSink> sink);
 
   // Advances primary selection using current identity evidence and returns an
   // observation only when that same frame contains a representable, trusted
@@ -50,6 +71,9 @@ class PrimaryTargetObserver {
       const cv::Mat &source_image);
 
   PrimaryTargetManager primary_manager_;
+  std::shared_ptr<PrimaryTargetObservationSink> sink_;
 };
 
 }  // namespace dog_patrol_perception_tracking
+#include <memory>
+#include <mutex>
