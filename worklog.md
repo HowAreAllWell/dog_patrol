@@ -1,5 +1,14 @@
 # worklog
 
+## 2026-08-04 19:59 - 切换 tracking 权威入口并归档旧视觉仓库
+
+- 目标：完成 #15，使 dog_patrol 成为 tracking 后续开发、构建、测试和部署的唯一权威入口，并在保留历史、回退锚点和本机资产的前提下归档旧视觉仓库。
+- 完成：先在旧仓冻结分支和默认分支提交并推送权威入口告示；主仓补齐感知 CODEOWNERS、Orin full-runtime 构建/检查/standalone 连续入口、许可证/来源/回退/归档证据和 face/voice/navigation 后续边界；首次 clean-clone 验收发现并修复 mission adapter 默认 DDS domain 污染，以及 integration fixture 首次 discovery 漏收 capability 后不重试的问题；PR #25/#26 均通过 CI 并 squash merge；最终 merged-main clean clone 验收后将 `HowAreAllWell/vision_demo_ws` 设为 GitHub archived。
+- 关键结论：主仓最终验收 SHA 为 `c60ea3e028fd4abbeb83e21e14360d7041834385`；旧仓 `isArchived=true`，默认分支告示为 `599bdfc`、冻结分支告示为 `4f3df15`，历史仍可读取。fixture 只在 STARTUP 以 200 ms 有界周期重送当前测试 readiness 样本，直到权威 PATROL ack；生产 readiness 行为和 perception READY exactly-once 断言未改变。face、voice 和导航整机验收仍未完成，父 Spec #3 保持开放。
+- 涉及文件：`.github/CODEOWNERS`、`README.md`、`docs/perception/tracking/issue15_authoritative_entry_archive.md`、`src/perception/requirements.md`、`src/perception/dog_patrol_perception_tracking/CMakeLists.txt`、`src/perception/dog_patrol_perception_tracking/test/mission_pipeline_integration_driver.cpp`、`worklog.md`；旧仓 `/home/user/workspace/vision_demo_ws/README.md`。
+- 验证：环境检查器 13 项通过；Standards/Spec 双轴审查及两轮修复复审无剩余 blocking finding；20 个全新 ROS domain 的 mission integration 20/20 通过；远端最终 main 全新 clone 五包 portable build 通过，399 tests、0 errors/failures/skipped；PR #25/#26 CI 通过；归档后 API 验证 `isArchived=true` 且两条历史分支 SHA 可读；主仓和旧仓本地均与远端同步且无 tracked 改动，旧仓 ignored 的 MVS 日志、模型、engine、ReID 和数据目录仍在。
+- 后续：继续由独立问题接入真实 face/voice provider，并在最终导航 Orin 完成精确环境与整机验收；不得因 #15 关闭父 Spec #3。
+
 ## 2026-08-04 18:44 - 完成 tracking Orin 硬件验收
 
 - 目标：完成 #14 的迁入后 tracking 真实 Orin/Hik/semantic/crop 性能与稳定性验收。
