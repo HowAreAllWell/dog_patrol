@@ -75,3 +75,14 @@ colcon 安装结果、完整 Orin runtime 构建开关、测试结果和上表�
 
 对 `navigation-orin` 的第一次成功检查只证明落在已支持系列；还需将输出中的精确版本
 回填到本文档，经现场验收后才能从“待核验”改为“已核验”。
+
+## Tracking verified baseline
+
+2026-08-04，当前感知 AGX Orin 已在 MAXN、CPU 2.2016 GHz 和 GPU 1.3005 GHz 锁频下完成
+tracking 硬件验收：production 默认 tracker/SID `light` backend，真实 Hik
+`BayerGB8` 1280×1024@30 FPS，真人 detector/tracker/semantic primary 和 standalone
+`TrackedTargetImage` 字段、同人 crop、离场停发均通过。无业务消费者、正常消费者和 500 ms
+慢消费者三轮各 60 秒的 tracking 稳态均值分别为 30.012、30.011 和 29.992 FPS；慢消费者未反压
+tracking。三轮 acquisition failure/MVS lost packet 均为 0，估计 drop/non-contiguous 均为 2/2
+且仅见于启动阶段。完整阶段分位数、资源、topic 和 queue-drop 基线见
+[`../../docs/perception/tracking/issue14_tracking_hardware_acceptance.md`](../../docs/perception/tracking/issue14_tracking_hardware_acceptance.md)。

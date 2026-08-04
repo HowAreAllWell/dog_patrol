@@ -1,13 +1,13 @@
 # worklog
 
-## 2026-08-04 17:15 - 继续 tracking Orin 硬件验收（现场目标阻塞）
+## 2026-08-04 18:44 - 完成 tracking Orin 硬件验收
 
 - 目标：完成 #14 的迁入后 tracking 真实 Orin/Hik/semantic/crop 性能与稳定性验收。
-- 完成：继承并修正迁移后 Orin 脚本路径和 MVS aarch64 库探测；新增 production-path TensorRT engine validator，消除 trtexec 在加载无关插件时崩溃导致的统一检查误报；修复统一检查器无条件要求 ReID ONNX 的 #13 回归；full-runtime Release 构建、统一环境检查和 434 项测试通过；真实 Hik clean capture、默认 light 60 秒 standalone 暗场吞吐、standalone ROS graph 隔离及历史真人 Hik 录像的当前主仓 detector/tracker/semantic identity 回归均已留证；新增未完成验收文档。
-- 关键结论：当前感知 Orin 为 MAXN；18:24 默认 light 重跑时 CPU 为动态调频且当前账号不能免密执行 `jetson_clocks`，后续资源对照必须统一锁频状态。真实 Hik+TensorRT+默认 light ReID 稳态均值 30.023 FPS，最终 1,745 frames、0 acquisition failure、4 estimated drops、2 non-contiguous frames、0 MVS lost packet；baseline 时物理视场为无人暗场，18:15 复查已有照明但仍无人，不能触发真实 primary/crop。旧 60 秒日志的 effective config 为人为覆盖的 `osnet_onnx`，不再作为默认 production baseline；此前统一检查器无条件要求该路径是 #13 回归，已改为按 backend 条件门禁。#14 未关闭，不能把 deterministic transport tests 或历史录像冒充当前 live crop 验收。
+- 完成：继承并修正迁移后 Orin 脚本路径和 MVS aarch64 库探测；新增 production-path TensorRT engine validator，消除 trtexec 在加载无关插件时崩溃导致的统一检查误报；修复统一检查器无条件要求 ReID ONNX 的 #13 回归；full-runtime Release 构建、统一环境检查和 434 项测试通过；完成真实 Hik clean capture、standalone graph 隔离、真人 detector/tracker/semantic primary、`TrackedTargetImage` 全字段与同人 crop、真人离场停发及三轮锁频资源对照，并回填 verified baseline。
+- 关键结论：正式资源轮统一为 MAXN、CPU 2.2016 GHz、GPU 1.3005 GHz 锁频和默认 tracker/SID `light` backend。生命周期/正常/慢消费者轮合计 703 条 crop 的 target ID、源时间/帧、原图 bbox/尺寸、BGR8 行列/字节均 0 错误，跨三轮八张抽样为同一真人；离场后立即停止 crop，约 6.07 秒失效门禁后清空 primary，随后约 35 秒没有旧消息。无业务消费者/正常/500 ms 慢消费者三轮全程 `LOCKED`，稳态均值为 30.012/30.011/29.992 FPS，慢消费者自身仅收 109 条但探针仍约 8.27 Hz，未反压 tracking；三轮 acquisition failure/MVS lost packet 均为 0。
 - 涉及文件：`README.md`、`docs/perception/tracking/issue14_tracking_hardware_acceptance.md`、`src/perception/requirements.md`、`src/perception/scripts/check_perception_environment.py`、`src/perception/test/test_check_perception_environment.py`、`src/perception/dog_patrol_perception_tracking/CMakeLists.txt`、`src/perception/dog_patrol_perception_tracking/src/tools/validate_tensorrt_engine.cpp`、`src/perception/dog_patrol_perception_tracking/scripts/bench_hik_mvs_camera.sh`、`src/perception/dog_patrol_perception_tracking/scripts/check_orin_env.sh`、`worklog.md`。
-- 验证：当前分支 full Orin Release build 通过；默认 light + 空模型路径的统一环境检查 PASS；检查器 13 项 Python 单测通过；五包 434 tests、0 errors/failures/skipped；真实 capture 61/61 frames，18:15 现场复查 capture 30/30 frames；默认 light 60 秒 live、60 个 tegrastats 样本、ROS graph snapshot和 539 帧历史 Hik 回归通过；Python `py_compile`、shell `bash -n` 和 `git diff --check` 通过。
-- 后续：18:15 重新采集的 30 帧显示已有照明但仍无真人；必须由现场人员让真人进入/离开相机视场，才能补齐 live `TrackedTargetImage` 字段/crop 内容/停止发布和正常/慢消费者资源与 queue-drop 对照；完成前不得提交通过结论、关闭 #14 或合并 PR。
+- 验证：当前分支 full Orin Release build 通过；默认 light + 空模型路径的统一环境检查 PASS；检查器 13 项 Python 单测通过；五包 434 tests、0 errors/failures/skipped；真实 capture 61/61 frames；真人 live 字段校验 703/703 条通过且跨三轮 8 张 crop 目检一致；三轮各 60 个 tegrastats 样本、topic hz/bw、camera/inference/queue 指标和历史 539 帧 Hik 回归通过；Python `py_compile`、shell `bash -n` 和 `git diff --check` 通过。
+- 后续：提交并完成最终 Standards/Spec 复审、PR CI 和合并收尾；现场原始日志、crop、参数、模型与录像继续只保存在忽略目录。
 
 ## 2026-08-04 16:30 - 交付感知域部署检查
 
