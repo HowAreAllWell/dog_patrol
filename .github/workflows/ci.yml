@@ -20,7 +20,8 @@ jobs:
         shell: bash
         run: |
           apt-get update
-          apt-get install --no-install-recommends -y python3-colcon-common-extensions
+          apt-get install --no-install-recommends -y \
+            libopencv-dev python3-colcon-common-extensions
 
       - name: Build
         shell: bash
@@ -28,7 +29,9 @@ jobs:
           source /opt/ros/humble/setup.bash
           colcon build --packages-select \
             dog_patrol_interfaces dog_patrol_manager \
-            dog_patrol_perception_orchestrator
+            dog_patrol_perception_orchestrator \
+            dog_patrol_perception_tracking \
+            --cmake-args -DTRACKING_ENABLE_ORIN_RUNTIME=OFF
 
       - name: Test
         shell: bash
@@ -38,5 +41,6 @@ jobs:
           colcon test --packages-select \
             dog_patrol_interfaces dog_patrol_manager \
             dog_patrol_perception_orchestrator \
+            dog_patrol_perception_tracking \
             --event-handlers console_direct+
           colcon test-result --verbose
