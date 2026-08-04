@@ -95,10 +95,18 @@ ament_target_dependencies(mission_ros_adapter_smoke
   rclcpp dog_patrol_interfaces dog_patrol_perception_interfaces)
 target_link_libraries(mission_ros_adapter_smoke ${PROJECT_NAME}_ros_adapter)
 
+# Deployment preflight uses the same CMake-resolved OpenCV DNN runtime as the
+# tracking core to validate ReID ONNX files and any referenced external data.
+add_executable(validate_reid_onnx src/tools/validate_reid_onnx.cpp)
+target_compile_features(validate_reid_onnx PUBLIC cxx_std_17)
+target_include_directories(validate_reid_onnx PRIVATE ${OpenCV_INCLUDE_DIRS})
+target_link_libraries(validate_reid_onnx ${OpenCV_LIBS})
+
 set(INSTALL_TARGETS
   ${PROJECT_NAME}_core
   ${PROJECT_NAME}_ros_adapter
-  mission_ros_adapter_smoke)
+  mission_ros_adapter_smoke
+  validate_reid_onnx)
 
 if(TRACKING_ENABLE_ORIN_RUNTIME)
   message(STATUS "Building the full Orin tracking runtime")
