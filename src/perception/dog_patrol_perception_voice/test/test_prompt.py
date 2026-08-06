@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import subprocess
+import threading
 
 import pytest
 
@@ -9,22 +10,92 @@ from dog_patrol_perception_voice.prompt import FfmpegAlsaPromptPlayer
 
 
 def test_prompt_player_synthesizes_then_plays_without_a_shell(monkeypatch) -> None:
-    calls: list[tuple[list[str], dict[str, object]]] = []
+    calls: list[tuple[list[str], dict[str, object], bytes | None]] = []
 
-    def fake_run(command, **settings):
-        calls.append((command, settings))
-        if command[0] == "ffmpeg":
-            return subprocess.CompletedProcess(command, 0, b"wav-bytes", b"")
-        return subprocess.CompletedProcess(command, 0, b"", b"")
+    class FakeProcess:
+        def __init__(self, command, **settings):
+            self.command = command
+            self.settings = settings
+            self.returncode = 0
 
-    monkeypatch.setattr(prompt_module.subprocess, "run", fake_run)
+        def communicate(self, *, input=None, timeout=None):
+            del timeout
+            calls.append((self.command, self.settings, input))
+            if self.command[0] == "ffmpeg":
+                return b"wav-bytes", b""
+            return b"", b""
 
-    FfmpegAlsaPromptPlayer(command_timeout_seconds=3.0).play("say 'hello'")
+        def terminate(self):
+            self.returncode = -15
 
-    assert [command[0] for command, _ in calls] == ["ffmpeg", "amixer", "aplay"]
-    assert calls[-1][1]["input"] == b"wav-bytes"
-    assert all(settings["timeout"] == 3.0 for _, settings in calls)
-    assert all(settings["check"] is False for _, settings in calls)
+        def kill(self):
+            self.returncode = -9
+
+        def wait(self, timeout=None):
+            del timeout
+            return self.returncode
+
+    def fake_popen(command, **settings):
+        return FakeProcess(command, **settings)
+
+    monkeypatch.setattr(prompt_module.subprocess, "Popen", fake_popen)
+
+    prompt_module.FfmpegAlsaPromptPlayer(command_timeout_seconds=3.0).play("say 'hello'")
+
+    assert [command[0] for command, _, _ in calls] == ["ffmpeg", "amixer", "aplay"]
+    assert calls[-1][2] == b"wav-bytes"
+    assert all("stdin" not in settings for _, settings, _ in calls[:2])
+    assert calls[-1][1]["stdin"] is subprocess.PIPE
+
+
+def test_prompt_player_request_stop_terminates_active_command(monkeypatch) -> None:
+    started = threading.Event()
+    terminated = threading.Event()
+
+    class FakeProcess:
+        def __init__(self, command, **_settings):
+            self.command = command
+            self.returncode = 0
+
+        def communicate(self, *, input=None, timeout=None):
+            del input, timeout
+            if self.command[0] == "aplay":
+                started.set()
+                assert terminated.wait(timeout=1.0)
+            return b"wav-bytes" if self.command[0] == "ffmpeg" else b"", b""
+
+        def terminate(self):
+            self.returncode = -15
+            terminated.set()
+
+        def kill(self):
+            self.returncode = -9
+            terminated.set()
+
+        def wait(self, timeout=None):
+            del timeout
+            return self.returncode
+
+    monkeypatch.setattr(prompt_module.subprocess, "Popen", FakeProcess)
+    player = prompt_module.FfmpegAlsaPromptPlayer(command_timeout_seconds=3.0)
+    errors: list[BaseException] = []
+
+    worker = threading.Thread(target=lambda: _capture_error(errors, player.play, "hello"))
+    worker.start()
+    assert started.wait(timeout=1.0)
+    player.request_stop()
+    worker.join(timeout=1.0)
+
+    assert not worker.is_alive()
+    assert len(errors) == 1
+    assert "cancelled" in str(errors[0])
+
+
+def _capture_error(errors: list[BaseException], operation, *args) -> None:
+    try:
+        operation(*args)
+    except BaseException as exc:
+        errors.append(exc)
 
 
 def test_prompt_player_rejects_invalid_settings() -> None:

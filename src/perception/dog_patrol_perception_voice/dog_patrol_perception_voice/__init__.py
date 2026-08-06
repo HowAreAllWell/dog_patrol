@@ -1,6 +1,11 @@
 """Portable task-scoped R818/Vosk voice verification core."""
 
-from .adapter import R818TaskSession, R818VoiceAdapter
+from .adapter import (
+    R818TaskSession,
+    R818VoiceAdapter,
+    VoiceTaskCancelled,
+    VoiceTaskCleanupError,
+)
 from .adb import SubprocessAdbFileTransfer
 from .config import VoiceConfig, default_config, load_voice_config
 from .prompt import FfmpegAlsaPromptPlayer
@@ -15,6 +20,8 @@ from .result import VoiceWindowResult
 __all__ = [
     "R818TaskSession",
     "R818VoiceAdapter",
+    "VoiceTaskCancelled",
+    "VoiceTaskCleanupError",
     "R818HardwareUnreadyError",
     "R818StreamingVoskSession",
     "SubprocessAdbEncodedPcmStream",

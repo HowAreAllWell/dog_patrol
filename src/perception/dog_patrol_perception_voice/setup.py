@@ -26,7 +26,12 @@ setup(
     zip_safe=False,
     maintainer="HowAreAllWell",
     maintainer_email="77225398+HowAreAllWell@users.noreply.github.com",
-    description="Portable task-scoped R818/Vosk voice verification core for dog_patrol.",
+    description="Asynchronous R818/Vosk voice evidence provider for dog_patrol.",
     license="BSD-3-Clause",
     tests_require=["pytest"],
+    entry_points={
+        "console_scripts": [
+            "perception_voice_provider = dog_patrol_perception_voice.provider:main",
+        ],
+    },
 )

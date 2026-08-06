@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+import threading
 from typing import Protocol
 
 from .config import VoiceConfig
@@ -21,6 +22,14 @@ class WindowRecognizer(Protocol):
 
 class PromptPlayer(Protocol):
     def play(self, prompt: str) -> None: ...
+
+
+class VoiceTaskCancelled(RuntimeError):
+    """Raised when a task loses its mission session while it is running."""
+
+
+class VoiceTaskCleanupError(RuntimeError):
+    """Raised when a task cannot restore the hardware it owned."""
 
 
 class R818VoiceAdapter:
@@ -136,16 +145,33 @@ class R818TaskSession:
         self._active = False
         self._closed = False
         self._attempt_number = 0
+        self._cancel_requested = threading.Event()
 
     def __enter__(self) -> R818TaskSession:
         if self._active or self._closed:
             raise RuntimeError("R818 task session cannot be entered again")
+        self._raise_if_cancelled()
+        reset_stop = getattr(self._prompt_player, "reset_stop", None)
+        if callable(reset_stop):
+            reset_stop()
+        self._raise_if_cancelled()
         self._stream.start()
         self._active = True
+        if self._cancel_requested.is_set():
+            try:
+                self.close()
+            except Exception as exc:
+                raise VoiceTaskCleanupError(
+                    "R818 task cleanup failed during startup"
+                ) from exc
+            raise VoiceTaskCancelled("R818 task was cancelled during startup")
         return self
 
     def __exit__(self, _exc_type: object, _exc: object, _traceback: object) -> None:
-        self.close()
+        try:
+            self.close()
+        except Exception as exc:
+            raise VoiceTaskCleanupError("R818 task cleanup failed") from exc
 
     def close(self) -> None:
         if self._closed:
@@ -156,12 +182,23 @@ class R818TaskSession:
         finally:
             self._active = False
 
+    def cancel(self) -> None:
+        """Request prompt/recognition to stop without waiting for hardware restore."""
+        self._cancel_requested.set()
+        request_stop = getattr(self._stream, "request_stop", None)
+        if callable(request_stop):
+            request_stop()
+        request_stop = getattr(self._prompt_player, "request_stop", None)
+        if callable(request_stop):
+            request_stop()
+
     def respond(
         self,
         prompt: str | None = None,
         *,
         timeout_seconds: float | None = None,
     ) -> VoiceWindowResult:
+        self._raise_if_cancelled()
         if not self._active:
             raise RuntimeError("R818 task session must be entered before respond")
         if self._attempt_number >= 2:
@@ -177,8 +214,17 @@ class R818TaskSession:
         response_timeout = (
             self._config.response_timeout_seconds if timeout_seconds is None else timeout_seconds
         )
-        self._prompt_player.play(selected_prompt)
-        result = self._recognizer.recognize(self._attempt_number, response_timeout)
+        try:
+            self._prompt_player.play(selected_prompt)
+            self._raise_if_cancelled()
+            result = self._recognizer.recognize(self._attempt_number, response_timeout)
+            self._raise_if_cancelled()
+        except VoiceTaskCancelled:
+            raise
+        except Exception as exc:
+            if self._cancel_requested.is_set():
+                raise VoiceTaskCancelled("R818 task was cancelled during recognition") from exc
+            raise
         if result.attempt_number not in (0, self._attempt_number):
             raise ValueError("recognizer returned a result for the wrong response window")
         if result.attempt_number == 0:
@@ -193,6 +239,10 @@ class R818TaskSession:
                 vote_counts=result.vote_counts,
             )
         return result
+
+    def _raise_if_cancelled(self) -> None:
+        if self._cancel_requested.is_set():
+            raise VoiceTaskCancelled("R818 task was cancelled")
 
 
 def _single_value_factory(value: TaskStream | None) -> Callable[[], TaskStream]:

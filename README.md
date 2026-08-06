@@ -19,8 +19,8 @@
 - tracking 已提供不创建 mission ROS adapter 的正式 standalone Orin 启动方式，并通过
   ROS-independent `PrimaryTargetObservation` 返回当前可信语义主目标及自持有目标图像；mission 与
   standalone 均通过有界异步 ROS adapter 以 `TrackedTargetImage` 向独立人脸进程交付同帧 crop。
-- `dog_patrol_perception_orchestrator`：已实现授权编排、授权事件 adapter 和 capability readiness ROS 节点；真实人脸、语音 provider 尚未接入，因此生产环境不会提前发布感知 READY 或伪造授权结果。
-- `dog_patrol_perception_voice`：已按 #33 allowlist 迁入可移植的 R818/Vosk 任务级核心；生产 Adapter 每个 task 只建立一次八通道流并支持两个独立响应窗，默认不落盘 PCM。真实 voice provider/evidence producer、生产 READY 和现场 FAR/FRR 验收仍未完成。
+- `dog_patrol_perception_orchestrator`：已实现授权编排、授权事件 adapter 和 capability readiness ROS 节点；真实人脸尚未接入，因此生产环境不会提前发布感知 READY 或伪造授权结果。
+- `dog_patrol_perception_voice`：已按 #33 allowlist 迁入可移植的 R818/Vosk 任务级核心，并在 #34 接入异步 `perception_voice_provider`；provider 按 `MissionState` 管理单一硬件 session，将两轮结果发布到现有 `AuthorizationEvidence`，默认不落盘 PCM。真实设备接管、模型效果、生产 READY 和现场 FAR/FRR 验收仍未完成。
 - 语音部署候选源仓 `moonshine_voice_commands` 已以 `b979a7fd33aac5c9ced9591bb507e483faf4aef5` 冻结；#33 只从该版本选择性提炼，不把源仓作为构建或运行依赖。允许/排除清单与复现证据见 [`docs/issue32_voice_deployment_baseline_audit.md`](docs/issue32_voice_deployment_baseline_audit.md)，迁入说明见 [`docs/perception/voice/issue33_voice_import.md`](docs/perception/voice/issue33_voice_import.md)。
 - 感知域已提供整体部署 requirements 和统一 Orin 环境检查，显式区分 tracking、face、voice 和 orchestrator 当前状态。
 - tracking 已在当前感知 Orin 完成 full-runtime build/test、真实 Hik 30 FPS、standalone 隔离、
@@ -29,7 +29,7 @@
 - detection/tracking 接入父 Spec #3 已完成独立整体验收；子票、合并、CI、现场证据与明确后续边界见
   [`docs/perception/tracking/issue3_spec_acceptance.md`](docs/perception/tracking/issue3_spec_acceptance.md)。
 - 人脸实现尚未建立。
-- 语音核心已迁入，但真实设备接管、模型/设备部署和导航整机验收尚未完成；它们与人脸 provider
+- 语音 provider 已完成 ROS 接入，但真实设备接管、模型/设备部署和导航整机验收尚未完成；它们与人脸 provider
   接入继续作为后续工作，不属于 tracking 迁入和仓库切换的完成证据。
 - 目标公开远程：`https://github.com/HowAreAllWell/dog_patrol`
 
@@ -41,7 +41,7 @@ src/orchestration/dog_patrol_manager/      # 主状态机和 supervisor
 src/navigation/                            # 导航模块预留位置
 src/perception/                            # 感知业务编排入口
 src/perception/dog_patrol_perception_interfaces/ # 感知内部 ROS 2 合同
-src/perception/dog_patrol_perception_voice/ # voice 任务级核心与生产 Adapter
+src/perception/dog_patrol_perception_voice/ # voice 核心、异步 evidence provider 与生产 Adapter
 src/perception/dog_patrol_perception_tracking/ # tracking 核心与可选 Orin runtime
 docs/contracts/                             # 可评审的接口协议
 docs/perception/tracking/                    # tracking 稳定说明与迁移验收证据
@@ -91,6 +91,8 @@ Apache-2.0。具体范围和许可证副本见 [`LICENSES/README.md`](LICENSES/R
 感知编排模块说明见 [`src/perception/README.md`](src/perception/README.md)。
 tracking 的 portable/Orin 构建、运行和配置说明见
 [`src/perception/dog_patrol_perception_tracking/README.md`](src/perception/dog_patrol_perception_tracking/README.md)。
+voice provider 的 ROS 参数、取消/会话门禁和验证边界见
+[`docs/perception/voice/issue34_voice_provider.md`](docs/perception/voice/issue34_voice_provider.md)。
 旧仓研究治理、追溯和回退锚点见
 [`docs/perception/tracking/issue15_authoritative_entry_archive.md`](docs/perception/tracking/issue15_authoritative_entry_archive.md)。
 父 Spec 的整体验收矩阵见

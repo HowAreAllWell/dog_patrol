@@ -2,12 +2,16 @@
 <package format="3">
   <name>dog_patrol_perception_voice</name>
   <version>0.1.0</version>
-  <description>Portable task-scoped R818/Vosk voice verification core for dog_patrol.</description>
+  <description>Asynchronous R818/Vosk voice evidence provider for dog_patrol.</description>
   <maintainer email="77225398+HowAreAllWell@users.noreply.github.com">HowAreAllWell</maintainer>
   <license>BSD-3-Clause</license>
 
   <buildtool_depend>ament_python</buildtool_depend>
 
+  <exec_depend>ament_index_python</exec_depend>
+  <exec_depend>rclpy</exec_depend>
+  <exec_depend>dog_patrol_interfaces</exec_depend>
+  <exec_depend>dog_patrol_perception_interfaces</exec_depend>
   <exec_depend>python3-numpy</exec_depend>
   <exec_depend>python3-yaml</exec_depend>
 

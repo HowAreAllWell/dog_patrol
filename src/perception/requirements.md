@@ -13,7 +13,7 @@
 | --- | --- | --- | --- |
 | tracking | `implemented` | Jetson Orin；CUDA/TensorRT、Hikrobot MVS SDK、相机、本机 engine、ROS 参数；仅 `osnet_onnx` 后端需要 ReID ONNX | 完整 Orin build/test；相机可枚举；live 节点加载 engine 并稳定输出 tracking 指标 |
 | face | `not-integrated` | 预期从 `TrackedTargetImage` 消费同帧主目标 crop；实现、模型和白名单尚未进入本仓 | 当前只验证 crop transport；不得把测试 provider 当作生产 readiness |
-| voice | `implemented` | `dog_patrol_perception_voice` 的 R818/Vosk 核心、Prompt player、安装 helper 和受控配置；设备、Vosk 模型和 evidence producer 由部署机提供 | 核心可移植测试已通过；真实 provider 尚未发布生产 `voice` READY |
+| voice | `implemented` | `dog_patrol_perception_voice` 的 R818/Vosk 核心、异步 evidence provider、Prompt player、安装 helper 和受控配置；设备与 Vosk 模型由部署机提供 | provider ROS 端到端 fake hardware 验证已通过；真实设备恢复、模型效果和生产 `voice` READY 仍待现场验收 |
 | orchestrator | `integrating` | ROS 2 Humble；已有 readiness 聚合、ROS-independent 授权规则和通用授权事件 adapter | tracking/face/voice 对当前 STARTUP sequence 都 ready 才能发布感知整体 READY；真实 face/voice provider 尚未接入 |
 
 环境检查中的最终 `PASS` 表示“当前已实现范围的部署前置条件完整”，不会把
@@ -49,8 +49,9 @@ ID `2bdf:0001`）。已验收模式为 `BayerGB8` (`0x0108000a`)、`1280x1024@30
   特征向量、录像或本机临时目录。
 
 face 的模型、隐私数据与设备需求要在实现接入时由各自模块补充；voice 的 Vosk 模型、ADB serial 和
-音频设备同样由部署机提供，不进入 Git。voice 的迁入边界与安装验证见
-[`../../docs/perception/voice/issue33_voice_import.md`](../../docs/perception/voice/issue33_voice_import.md)。
+音频设备同样由部署机提供，不进入 Git。voice 的 provider 参数和验收边界见
+[`../../docs/perception/voice/issue34_voice_provider.md`](../../docs/perception/voice/issue34_voice_provider.md)，
+迁入边界与安装验证见 [`../../docs/perception/voice/issue33_voice_import.md`](../../docs/perception/voice/issue33_voice_import.md)。
 
 ## 统一环境检查
 
@@ -123,8 +124,9 @@ ros2 launch dog_patrol_perception_tracking \
 
 运行后以 production 节点的 `runtime_monitor` 日志、`ros2 topic hz /perception/tracked_target_image` 和
 `ros2 topic bw /perception/tracked_target_image` 核验相机、推理、tracking FPS 和 crop transport。
-需要 mission 模式时改为运行 `dog_patrol_perception_tracking_node`，并同时启动主仓内的 supervisor
-和 orchestrator；在 face/voice 真实 provider 接入前，感知整体 READY 仍应保持未就绪。
+需要 mission 模式时改为运行 `dog_patrol_perception_tracking_node`，并同时启动主仓内的 supervisor、
+orchestrator 和 `perception_voice_provider`；在 face provider、voice capability readiness 和现场
+部署输入均未完成前，感知整体 READY 仍应保持未就绪。
 
 ## Tracking verified baseline
 

@@ -90,6 +90,8 @@ class InterleavedPcmTaskStream(Protocol):
 
     def close(self) -> None: ...
 
+    def request_stop(self) -> None: ...
+
 
 _BUNDLED_HELPER = Path(__file__).with_name("assets") / "r818_pcm_base64_aarch64"
 _REMOTE_HELPER = "/tmp/dog-patrol-r818-base64"
@@ -180,6 +182,8 @@ class SubprocessAdbEncodedPcmStream:
             raise R818HardwareUnreadyError(f"R818 PCM stream could not start: {exc}") from exc
 
     def window_chunks(self, timeout_seconds: float) -> Iterator[bytes]:
+        if self._reader_stop.is_set():
+            raise R818HardwareUnreadyError("R818 PCM stream stop was requested")
         if not self._started or self._remote_shell is None:
             raise RuntimeError("R818 PCM stream is not active")
         if not math.isfinite(timeout_seconds) or timeout_seconds <= 0:
@@ -213,14 +217,33 @@ class SubprocessAdbEncodedPcmStream:
                 f"R818 PCM stream cleanup failed: {cleanup_error}"
             ) from cleanup_error
 
+    def request_stop(self) -> None:
+        """Interrupt the current response window; close() still owns restoration."""
+        if self._close_called:
+            return
+        self._reader_stop.set()
+        with self._window_condition:
+            self._active_window_generation = None
+            self._window_started_at = None
+            self._window_deadline = None
+            self._window_data.clear()
+            self._window_buffered_bytes = 0
+            self._window_condition.notify_all()
+
     def _wait_until_streaming(self) -> None:
         deadline = self._clock() + self._start_timeout_seconds
         with self._window_condition:
-            while not self._stream_ready and self._reader_error is None:
+            while (
+                not self._stream_ready
+                and self._reader_error is None
+                and not self._reader_stop.is_set()
+            ):
                 remaining = deadline - self._clock()
                 if remaining <= 0:
                     raise TimeoutError("R818 PCM stream did not produce audio before the start deadline")
                 self._window_condition.wait(timeout=min(remaining, 0.25))
+            if self._reader_stop.is_set():
+                raise R818HardwareUnreadyError("R818 PCM stream stop was requested during startup")
             if self._reader_error is not None:
                 raise OSError(f"R818 PCM stream reader failed during startup: {self._reader_error}")
 

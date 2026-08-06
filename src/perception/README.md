@@ -1,7 +1,7 @@
 # 感知模块
 
-感知团队的实现入口。tracking 和可移植 voice 核心已正式迁入本仓；人脸实现尚未建立，voice
-的真实 provider/evidence producer 尚未接入。
+感知团队的实现入口。tracking 和可移植 voice 核心已正式迁入本仓；异步 voice evidence provider
+已接入，人脸实现尚未建立。
 整个感知域的 Orin 平台、SDK、资产、参数、模块状态和统一环境检查见
 [`requirements.md`](requirements.md)。该入口不替代各 ROS package manifest 或模块内部配置。
 
@@ -10,8 +10,11 @@ mission ROS 2 adapter，以及录制和离线评估工具。普通开发和 CI �
 只构建可移植核心；CUDA、TensorRT、Hik MVS 和 FFmpeg runtime 由 Orin 部署显式开启。
 
 `dog_patrol_perception_voice` 提供按需调用的 R818/Vosk 任务级核心：一个 task session 只接管和恢复
-一次 R818，Prompt 期间丢弃音频，最多运行两个独立响应窗；它不提供常驻监听、落盘 PCM 或通用 CLI。
-生产 Adapter、安装资产和迁入边界见 [`dog_patrol_perception_voice/README.md`](dog_patrol_perception_voice/README.md)
+一次 R818，Prompt 期间丢弃音频，最多运行两个独立响应窗；异步 `perception_voice_provider` 只对
+未阻塞的 `VERIFY_IDENTITY` 任务创建一个硬件 session，并将每轮结果发布到既有
+`AuthorizationEvidence`。它不提供常驻监听、落盘 PCM 或通用 CLI。生产 Adapter、provider 参数、
+安装资产和迁入边界见 [`dog_patrol_perception_voice/README.md`](dog_patrol_perception_voice/README.md)、
+[`../../docs/perception/voice/issue34_voice_provider.md`](../../docs/perception/voice/issue34_voice_provider.md)
 以及 [`../../docs/perception/voice/issue33_voice_import.md`](../../docs/perception/voice/issue33_voice_import.md)。
 
 `dog_patrol_perception_interfaces` 是感知团队内部 ROS 2 interface package，当前提供：
@@ -35,8 +38,9 @@ provider 保留的当前状态。授权证据是离散、reliable、volatile 事
 - `perception_readiness` 节点：只在三者状态都匹配当前 STARTUP sequence 时发布一次
   `SOURCE_PERCEPTION/READY`。
 
-tracking 只发布自身 `detection_tracking` 状态，不再聚合或发布整体 READY。人脸和 voice 当前没有
-生产 evidence provider，因此保持 not-ready；测试通过独立 adapter publisher 注入它们的状态。与主状态机
+tracking 只发布自身 `detection_tracking` 状态，不再聚合或发布整体 READY。人脸尚无生产 evidence
+provider；voice provider 只发布授权 evidence，不改变 capability readiness 规则，因此整体 READY 仍由
+现有 required capability 流程决定。与主状态机
 交互只使用 `dog_patrol_interfaces`，感知内部 capability transport 使用
 `dog_patrol_perception_interfaces`。
 
@@ -72,5 +76,5 @@ colcon test-result --verbose
 - 第一次有效 `NOT_PASSED` 返回 `None`，第二次返回最终未通过结果；
 - 非当前 `state_seq + target_id` 的旧结果返回 `None`，不能影响新会话；
 - `perception_authorization` ROS adapter 订阅内部 `AuthorizationEvidence`，并将完成结果映射为公共
-  任务事件；该职责不下沉到人脸或语音算法。真实 provider 尚未接入，因此生产环境当前不会产生
-  evidence 或授权事件；测试 provider 只存在于测试代码，不安装。
+  任务事件；该职责不下沉到人脸或语音算法。voice provider 通过 `perception_voice_provider` 产生
+  evidence，测试 fake hardware 只存在于测试代码，不安装。
