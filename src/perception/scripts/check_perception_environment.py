@@ -8,6 +8,7 @@ import ast
 import ctypes
 from dataclasses import dataclass
 import glob
+import hashlib
 import os
 from pathlib import Path
 import platform
@@ -16,6 +17,19 @@ import shutil
 import subprocess
 import sys
 from typing import Dict, Optional, Sequence, Tuple
+
+
+VOICE_SOURCE_PACKAGE = Path(__file__).parents[1] / "dog_patrol_perception_voice"
+if VOICE_SOURCE_PACKAGE.is_dir() and str(VOICE_SOURCE_PACKAGE) not in sys.path:
+    sys.path.insert(0, str(VOICE_SOURCE_PACKAGE))
+try:
+    from dog_patrol_perception_voice.config import default_config, load_voice_config
+except ImportError as exc:  # pragma: no cover - source package is part of this repository.
+    default_config = None
+    load_voice_config = None
+    VOICE_CONFIG_IMPORT_ERROR = exc
+else:
+    VOICE_CONFIG_IMPORT_ERROR = None
 
 
 @dataclass(frozen=True)
@@ -54,6 +68,9 @@ TARGET_POLICIES = {
 SUPPORTED_TARGETS = tuple(TARGET_POLICIES)
 EXPECTED_MODULES = {"tracking", "face", "voice", "orchestrator"}
 ALLOWED_MODULE_STATUSES = {"implemented", "integrating", "not-integrated"}
+VOICE_HELPER_SHA256 = (
+    "c2517d85e60845679acaeab4aa6c4f439b828393c5d73599dcef0e4fa68c0f52"
+)
 
 
 class Reporter:
@@ -173,6 +190,22 @@ def find_install_artifact(prefix: Path, relative: Path) -> Optional[Path]:
         return direct
     candidates = list(prefix.glob(f"*/{relative}"))
     return candidates[0] if candidates else None
+
+
+def find_installed_voice_asset(prefix: Path, filename: str) -> Optional[Path]:
+    candidates = [
+        path
+        for path in prefix.glob("*/lib/python*/site-packages/dog_patrol_perception_voice/assets")
+        for path in [path / filename]
+        if path.is_file()
+    ]
+    direct_candidates = [
+        path
+        for path in prefix.glob("lib/python*/site-packages/dog_patrol_perception_voice/assets")
+        for path in [path / filename]
+        if path.is_file()
+    ]
+    return (direct_candidates + candidates)[0] if direct_candidates + candidates else None
 
 
 def detect_tensorrt_version() -> Optional[str]:
@@ -456,6 +489,111 @@ def check_parameters_and_assets(
     check_file(reporter, "tracker configuration", tracker_config, nonempty=True)
 
 
+def load_vosk_model(model_dir: Path) -> object:
+    """Load the deployment model using the same runtime dependency as voice."""
+    try:
+        import vosk
+    except ImportError as exc:
+        raise RuntimeError("the Vosk runtime dependency is not installed") from exc
+    return vosk.Model(str(model_dir))
+
+
+def check_voice_environment(
+    reporter: Reporter,
+    model_dir: Path,
+    config_file: Path,
+    helper_path: Path,
+) -> None:
+    """Check voice deployment inputs using read-only hardware/tool queries."""
+    voice_config = default_config() if default_config is not None else None
+    check_file(reporter, "voice configuration", config_file, nonempty=True)
+    if config_file.is_file():
+        try:
+            if load_voice_config is None:
+                raise RuntimeError(
+                    f"voice config module unavailable: {VOICE_CONFIG_IMPORT_ERROR}"
+                )
+            voice_config = load_voice_config(config_file)
+            reporter.pass_("voice configuration parses")
+        except (OSError, ValueError, RuntimeError) as exc:
+            reporter.fail(f"voice configuration is invalid: {exc}")
+
+    if voice_config is None:
+        reporter.fail("voice configuration runtime is unavailable")
+        return
+
+    if model_dir.is_dir():
+        try:
+            load_vosk_model(model_dir)
+            reporter.pass_("Vosk runtime and model load")
+        except Exception as exc:
+            reporter.fail(f"Vosk runtime/model preflight failed: {exc}")
+    else:
+        reporter.fail(f"Vosk model directory missing: {model_dir}")
+
+    if helper_path.is_file() and os.access(helper_path, os.X_OK):
+        digest = hashlib.sha256(helper_path.read_bytes()).hexdigest()
+        if digest == VOICE_HELPER_SHA256:
+            reporter.pass_("installed R818 helper checksum")
+        else:
+            reporter.fail(
+                "installed R818 helper checksum mismatch: "
+                f"expected {VOICE_HELPER_SHA256}, got {digest}"
+            )
+    else:
+        reporter.fail(f"installed R818 helper missing or not executable: {helper_path}")
+
+    adb_executable = voice_config.adb_executable
+    device_serial = voice_config.device_serial
+    prompt_device = voice_config.prompt_device
+    mixer_card = voice_config.prompt_mixer_card
+    mixer_control = voice_config.prompt_mixer_control
+
+    adb = shutil.which(adb_executable)
+    if adb is None:
+        reporter.fail(f"ADB executable missing: {adb_executable}")
+    else:
+        command = [adb]
+        if device_serial:
+            command.extend(["-s", device_serial])
+        command.append("get-state")
+        code, output = run(command)
+        if code == 0 and output.strip() == "device":
+            reporter.pass_("ADB device is ready (read-only get-state)")
+        else:
+            reporter.fail(f"ADB device is not ready: {output or 'get-state failed'}")
+
+    ffmpeg = shutil.which("ffmpeg")
+    if ffmpeg is None:
+        reporter.fail("FFmpeg executable missing")
+    else:
+        code, output = run([ffmpeg, "-hide_banner", "-filters"])
+        if code == 0 and re.search(r"\bflite\b", output, re.IGNORECASE):
+            reporter.pass_("FFmpeg flite filter")
+        else:
+            reporter.fail("FFmpeg does not provide the flite audio filter")
+
+    aplay = shutil.which("aplay")
+    if aplay is None:
+        reporter.fail("aplay executable missing")
+    else:
+        code, output = run([aplay, "-L"])
+        if code == 0 and prompt_device in output:
+            reporter.pass_(f"ALSA playback device enumerated: {prompt_device}")
+        else:
+            reporter.fail(f"configured ALSA playback device is not enumerated: {prompt_device}")
+
+    amixer = shutil.which("amixer")
+    if amixer is None:
+        reporter.fail("amixer executable missing")
+    else:
+        code, output = run([amixer, "-c", mixer_card, "scontrols"])
+        if code == 0 and mixer_control in output:
+            reporter.pass_(f"ALSA mixer control enumerated: {mixer_control}")
+        else:
+            reporter.fail(f"configured ALSA mixer control is not enumerated: {mixer_control}")
+
+
 def check_build(
     reporter: Reporter, workspace: Path, install_prefix: Path, build_base: Path
 ) -> None:
@@ -482,6 +620,16 @@ def check_build(
             )
         else:
             reporter.pass_(f"built package: {package}")
+
+    for executable in ("perception_voice_provider", "perception_voice_readiness"):
+        artifact = find_install_artifact(
+            install_prefix,
+            Path(f"lib/dog_patrol_perception_voice/{executable}"),
+        )
+        if artifact is not None and os.access(artifact, os.X_OK):
+            reporter.pass_(f"installed voice executable: {executable}")
+        else:
+            reporter.fail(f"installed voice executable missing: {executable}")
 
     executable = find_install_artifact(
         install_prefix,
@@ -563,6 +711,9 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--target", choices=SUPPORTED_TARGETS, required=True)
     parser.add_argument("--params-file", type=Path, required=True)
     parser.add_argument("--tracker-config", type=Path, required=True)
+    parser.add_argument("--voice-model-dir", type=Path, required=True)
+    parser.add_argument("--voice-config-file", type=Path)
+    parser.add_argument("--voice-helper-path", type=Path)
     parser.add_argument("--workspace", type=Path, default=default_workspace)
     parser.add_argument("--install-prefix", type=Path, default=default_workspace / "install")
     parser.add_argument("--build-base", type=Path, default=default_workspace / "build")
@@ -601,6 +752,27 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         onnx_validator,
     )
     check_build(reporter, workspace, install_prefix, build_base)
+    voice_config = args.voice_config_file
+    if voice_config is None:
+        voice_config = find_install_artifact(
+            install_prefix,
+            Path("share/dog_patrol_perception_voice/config/voice.yaml"),
+        )
+    if voice_config is None:
+        voice_config = Path("/__dog_patrol_voice_install_missing__/config/voice.yaml")
+    voice_helper = args.voice_helper_path or find_installed_voice_asset(
+        install_prefix, "r818_pcm_base64_aarch64"
+    )
+    if voice_helper is None:
+        voice_helper = Path(
+            "/__dog_patrol_voice_install_missing__/r818_pcm_base64_aarch64"
+        )
+    check_voice_environment(
+        reporter,
+        args.voice_model_dir.resolve(),
+        voice_config.resolve(),
+        voice_helper.resolve(),
+    )
     report_module_status(
         reporter, workspace, workspace / "src/perception/requirements.md"
     )

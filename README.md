@@ -20,7 +20,7 @@
   ROS-independent `PrimaryTargetObservation` 返回当前可信语义主目标及自持有目标图像；mission 与
   standalone 均通过有界异步 ROS adapter 以 `TrackedTargetImage` 向独立人脸进程交付同帧 crop。
 - `dog_patrol_perception_orchestrator`：已实现授权编排、授权事件 adapter 和 capability readiness ROS 节点；真实人脸尚未接入，因此生产环境不会提前发布感知 READY 或伪造授权结果。
-- `dog_patrol_perception_voice`：已按 #33 allowlist 迁入可移植的 R818/Vosk 任务级核心，并在 #34 接入异步 `perception_voice_provider`；provider 按 `MissionState` 管理单一硬件 session，将两轮结果发布到现有 `AuthorizationEvidence`，默认不落盘 PCM。真实设备接管、模型效果、生产 READY 和现场 FAR/FRR 验收仍未完成。
+- `dog_patrol_perception_voice`：已按 #33 allowlist 迁入可移植的 R818/Vosk 任务级核心，在 #34 接入异步 `perception_voice_provider`，并在 #35 接入只读 `perception_voice_readiness` 与安装/部署 preflight；provider 按 `MissionState` 管理单一硬件 session，将两轮结果发布到现有 `AuthorizationEvidence`，默认不落盘 PCM。真实设备接管、模型效果、音频播放、现场生产 READY 和 FAR/FRR 验收仍未完成。
 - 语音部署候选源仓 `moonshine_voice_commands` 已以 `b979a7fd33aac5c9ced9591bb507e483faf4aef5` 冻结；#33 只从该版本选择性提炼，不把源仓作为构建或运行依赖。允许/排除清单与复现证据见 [`docs/issue32_voice_deployment_baseline_audit.md`](docs/issue32_voice_deployment_baseline_audit.md)，迁入说明见 [`docs/perception/voice/issue33_voice_import.md`](docs/perception/voice/issue33_voice_import.md)。
 - 感知域已提供整体部署 requirements 和统一 Orin 环境检查，显式区分 tracking、face、voice 和 orchestrator 当前状态。
 - tracking 已在当前感知 Orin 完成 full-runtime build/test、真实 Hik 30 FPS、standalone 隔离、
