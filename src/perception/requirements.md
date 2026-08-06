@@ -13,7 +13,7 @@
 | --- | --- | --- | --- |
 | tracking | `implemented` | Jetson Orin；CUDA/TensorRT、Hikrobot MVS SDK、相机、本机 engine、ROS 参数；仅 `osnet_onnx` 后端需要 ReID ONNX | 完整 Orin build/test；相机可枚举；live 节点加载 engine 并稳定输出 tracking 指标 |
 | face | `not-integrated` | 预期从 `TrackedTargetImage` 消费同帧主目标 crop；实现、模型和白名单尚未进入本仓 | 当前只验证 crop transport；不得把测试 provider 当作生产 readiness |
-| voice | `implemented` | `dog_patrol_perception_voice` 的 R818/Vosk 核心、异步 evidence provider、Prompt player、安装 helper 和受控配置；设备与 Vosk 模型由部署机提供 | provider ROS 端到端 fake hardware 验证已通过；真实设备恢复、模型效果和生产 `voice` READY 仍待现场验收 |
+| voice | `integrating` | `dog_patrol_perception_voice` 的 R818/Vosk 核心、异步 evidence provider、只读 voice preflight/readiness、Prompt player、安装 helper 和受控配置；设备与 Vosk 模型由部署机提供 | preflight、安装产物和 transient-local `voice` capability 接口已接入；真实设备恢复、模型效果、音频播放和生产现场验收仍待完成 |
 | orchestrator | `integrating` | ROS 2 Humble；已有 readiness 聚合、ROS-independent 授权规则和通用授权事件 adapter | tracking/face/voice 对当前 STARTUP sequence 都 ready 才能发布感知整体 READY；真实 face/voice provider 尚未接入 |
 
 环境检查中的最终 `PASS` 表示“当前已实现范围的部署前置条件完整”，不会把
@@ -51,6 +51,7 @@ ID `2bdf:0001`）。已验收模式为 `BayerGB8` (`0x0108000a`)、`1280x1024@30
 face 的模型、隐私数据与设备需求要在实现接入时由各自模块补充；voice 的 Vosk 模型、ADB serial 和
 音频设备同样由部署机提供，不进入 Git。voice 的 provider 参数和验收边界见
 [`../../docs/perception/voice/issue34_voice_provider.md`](../../docs/perception/voice/issue34_voice_provider.md)，
+readiness/preflight 入口见 [`../../docs/perception/voice/issue35_voice_readiness.md`](../../docs/perception/voice/issue35_voice_readiness.md)，
 迁入边界与安装验证见 [`../../docs/perception/voice/issue33_voice_import.md`](../../docs/perception/voice/issue33_voice_import.md)。
 
 ## 统一环境检查
@@ -90,6 +91,8 @@ python3 src/perception/scripts/check_perception_environment.py \
   --target perception-orin \
   --params-file /absolute/path/to/orin_tracking.yaml \
   --tracker-config /absolute/path/to/bot_sort.yaml \
+  --voice-model-dir /absolute/path/to/vosk-model \
+  --voice-config-file /absolute/path/to/voice.yaml \
   --install-prefix /absolute/path/to/dog_patrol/install \
   --build-base /absolute/path/to/dog_patrol/build
 ```
@@ -125,8 +128,8 @@ ros2 launch dog_patrol_perception_tracking \
 运行后以 production 节点的 `runtime_monitor` 日志、`ros2 topic hz /perception/tracked_target_image` 和
 `ros2 topic bw /perception/tracked_target_image` 核验相机、推理、tracking FPS 和 crop transport。
 需要 mission 模式时改为运行 `dog_patrol_perception_tracking_node`，并同时启动主仓内的 supervisor、
-orchestrator 和 `perception_voice_provider`；在 face provider、voice capability readiness 和现场
-部署输入均未完成前，感知整体 READY 仍应保持未就绪。
+orchestrator、`perception_voice_readiness` 和 `perception_voice_provider`；在 face provider、voice
+现场部署输入和现场验收均未完成前，感知整体 READY 仍应保持未就绪。
 
 ## Tracking verified baseline
 

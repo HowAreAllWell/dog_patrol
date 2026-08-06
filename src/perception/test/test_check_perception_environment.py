@@ -74,10 +74,105 @@ class EnvironmentCheckTest(unittest.TestCase):
             {
                 "tracking": "implemented",
                 "face": "not-integrated",
-                "voice": "implemented",
+                "voice": "integrating",
                 "orchestrator": "integrating",
             },
         )
+
+    def test_voice_preflight_checks_install_assets_and_read_only_runtime_queries(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            model = root / "vosk-model"
+            model.mkdir()
+            config = root / "voice.yaml"
+            config.write_text(
+                "\n".join(
+                    [
+                        "adb_executable: adb",
+                        "prompt_device: plughw:CARD=Device,DEV=0",
+                        "prompt_mixer_card: Device",
+                        "prompt_mixer_control: PCM",
+                    ]
+                ),
+                encoding="utf-8",
+            )
+            helper = root / "r818_pcm_base64_aarch64"
+            helper.write_bytes(b"helper")
+            helper.chmod(0o755)
+            commands = []
+
+            def fake_run(command):
+                commands.append(command)
+                if command[-1] == "get-state":
+                    return 0, "device"
+                if command[0] == "/usr/bin/ffmpeg":
+                    return 0, "flite"
+                if command[0] == "/usr/bin/aplay":
+                    return 0, "plughw:CARD=Device,DEV=0"
+                if command[0] == "/usr/bin/amixer":
+                    return 0, "Simple mixer control 'PCM',0"
+                raise AssertionError(command)
+
+            reporter = MODULE.Reporter()
+            with (
+                mock.patch.object(
+                    MODULE,
+                    "VOICE_HELPER_SHA256",
+                    "e81d3b0e9d82feaaf5f6e55bdff24731d7eee08632ffa63801e6397290c5d20a",
+                ),
+                mock.patch.object(
+                    MODULE.shutil,
+                    "which",
+                    side_effect=lambda name: f"/usr/bin/{name}",
+                ),
+                mock.patch.object(MODULE, "run", side_effect=fake_run),
+                mock.patch.object(MODULE, "load_vosk_model", return_value=object()),
+            ):
+                MODULE.check_voice_environment(reporter, model, config, helper)
+
+        self.assertEqual(reporter.failures, 0)
+        self.assertIn("get-state", commands[0])
+        self.assertTrue(all("push" not in command and "shell" not in command for command in commands))
+
+    def test_voice_preflight_rejects_missing_model_and_bad_helper_checksum(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            config = root / "voice.yaml"
+            config.write_text("passphrase: blue star\n", encoding="utf-8")
+            helper = root / "helper"
+            helper.write_bytes(b"wrong")
+            helper.chmod(0o755)
+            reporter = MODULE.Reporter()
+            with mock.patch.object(MODULE.shutil, "which", return_value=None):
+                MODULE.check_voice_environment(
+                    reporter,
+                    root / "missing-model",
+                    config,
+                    helper,
+                )
+
+        self.assertGreaterEqual(reporter.failures, 2)
+
+    def test_voice_preflight_uses_strict_package_config_validation(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            config = root / "voice.yaml"
+            config.write_text("unknown_field: true\n", encoding="utf-8")
+            reporter = MODULE.Reporter()
+            output = io.StringIO()
+            with (
+                mock.patch.object(MODULE.shutil, "which", return_value=None),
+                redirect_stdout(output),
+            ):
+                MODULE.check_voice_environment(
+                    reporter,
+                    root / "missing-model",
+                    config,
+                    root / "missing-helper",
+                )
+
+        self.assertIn("voice configuration is invalid", output.getvalue())
+        self.assertGreaterEqual(reporter.failures, 2)
 
     def test_rejects_parameter_file_without_ros_mapping(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -295,6 +390,10 @@ class EnvironmentCheckTest(unittest.TestCase):
             )
             executable.parent.mkdir(parents=True)
             executable.touch(mode=0o755)
+            for voice_executable in ("perception_voice_provider", "perception_voice_readiness"):
+                voice_path = install_prefix / "lib/dog_patrol_perception_voice" / voice_executable
+                voice_path.parent.mkdir(parents=True, exist_ok=True)
+                voice_path.touch(mode=0o755)
             cache = root / "build/dog_patrol_perception_tracking/CMakeCache.txt"
             cache.parent.mkdir(parents=True)
             cache.write_text("TRACKING_ENABLE_ORIN_RUNTIME:BOOL=ON\n", encoding="utf-8")
@@ -322,6 +421,8 @@ class EnvironmentCheckTest(unittest.TestCase):
             "/tmp/deploy.yaml",
             "--tracker-config",
             "/tmp/tracker.yaml",
+            "--voice-model-dir",
+            "/tmp/voice-model",
         ]
         output = io.StringIO()
         with (
@@ -329,6 +430,7 @@ class EnvironmentCheckTest(unittest.TestCase):
             mock.patch.object(MODULE, "check_mvs_and_camera"),
             mock.patch.object(MODULE, "check_parameters_and_assets"),
             mock.patch.object(MODULE, "check_build"),
+            mock.patch.object(MODULE, "check_voice_environment"),
             mock.patch.object(MODULE, "report_module_status"),
             redirect_stdout(output),
         ):
@@ -344,6 +446,8 @@ class EnvironmentCheckTest(unittest.TestCase):
             "/tmp/deploy.yaml",
             "--tracker-config",
             "/tmp/tracker.yaml",
+            "--voice-model-dir",
+            "/tmp/voice-model",
         ]
 
         def fail_platform(reporter, _target):
@@ -355,6 +459,7 @@ class EnvironmentCheckTest(unittest.TestCase):
             mock.patch.object(MODULE, "check_mvs_and_camera"),
             mock.patch.object(MODULE, "check_parameters_and_assets"),
             mock.patch.object(MODULE, "check_build"),
+            mock.patch.object(MODULE, "check_voice_environment"),
             mock.patch.object(MODULE, "report_module_status"),
             redirect_stdout(output),
         ):

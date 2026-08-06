@@ -12,7 +12,8 @@ mission ROS 2 adapter，以及录制和离线评估工具。普通开发和 CI �
 `dog_patrol_perception_voice` 提供按需调用的 R818/Vosk 任务级核心：一个 task session 只接管和恢复
 一次 R818，Prompt 期间丢弃音频，最多运行两个独立响应窗；异步 `perception_voice_provider` 只对
 未阻塞的 `VERIFY_IDENTITY` 任务创建一个硬件 session，并将每轮结果发布到既有
-`AuthorizationEvidence`。它不提供常驻监听、落盘 PCM 或通用 CLI。生产 Adapter、provider 参数、
+`AuthorizationEvidence`。另有 `perception_voice_readiness` 对每个 STARTUP sequence 执行只读部署
+preflight 并发布 `CapabilityStatus`。它不提供常驻监听、落盘 PCM 或通用 CLI。生产 Adapter、provider 参数、
 安装资产和迁入边界见 [`dog_patrol_perception_voice/README.md`](dog_patrol_perception_voice/README.md)、
 [`../../docs/perception/voice/issue34_voice_provider.md`](../../docs/perception/voice/issue34_voice_provider.md)
 以及 [`../../docs/perception/voice/issue33_voice_import.md`](../../docs/perception/voice/issue33_voice_import.md)。
@@ -39,8 +40,8 @@ provider 保留的当前状态。授权证据是离散、reliable、volatile 事
   `SOURCE_PERCEPTION/READY`。
 
 tracking 只发布自身 `detection_tracking` 状态，不再聚合或发布整体 READY。人脸尚无生产 evidence
-provider；voice provider 只发布授权 evidence，不改变 capability readiness 规则，因此整体 READY 仍由
-现有 required capability 流程决定。与主状态机
+provider；voice provider 只发布授权 evidence，voice readiness provider 只发布自身 capability，不改变
+capability readiness 规则，因此整体 READY 仍由现有 required capability 流程决定。与主状态机
 交互只使用 `dog_patrol_interfaces`，感知内部 capability transport 使用
 `dog_patrol_perception_interfaces`。
 

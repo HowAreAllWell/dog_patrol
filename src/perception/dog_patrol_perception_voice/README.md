@@ -1,6 +1,6 @@
 # dog_patrol_perception_voice
 
-`dog_patrol_perception_voice` 是按需调用的语音验证核心，不提供常驻监听或产品 CLI。
+`dog_patrol_perception_voice` 是按需调用的语音验证核心和启动 readiness provider，不提供常驻监听或产品 CLI。
 一个 `R818TaskSession` 只建立一次八通道 R818 流；Prompt 播放期间 reader 持续消费但丢弃完整
 音频帧，Prompt 返回后再打开响应窗。每个响应窗独立返回 `VoiceWindowResult`，最多可在同一任务中
 连续执行两窗，任务结束时统一清理远端临时节点并恢复厂商音频服务。
@@ -21,8 +21,28 @@ ros2 run dog_patrol_perception_voice perception_voice_provider \
 ```
 
 `helper_path` 为空时使用安装包内的 ARM64 helper；`provider`、`mission_state_topic` 和
-`authorization_evidence_topic` 可按联调命名空间覆盖。provider 不新增 ROS msg，也不发布或修改
-capability readiness。
+`authorization_evidence_topic` 可按联调命名空间覆盖。授权 evidence 与 capability readiness 是两条
+独立接口：`perception_voice_provider` 只发布前者，`perception_voice_readiness` 只发布后者。
+
+### 启动和 readiness preflight
+
+安装后推荐使用统一 launch：
+
+```bash
+ros2 launch dog_patrol_perception_voice voice.launch.py \
+  model_dir:=/path/to/vosk-model \
+  config_file:=/path/to/voice.yaml
+```
+
+`perception_voice_readiness` 订阅 transient-local `/mission/state`。每个有效 STARTUP
+`state_seq` 只运行一次真实 preflight，并以同一 `observed_startup_state_seq` 发布 transient-local
+`CapabilityStatus`：缺失部署输入或设备不可用为 `NOT_READY`，配置、模型或 helper 校验错误为 `ERROR`，
+全部通过才为 `READY`；旧 STARTUP 的 retained status 不会匹配新的 sequence。
+
+preflight 只读取安装后的配置/helper、加载 Vosk 模型、执行 `adb get-state`、查询 FFmpeg 的 flite
+filter 和 ALSA 的 `aplay -L`/`amixer scontrols`。它不创建 voice task，不执行 ADB push/shell，不接管
+R818，不停止 `vtn_init`/demo，不改变 mixer，不播放 Prompt；readiness 不等价于真实语音效果或现场
+FAR/FRR 验收。
 
 ## 配置和安装资产
 
@@ -41,5 +61,6 @@ capability readiness。
   python3 -m pip install --requirement requirements.txt
   ```
 
-Vosk 运行时和模型是部署依赖，不随 package 发布；PCM、模型、录音和评测数据不进入仓库。
+Vosk 运行时和模型是部署依赖，不随 package 发布；PCM、模型、录音和评测数据不进入仓库。ROS 节点
+从安装产物解析默认 config/helper 路径，不回退到源仓源码或源仓虚拟环境。
 本 package 的代码和 helper 按 BSD-3-Clause 分发，许可全文见同目录 `LICENSE`。

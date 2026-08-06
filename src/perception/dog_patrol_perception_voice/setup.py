@@ -1,3 +1,5 @@
+from glob import glob
+
 from setuptools import find_packages, setup
 
 
@@ -14,6 +16,7 @@ setup(
         ),
         (f"share/{package_name}", ["package.xml", "README.md", "LICENSE", "requirements.txt"]),
         (f"share/{package_name}/config", ["config/voice.yaml"]),
+        (f"share/{package_name}/launch", glob("launch/*.launch.py")),
         (f"share/{package_name}/tools", ["tools/r818_pcm_base64.c"]),
     ],
     package_data={package_name: ["assets/r818_pcm_base64_aarch64"]},
@@ -32,6 +35,7 @@ setup(
     entry_points={
         "console_scripts": [
             "perception_voice_provider = dog_patrol_perception_voice.provider:main",
+            "perception_voice_readiness = dog_patrol_perception_voice.readiness_node:main",
         ],
     },
 )

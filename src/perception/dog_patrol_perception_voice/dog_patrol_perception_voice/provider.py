@@ -452,7 +452,7 @@ def _default_config_file() -> str:
     try:
         share_dir = Path(get_package_share_directory("dog_patrol_perception_voice"))
     except Exception:
-        share_dir = Path(__file__).resolve().parents[1]
+        return "/__dog_patrol_voice_install_missing__/config/voice.yaml"
     return str(share_dir / "config" / "voice.yaml")
 
 
