@@ -20,6 +20,7 @@
   ROS-independent `PrimaryTargetObservation` 返回当前可信语义主目标及自持有目标图像；mission 与
   standalone 均通过有界异步 ROS adapter 以 `TrackedTargetImage` 向独立人脸进程交付同帧 crop。
 - `dog_patrol_perception_orchestrator`：已实现授权编排、授权事件 adapter 和 capability readiness ROS 节点；真实人脸、语音 provider 尚未接入，因此生产环境不会提前发布感知 READY 或伪造授权结果。
+- 语音部署候选已在本地源仓 `moonshine_voice_commands` 以 `b979a7fd33aac5c9ced9591bb507e483faf4aef5` 冻结，并创建等值的 `deploy/dog-patrol-integration` 分支；它尚未迁入本仓，也不代表 voice provider 或生产 READY 已完成。允许/排除清单与复现证据见 [`docs/issue32_voice_deployment_baseline_audit.md`](docs/issue32_voice_deployment_baseline_audit.md)。
 - 感知域已提供整体部署 requirements 和统一 Orin 环境检查，显式区分 tracking、face、voice 和 orchestrator 当前状态。
 - tracking 已在当前感知 Orin 完成 full-runtime build/test、真实 Hik 30 FPS、standalone 隔离、
   真人 semantic primary、主目标 crop/离场停发和慢消费者不反压验收；verified baseline 见
