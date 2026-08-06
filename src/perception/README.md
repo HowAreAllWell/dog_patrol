@@ -1,12 +1,18 @@
 # 感知模块
 
-感知团队的实现入口。tracking 已正式迁入本仓，人脸和语音实现尚未建立。
+感知团队的实现入口。tracking 和可移植 voice 核心已正式迁入本仓；人脸实现尚未建立，voice
+的真实 provider/evidence producer 尚未接入。
 整个感知域的 Orin 平台、SDK、资产、参数、模块状态和统一环境检查见
 [`requirements.md`](requirements.md)。该入口不替代各 ROS package manifest 或模块内部配置。
 
 `dog_patrol_perception_tracking` 提供相机、检测、tracking、semantic identity、主目标选择、
 mission ROS 2 adapter，以及录制和离线评估工具。普通开发和 CI 显式关闭 Orin runtime，
 只构建可移植核心；CUDA、TensorRT、Hik MVS 和 FFmpeg runtime 由 Orin 部署显式开启。
+
+`dog_patrol_perception_voice` 提供按需调用的 R818/Vosk 任务级核心：一个 task session 只接管和恢复
+一次 R818，Prompt 期间丢弃音频，最多运行两个独立响应窗；它不提供常驻监听、落盘 PCM 或通用 CLI。
+生产 Adapter、安装资产和迁入边界见 [`dog_patrol_perception_voice/README.md`](dog_patrol_perception_voice/README.md)
+以及 [`../../docs/perception/voice/issue33_voice_import.md`](../../docs/perception/voice/issue33_voice_import.md)。
 
 `dog_patrol_perception_interfaces` 是感知团队内部 ROS 2 interface package，当前提供：
 
@@ -29,8 +35,8 @@ provider 保留的当前状态。授权证据是离散、reliable、volatile 事
 - `perception_readiness` 节点：只在三者状态都匹配当前 STARTUP sequence 时发布一次
   `SOURCE_PERCEPTION/READY`。
 
-tracking 只发布自身 `detection_tracking` 状态，不再聚合或发布整体 READY。人脸和语音当前没有
-生产 provider，因此保持 not-ready；测试通过独立 adapter publisher 注入它们的状态。与主状态机
+tracking 只发布自身 `detection_tracking` 状态，不再聚合或发布整体 READY。人脸和 voice 当前没有
+生产 evidence provider，因此保持 not-ready；测试通过独立 adapter publisher 注入它们的状态。与主状态机
 交互只使用 `dog_patrol_interfaces`，感知内部 capability transport 使用
 `dog_patrol_perception_interfaces`。
 
@@ -42,6 +48,7 @@ colcon build --packages-select \
   dog_patrol_interfaces dog_patrol_perception_interfaces \
   dog_patrol_manager \
   dog_patrol_perception_orchestrator \
+  dog_patrol_perception_voice \
   dog_patrol_perception_tracking \
   --cmake-args -DTRACKING_ENABLE_ORIN_RUNTIME=OFF
 source install/setup.bash
@@ -49,6 +56,7 @@ colcon test --packages-select \
   dog_patrol_interfaces dog_patrol_perception_interfaces \
   dog_patrol_manager \
   dog_patrol_perception_orchestrator \
+  dog_patrol_perception_voice \
   dog_patrol_perception_tracking \
   --event-handlers console_direct+
 colcon test-result --verbose

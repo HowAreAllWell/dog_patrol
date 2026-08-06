@@ -1,0 +1,4 @@
+# Runtime wheels for the frozen Issue #32 deployment baseline.
+numpy==2.2.6
+PyYAML==6.0.3
+vosk==0.3.45

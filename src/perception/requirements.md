@@ -13,7 +13,7 @@
 | --- | --- | --- | --- |
 | tracking | `implemented` | Jetson Orin；CUDA/TensorRT、Hikrobot MVS SDK、相机、本机 engine、ROS 参数；仅 `osnet_onnx` 后端需要 ReID ONNX | 完整 Orin build/test；相机可枚举；live 节点加载 engine 并稳定输出 tracking 指标 |
 | face | `not-integrated` | 预期从 `TrackedTargetImage` 消费同帧主目标 crop；实现、模型和白名单尚未进入本仓 | 当前只验证 crop transport；不得把测试 provider 当作生产 readiness |
-| voice | `not-integrated` | 实现、语音 SDK/模型、音频设备和生产 provider 尚未进入本仓 | 当前不能发布生产 `voice` READY |
+| voice | `implemented` | `dog_patrol_perception_voice` 的 R818/Vosk 核心、Prompt player、安装 helper 和受控配置；设备、Vosk 模型和 evidence producer 由部署机提供 | 核心可移植测试已通过；真实 provider 尚未发布生产 `voice` READY |
 | orchestrator | `integrating` | ROS 2 Humble；已有 readiness 聚合、ROS-independent 授权规则和通用授权事件 adapter | tracking/face/voice 对当前 STARTUP sequence 都 ready 才能发布感知整体 READY；真实 face/voice provider 尚未接入 |
 
 环境检查中的最终 `PASS` 表示“当前已实现范围的部署前置条件完整”，不会把
@@ -48,7 +48,9 @@ ID `2bdf:0001`）。已验收模式为 `BayerGB8` (`0x0108000a`)、`1280x1024@30
 - 部署专用 ROS 参数文件和 tracker YAML。参数文件不得携带 RTSP userinfo、凭据、白名单、
   特征向量、录像或本机临时目录。
 
-face 和 voice 的模型、隐私数据与设备需求要在实现接入时由各自模块补充；在此之前不伪造占位资产。
+face 的模型、隐私数据与设备需求要在实现接入时由各自模块补充；voice 的 Vosk 模型、ADB serial 和
+音频设备同样由部署机提供，不进入 Git。voice 的迁入边界与安装验证见
+[`../../docs/perception/voice/issue33_voice_import.md`](../../docs/perception/voice/issue33_voice_import.md)。
 
 ## 统一环境检查
 
@@ -63,6 +65,7 @@ colcon build --packages-select \
   dog_patrol_interfaces dog_patrol_perception_interfaces \
   dog_patrol_manager \
   dog_patrol_perception_orchestrator \
+  dog_patrol_perception_voice \
   dog_patrol_perception_tracking \
   --cmake-args -DTRACKING_ENABLE_ORIN_RUNTIME=ON
 source install/setup.bash
@@ -70,6 +73,7 @@ colcon test --packages-select \
   dog_patrol_interfaces dog_patrol_perception_interfaces \
   dog_patrol_manager \
   dog_patrol_perception_orchestrator \
+  dog_patrol_perception_voice \
   dog_patrol_perception_tracking \
   --event-handlers console_direct+
 colcon test-result --verbose

@@ -1,6 +1,9 @@
 # 许可证范围
 
 - 根目录 `LICENSE`（BSD-3-Clause）适用于未另行标注的 dog_patrol 原生代码和文档。
+- `src/perception/dog_patrol_perception_voice/**` 使用 BSD-3-Clause；package 内保留许可副本，
+  ARM64 helper 与对应 C 源码的迁入来源和校验值见
+  [`docs/perception/voice/issue33_voice_import.md`](../docs/perception/voice/issue33_voice_import.md)。
 - `src/perception/dog_patrol_perception_tracking/**` 使用 Apache-2.0；其 `package.xml`
   保留相同声明，许可证全文见 `Apache-2.0.txt`。
 - `docs/perception/tracking/**` 和 `assets/models/manifests/tracking_core_requirements.txt`

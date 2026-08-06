@@ -463,6 +463,7 @@ def check_build(
         "dog_patrol_interfaces",
         "dog_patrol_perception_interfaces",
         "dog_patrol_perception_orchestrator",
+        "dog_patrol_perception_voice",
         "dog_patrol_perception_tracking",
     )
     for package in packages:
