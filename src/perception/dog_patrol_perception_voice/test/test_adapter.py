@@ -1,8 +1,9 @@
 from __future__ import annotations
 
 from collections import deque
+import threading
 
-from dog_patrol_perception_voice.adapter import R818VoiceAdapter
+from dog_patrol_perception_voice.adapter import R818VoiceAdapter, VoiceTaskCancelled
 from dog_patrol_perception_voice.config import VoiceConfig
 from dog_patrol_perception_voice.result import VoiceWindowResult
 
@@ -20,6 +21,9 @@ class FakeTaskStream:
 
     def close(self) -> None:
         self.calls.append("close")
+
+    def request_stop(self) -> None:
+        self.calls.append("request_stop")
 
 
 class FakeWindowRecognizer:
@@ -69,3 +73,51 @@ def test_task_session_runs_two_independent_windows_with_one_stream_lifecycle() -
         "Once again, please face my camera directly or say the passphrase loudly.",
     ]
     assert stream.calls == ["start", "close"]
+
+
+def test_task_cancel_interrupts_recognition_and_leaves_close_to_context_cleanup() -> None:
+    class CancellableStream(FakeTaskStream):
+        def __init__(self) -> None:
+            super().__init__()
+            self.stop_requested = threading.Event()
+
+        def request_stop(self) -> None:
+            super().request_stop()
+            self.stop_requested.set()
+
+    class BlockingRecognizer:
+        def __init__(self, stream: CancellableStream) -> None:
+            self.stream = stream
+
+        def recognize(self, _attempt_number: int, _timeout_seconds: float):
+            assert self.stream.stop_requested.wait(timeout=1.0)
+            raise RuntimeError("recognizer interrupted")
+
+    stream = CancellableStream()
+    adapter = R818VoiceAdapter(
+        stream=stream,
+        recognizer=BlockingRecognizer(stream),
+        prompt_player=FakePromptPlayer(),
+    )
+    errors: list[BaseException] = []
+
+    with adapter.task() as task:
+        worker = threading.Thread(
+            target=lambda: _capture_error(errors, task.respond),
+            daemon=True,
+        )
+        worker.start()
+        task.cancel()
+        worker.join(timeout=1.0)
+
+    assert not worker.is_alive()
+    assert len(errors) == 1
+    assert isinstance(errors[0], VoiceTaskCancelled)
+    assert stream.calls == ["start", "request_stop", "close"]
+
+
+def _capture_error(errors: list[BaseException], operation) -> None:
+    try:
+        operation()
+    except BaseException as exc:
+        errors.append(exc)

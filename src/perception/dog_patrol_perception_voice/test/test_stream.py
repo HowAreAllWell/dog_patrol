@@ -197,6 +197,27 @@ def test_stream_takes_over_and_restores_vendor_audio_once_per_task(tmp_path) -> 
     ) == 1
 
 
+def test_request_stop_interrupts_response_window_before_context_close(tmp_path) -> None:
+    reader = BlockingReader()
+    helper = tmp_path / "helper"
+    helper.write_bytes(b"helper")
+    reader.feed(base64.b64encode(_frame(1)))
+    stream = SubprocessAdbEncodedPcmStream(FakeAdb(reader), helper_path=helper)
+    stream.start()
+    chunks = stream.window_chunks(20.0)
+    observed: list[list[bytes]] = []
+    worker = threading.Thread(target=lambda: observed.append(list(chunks)))
+    worker.start()
+
+    stream.request_stop()
+    worker.join(timeout=1.0)
+    try:
+        assert not worker.is_alive()
+        assert observed == [[]]
+    finally:
+        stream.close()
+
+
 class FakeWindowStream:
     def __init__(self, windows: list[list[bytes]]) -> None:
         self._windows = deque(windows)

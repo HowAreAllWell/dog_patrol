@@ -5,8 +5,24 @@
 音频帧，Prompt 返回后再打开响应窗。每个响应窗独立返回 `VoiceWindowResult`，最多可在同一任务中
 连续执行两窗，任务结束时统一清理远端临时节点并恢复厂商音频服务。
 
-生产入口是 `R818VoiceAdapter.from_model_dir()` 和 `R818VoiceAdapter.task()`。默认不会写入
-PCM；回放与硬件验收使用测试注入的 `TaskStream` seam，不作为安装后的通用入口。
+生产核心入口是 `R818VoiceAdapter.from_model_dir()` 和 `R818VoiceAdapter.task()`。ROS 生产
+evidence 入口是 `perception_voice_provider`：它订阅 `/mission/state`，只对未阻塞的
+`VERIFY_IDENTITY` 和正数 `target_id` 启动任务，并发布 `/perception/authorization_evidence`。
+provider 的 worker 与 ROS executor 分离；同一 `state_seq + target_id` 不重复建 task，状态替换、
+阻塞或离开 VERIFY 时请求取消并在旧 session 清理后才允许新 session。默认不会写入 PCM；回放与
+硬件验收使用测试注入的 `TaskStream` seam，不作为安装后的通用入口。
+
+部署时提供 Vosk 模型目录并启动：
+
+```bash
+ros2 run dog_patrol_perception_voice perception_voice_provider \
+  --ros-args -p model_dir:=/path/to/vosk-model \
+  -p config_file:=/path/to/voice.yaml
+```
+
+`helper_path` 为空时使用安装包内的 ARM64 helper；`provider`、`mission_state_topic` 和
+`authorization_evidence_topic` 可按联调命名空间覆盖。provider 不新增 ROS msg，也不发布或修改
+capability readiness。
 
 ## 配置和安装资产
 
