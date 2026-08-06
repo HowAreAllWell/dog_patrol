@@ -74,7 +74,7 @@ class EnvironmentCheckTest(unittest.TestCase):
             {
                 "tracking": "implemented",
                 "face": "not-integrated",
-                "voice": "not-integrated",
+                "voice": "implemented",
                 "orchestrator": "integrating",
             },
         )
@@ -266,6 +266,53 @@ class EnvironmentCheckTest(unittest.TestCase):
             isolated.parent.mkdir(parents=True)
             isolated.touch()
             self.assertEqual(MODULE.find_install_artifact(prefix, relative), isolated)
+
+    def test_check_build_requires_voice_package(self):
+        packages = (
+            "dog_patrol_interfaces",
+            "dog_patrol_perception_interfaces",
+            "dog_patrol_perception_orchestrator",
+            "dog_patrol_perception_voice",
+            "dog_patrol_perception_tracking",
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            workspace = root / "workspace"
+            install_prefix = root / "install"
+            for package in packages:
+                (workspace / "src" / "fixture" / package).mkdir(parents=True)
+                (workspace / "src" / "fixture" / package / "package.xml").touch()
+                marker = (
+                    install_prefix
+                    / "share/ament_index/resource_index/packages"
+                    / package
+                )
+                marker.parent.mkdir(parents=True, exist_ok=True)
+                marker.touch()
+            executable = (
+                install_prefix
+                / "lib/dog_patrol_perception_tracking/dog_patrol_perception_tracking_node"
+            )
+            executable.parent.mkdir(parents=True)
+            executable.touch(mode=0o755)
+            cache = root / "build/dog_patrol_perception_tracking/CMakeCache.txt"
+            cache.parent.mkdir(parents=True)
+            cache.write_text("TRACKING_ENABLE_ORIN_RUNTIME:BOOL=ON\n", encoding="utf-8")
+
+            reporter = MODULE.Reporter()
+            with (
+                mock.patch.object(MODULE.shutil, "which", return_value="/usr/bin/colcon"),
+                mock.patch.object(
+                    MODULE,
+                    "run",
+                    return_value=(0, "Summary: 1 tests, 0 errors, 0 failures"),
+                ),
+                redirect_stdout(io.StringIO()) as output,
+            ):
+                MODULE.check_build(reporter, workspace, install_prefix, root / "build")
+
+        self.assertEqual(reporter.failures, 0)
+        self.assertIn("built package: dog_patrol_perception_voice", output.getvalue())
 
     def test_main_prints_pass_only_when_checks_have_no_failures(self):
         arguments = [

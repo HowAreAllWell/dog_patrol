@@ -20,7 +20,8 @@
   ROS-independent `PrimaryTargetObservation` 返回当前可信语义主目标及自持有目标图像；mission 与
   standalone 均通过有界异步 ROS adapter 以 `TrackedTargetImage` 向独立人脸进程交付同帧 crop。
 - `dog_patrol_perception_orchestrator`：已实现授权编排、授权事件 adapter 和 capability readiness ROS 节点；真实人脸、语音 provider 尚未接入，因此生产环境不会提前发布感知 READY 或伪造授权结果。
-- 语音部署候选已在本地源仓 `moonshine_voice_commands` 以 `b979a7fd33aac5c9ced9591bb507e483faf4aef5` 冻结，并创建等值的 `deploy/dog-patrol-integration` 分支；它尚未迁入本仓，也不代表 voice provider 或生产 READY 已完成。允许/排除清单与复现证据见 [`docs/issue32_voice_deployment_baseline_audit.md`](docs/issue32_voice_deployment_baseline_audit.md)。
+- `dog_patrol_perception_voice`：已按 #33 allowlist 迁入可移植的 R818/Vosk 任务级核心；生产 Adapter 每个 task 只建立一次八通道流并支持两个独立响应窗，默认不落盘 PCM。真实 voice provider/evidence producer、生产 READY 和现场 FAR/FRR 验收仍未完成。
+- 语音部署候选源仓 `moonshine_voice_commands` 已以 `b979a7fd33aac5c9ced9591bb507e483faf4aef5` 冻结；#33 只从该版本选择性提炼，不把源仓作为构建或运行依赖。允许/排除清单与复现证据见 [`docs/issue32_voice_deployment_baseline_audit.md`](docs/issue32_voice_deployment_baseline_audit.md)，迁入说明见 [`docs/perception/voice/issue33_voice_import.md`](docs/perception/voice/issue33_voice_import.md)。
 - 感知域已提供整体部署 requirements 和统一 Orin 环境检查，显式区分 tracking、face、voice 和 orchestrator 当前状态。
 - tracking 已在当前感知 Orin 完成 full-runtime build/test、真实 Hik 30 FPS、standalone 隔离、
   真人 semantic primary、主目标 crop/离场停发和慢消费者不反压验收；verified baseline 见
@@ -28,8 +29,8 @@
 - detection/tracking 接入父 Spec #3 已完成独立整体验收；子票、合并、CI、现场证据与明确后续边界见
   [`docs/perception/tracking/issue3_spec_acceptance.md`](docs/perception/tracking/issue3_spec_acceptance.md)。
 - 人脸实现尚未建立。
-- 语音实现和导航整机验收尚未完成；它们与人脸接入继续作为后续工作，不属于 tracking
-  迁入和仓库切换的完成证据。
+- 语音核心已迁入，但真实设备接管、模型/设备部署和导航整机验收尚未完成；它们与人脸 provider
+  接入继续作为后续工作，不属于 tracking 迁入和仓库切换的完成证据。
 - 目标公开远程：`https://github.com/HowAreAllWell/dog_patrol`
 
 ## 目录
@@ -40,9 +41,11 @@ src/orchestration/dog_patrol_manager/      # 主状态机和 supervisor
 src/navigation/                            # 导航模块预留位置
 src/perception/                            # 感知业务编排入口
 src/perception/dog_patrol_perception_interfaces/ # 感知内部 ROS 2 合同
+src/perception/dog_patrol_perception_voice/ # voice 任务级核心与生产 Adapter
 src/perception/dog_patrol_perception_tracking/ # tracking 核心与可选 Orin runtime
 docs/contracts/                             # 可评审的接口协议
 docs/perception/tracking/                    # tracking 稳定说明与迁移验收证据
+docs/perception/voice/                        # voice 迁入和部署边界
 docs/workflows/                             # 业务流程参考文档
 ```
 
@@ -56,6 +59,7 @@ colcon build --packages-select \
   dog_patrol_interfaces dog_patrol_perception_interfaces \
   dog_patrol_manager \
   dog_patrol_perception_orchestrator \
+  dog_patrol_perception_voice \
   dog_patrol_perception_tracking \
   --cmake-args -DTRACKING_ENABLE_ORIN_RUNTIME=OFF
 source install/setup.bash
@@ -63,6 +67,7 @@ colcon test --packages-select \
   dog_patrol_interfaces dog_patrol_perception_interfaces \
   dog_patrol_manager \
   dog_patrol_perception_orchestrator \
+  dog_patrol_perception_voice \
   dog_patrol_perception_tracking \
   --event-handlers console_direct+
 colcon test-result --verbose

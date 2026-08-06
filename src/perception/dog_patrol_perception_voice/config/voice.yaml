@@ -1,0 +1,15 @@
+passphrase: blue star
+first_prompt: Please face my camera directly or say the passphrase loudly.
+retry_prompt: Once again, please face my camera directly or say the passphrase loudly.
+response_timeout_seconds: 20.0
+vote_guard_seconds: 0.75
+adb_executable: adb
+device_serial: null
+adb_timeout_seconds: 15.0
+start_timeout_seconds: 5.0
+restore_timeout_seconds: 20.0
+max_buffer_seconds: 4.0
+prompt_device: plughw:CARD=Device,DEV=0
+prompt_mixer_card: Device
+prompt_mixer_control: PCM
+prompt_volume_percent: 100
