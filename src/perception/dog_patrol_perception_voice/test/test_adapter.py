@@ -3,6 +3,8 @@ from __future__ import annotations
 from collections import deque
 import threading
 
+import pytest
+
 from dog_patrol_perception_voice.adapter import R818VoiceAdapter, VoiceTaskCancelled
 from dog_patrol_perception_voice.config import VoiceConfig
 from dog_patrol_perception_voice.result import VoiceWindowResult
@@ -114,6 +116,26 @@ def test_task_cancel_interrupts_recognition_and_leaves_close_to_context_cleanup(
     assert len(errors) == 1
     assert isinstance(errors[0], VoiceTaskCancelled)
     assert stream.calls == ["start", "request_stop", "close"]
+
+
+def test_task_start_failure_still_closes_stream_for_cleanup() -> None:
+    class StartFailingStream(FakeTaskStream):
+        def start(self) -> None:
+            self.calls.append("start")
+            raise RuntimeError("ADB push failed")
+
+    stream = StartFailingStream()
+    adapter = R818VoiceAdapter(
+        stream=stream,
+        recognizer=FakeWindowRecognizer([]),
+        prompt_player=FakePromptPlayer(),
+    )
+
+    with pytest.raises(RuntimeError, match="ADB push failed"):
+        with adapter.task():
+            pass
+
+    assert stream.calls == ["start", "close"]
 
 
 def _capture_error(errors: list[BaseException], operation) -> None:

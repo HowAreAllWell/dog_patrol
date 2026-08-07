@@ -46,8 +46,11 @@ jobs:
         run: |
           test -x install/dog_patrol_perception_voice/lib/dog_patrol_perception_voice/perception_voice_provider
           test -x install/dog_patrol_perception_voice/lib/dog_patrol_perception_voice/perception_voice_readiness
+          test -x install/dog_patrol_perception_voice/lib/dog_patrol_perception_voice/perception_voice_acceptance
           test -f install/dog_patrol_perception_voice/share/dog_patrol_perception_voice/launch/voice.launch.py
           test "$(sha256sum install/dog_patrol_perception_voice/lib/python*/site-packages/dog_patrol_perception_voice/assets/r818_pcm_base64_aarch64 | awk '{print $1}')" = "c2517d85e60845679acaeab4aa6c4f439b828393c5d73599dcef0e4fa68c0f52"
+          source install/setup.bash
+          ros2 run dog_patrol_perception_voice perception_voice_acceptance --help
 
       - name: Test
         shell: bash

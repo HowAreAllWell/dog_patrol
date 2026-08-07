@@ -13,7 +13,7 @@
 | --- | --- | --- | --- |
 | tracking | `implemented` | Jetson Orin；CUDA/TensorRT、Hikrobot MVS SDK、相机、本机 engine、ROS 参数；仅 `osnet_onnx` 后端需要 ReID ONNX | 完整 Orin build/test；相机可枚举；live 节点加载 engine 并稳定输出 tracking 指标 |
 | face | `not-integrated` | 预期从 `TrackedTargetImage` 消费同帧主目标 crop；实现、模型和白名单尚未进入本仓 | 当前只验证 crop transport；不得把测试 provider 当作生产 readiness |
-| voice | `integrating` | `dog_patrol_perception_voice` 的 R818/Vosk 核心、异步 evidence provider、只读 voice preflight/readiness、Prompt player、安装 helper 和受控配置；设备与 Vosk 模型由部署机提供 | preflight、安装产物和 transient-local `voice` capability 接口已接入；真实设备恢复、模型效果、音频播放和生产现场验收仍待完成 |
+| voice | `integrating` | `dog_patrol_perception_voice` 的 R818/Vosk 核心、异步 evidence provider、只读 voice preflight/readiness、无人参与验收 CLI、Prompt player、安装 helper 和受控配置；设备与 Vosk 模型由部署机提供 | preflight、安装产物、transient-local `voice` capability 接口和 #37 自动验收入口已接入；真实设备恢复、模型效果、音频播放和生产现场验收仍待完成 |
 | orchestrator | `integrating` | ROS 2 Humble；已有 readiness 聚合、ROS-independent 授权规则和通用授权事件 adapter | tracking/face/voice 对当前 STARTUP sequence 都 ready 才能发布感知整体 READY；真实 face/voice provider 尚未接入 |
 
 环境检查中的最终 `PASS` 表示“当前已实现范围的部署前置条件完整”，不会把
@@ -52,6 +52,8 @@ face 的模型、隐私数据与设备需求要在实现接入时由各自模块
 音频设备同样由部署机提供，不进入 Git。voice 的 provider 参数和验收边界见
 [`../../docs/perception/voice/issue34_voice_provider.md`](../../docs/perception/voice/issue34_voice_provider.md)，
 readiness/preflight 入口见 [`../../docs/perception/voice/issue35_voice_readiness.md`](../../docs/perception/voice/issue35_voice_readiness.md)，
+无人参与的 clean-install / R818 / ROS 验收入口见
+[`../../docs/perception/voice/issue37_voice_hardware_acceptance.md`](../../docs/perception/voice/issue37_voice_hardware_acceptance.md)，
 迁入边界与安装验证见 [`../../docs/perception/voice/issue33_voice_import.md`](../../docs/perception/voice/issue33_voice_import.md)。
 
 ## 统一环境检查

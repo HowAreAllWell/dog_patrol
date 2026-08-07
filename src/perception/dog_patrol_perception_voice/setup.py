@@ -36,6 +36,7 @@ setup(
         "console_scripts": [
             "perception_voice_provider = dog_patrol_perception_voice.provider:main",
             "perception_voice_readiness = dog_patrol_perception_voice.readiness_node:main",
+            "perception_voice_acceptance = dog_patrol_perception_voice.acceptance:main",
         ],
     },
 )

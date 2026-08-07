@@ -1,6 +1,7 @@
 # dog_patrol_perception_voice
 
-`dog_patrol_perception_voice` 是按需调用的语音验证核心和启动 readiness provider，不提供常驻监听或产品 CLI。
+`dog_patrol_perception_voice` 是按需调用的语音验证核心和启动 readiness provider，不提供常驻监听；
+安装产物另提供无人参与的部署验收 CLI。
 一个 `R818TaskSession` 只建立一次八通道 R818 流；Prompt 播放期间 reader 持续消费但丢弃完整
 音频帧，Prompt 返回后再打开响应窗。每个响应窗独立返回 `VoiceWindowResult`，最多可在同一任务中
 连续执行两窗，任务结束时统一清理远端临时节点并恢复厂商音频服务。
@@ -43,6 +44,14 @@ preflight 只读取安装后的配置/helper、加载 Vosk 模型、执行 `adb 
 filter 和 ALSA 的 `aplay -L`/`amixer scontrols`。它不创建 voice task，不执行 ADB push/shell，不接管
 R818，不停止 `vtn_init`/demo，不改变 mixer，不播放 Prompt；readiness 不等价于真实语音效果或现场
 FAR/FRR 验收。
+
+### 无人参与的 Orin 验收
+
+安装产物还提供 `perception_voice_acceptance`。它从部署机 fixture 注入识别结果，自动
+验证 readiness、voice provider、authorization adapter、R818 清理和取消/替换/故障矩阵，
+不保存 PCM，也不等待用户说话。`--mode fixture` 适合 CI；`--mode hardware` 才接管真实
+ADB/AC107/R818，并需要部署机提供 33 条任务结果、Vosk model 和实际配置。完整命令、fixture
+格式和验收边界见 [`docs/perception/voice/issue37_voice_hardware_acceptance.md`](../../../docs/perception/voice/issue37_voice_hardware_acceptance.md)。
 
 ## 配置和安装资产
 
