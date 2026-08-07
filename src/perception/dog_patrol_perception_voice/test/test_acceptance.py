@@ -75,6 +75,30 @@ def test_fixture_acceptance_covers_ros_lifecycle_and_failure_matrix() -> None:
     assert all(scenario["passed"] for scenario in report["failure_matrix"])
 
 
+def test_cycle_requires_exactly_one_r818_session() -> None:
+    if acceptance.rclpy is None:
+        pytest.skip("ROS 2 Python bindings are unavailable on this development host")
+    fixture = AcceptanceFixture.from_tasks([[{"accepted": True, "decision_time_seconds": 0.2}]])
+    session_counts = iter((0, 2))
+
+    report = acceptance._run_cycles(
+        fixture,
+        cycles=1,
+        adapter_factory=acceptance._FixtureAdapterFactory(
+            acceptance._cycle_behaviors(fixture)
+        ),
+        preflight=lambda: acceptance.VoicePreflightOutcome(
+            acceptance.READY, "fixture readiness ready"
+        ),
+        session_count=lambda: next(session_counts),
+    )
+
+    assert report["passed"] is False
+    assert report["cycles"][0]["hardware_sessions_started"] == 2
+    assert report["cycles"][0]["cleanup"]["complete"] is False
+    assert report["cycles"][0]["passed"] is False
+
+
 def test_hardware_environment_gate_requires_explicit_unified_pass(monkeypatch) -> None:
     assert acceptance.run_unified_environment_check(None)["passed"] is False
 
@@ -96,6 +120,220 @@ def test_acceptance_defaults_to_minimal_representative_cycle_set() -> None:
     args = acceptance.build_parser().parse_args(["--fixture", "fixture.json"])
 
     assert args.cycles == 3
+
+
+def test_field_mode_uses_the_fixed_minimal_user_matrix_without_a_fixture() -> None:
+    args = acceptance.build_parser().parse_args(
+        [
+            "--mode",
+            "field",
+            "--model-dir",
+            "/srv/dog-patrol/vosk-model",
+            "--automated-report",
+            "/srv/dog-patrol/issue37_voice_acceptance.json",
+        ]
+    )
+
+    assert args.fixture is None
+    assert args.cycles == 3
+    assert args.automated_report == "/srv/dog-patrol/issue37_voice_acceptance.json"
+    assert [
+        [window.accepted for window in task.windows]
+        for task in acceptance.minimal_field_matrix().tasks
+    ] == [[True], [False, True], [False, False]]
+
+
+def test_field_mode_requires_a_matching_passed_issue37_hardware_report(tmp_path) -> None:
+    model_dir = tmp_path / "vosk-model"
+    model_dir.mkdir()
+    (model_dir / "model.bin").write_bytes(b"model")
+    config_file = tmp_path / "voice.yaml"
+    config_file.write_text("response_timeout_seconds: 20\n", encoding="utf-8")
+    helper_path = tmp_path / "r818_pcm_base64"
+    helper_path.write_bytes(b"helper")
+    report_path = tmp_path / "issue37.json"
+    report = {
+        "issue": 37,
+        "mode": "hardware",
+        "passed": True,
+        "deployment_assets": {
+            "model": acceptance._path_fingerprint(model_dir),
+            "config": acceptance._path_fingerprint(config_file),
+            "helper": acceptance._path_fingerprint(helper_path),
+        },
+    }
+    report_path.write_text(json.dumps(report), encoding="utf-8")
+
+    missing_acceptance_gate = acceptance._field_automatic_gate(
+        report_path,
+        model_dir=model_dir,
+        config_file=config_file,
+        helper_path=helper_path,
+    )
+
+    assert missing_acceptance_gate["passed"] is False
+    assert missing_acceptance_gate["diagnostic"].endswith("acceptance")
+
+    report["deployment_assets"]["acceptance"] = acceptance._path_fingerprint(
+        Path(acceptance.__file__)
+    )
+    report_path.write_text(json.dumps(report), encoding="utf-8")
+
+    missing_matrix_gate = acceptance._field_automatic_gate(
+        report_path,
+        model_dir=model_dir,
+        config_file=config_file,
+        helper_path=helper_path,
+    )
+
+    assert missing_matrix_gate["passed"] is False
+    assert "normal task matrix" in missing_matrix_gate["diagnostic"]
+
+    report.update(
+        {
+            "cycles_completed": 3,
+            "cycles_aborted": False,
+            "cycles": [
+                {
+                    "passed": True,
+                    "hardware_sessions_started": 1,
+                    "evidence": ["PASSED"],
+                    "events": ["AUTHORIZED"],
+                    "expected_evidence": ["PASSED"],
+                    "expected_event": "AUTHORIZED",
+                    "cleanup": {
+                        "complete": True,
+                        "late_evidence": False,
+                        "remote_residuals": [],
+                        "vendor_owner": {"status": "READY"},
+                    },
+                },
+                {
+                    "passed": True,
+                    "hardware_sessions_started": 1,
+                    "evidence": ["NOT_PASSED", "PASSED"],
+                    "events": ["AUTHORIZED"],
+                    "expected_evidence": ["NOT_PASSED", "PASSED"],
+                    "expected_event": "AUTHORIZED",
+                    "cleanup": {
+                        "complete": True,
+                        "late_evidence": False,
+                        "remote_residuals": [],
+                        "vendor_owner": {"status": "READY"},
+                    },
+                },
+                {
+                    "passed": True,
+                    "hardware_sessions_started": 1,
+                    "evidence": ["NOT_PASSED", "NOT_PASSED"],
+                    "events": ["UNAUTHORIZED"],
+                    "expected_evidence": ["NOT_PASSED", "NOT_PASSED"],
+                    "expected_event": "UNAUTHORIZED",
+                    "cleanup": {
+                        "complete": True,
+                        "late_evidence": False,
+                        "remote_residuals": [],
+                        "vendor_owner": {"status": "READY"},
+                    },
+                },
+            ],
+            "failure_matrix": [
+                {
+                    "name": name,
+                    "passed": True,
+                    "late_evidence": False,
+                    "max_active_sessions": 0 if name == "adb_failure" else 1,
+                    "cleanup": {"complete": True},
+                }
+                for name in acceptance._FAILURE_SCENARIOS
+            ],
+        }
+    )
+    report_path.write_text(json.dumps(report), encoding="utf-8")
+
+    gate = acceptance._field_automatic_gate(
+        report_path,
+        model_dir=model_dir,
+        config_file=config_file,
+        helper_path=helper_path,
+    )
+
+    assert gate["passed"] is True
+
+    helper_path.write_bytes(b"different helper")
+
+    mismatched_gate = acceptance._field_automatic_gate(
+        report_path,
+        model_dir=model_dir,
+        config_file=config_file,
+        helper_path=helper_path,
+    )
+
+    assert mismatched_gate["passed"] is False
+    assert mismatched_gate["diagnostic"].endswith("helper")
+
+
+def test_field_report_redacts_diagnostics_and_audio_metadata() -> None:
+    report = {
+        "mode": "field",
+        "automatic_gate": {"passed": True, "assets": {"sha256": "x"}},
+        "readiness": {"status": "READY", "diagnostic": "secret"},
+        "cycles": [
+            {
+                "index": 1,
+                "state_seq": 1000,
+                "target_id": 2000,
+                "evidence": ["PASSED"],
+                "evidence_details": ["secret recognition text"],
+                "events": ["AUTHORIZED"],
+                "event_details": ["secret detail"],
+                "expected_evidence": ["PASSED"],
+                "expected_event": "AUTHORIZED",
+                "cleanup": {
+                    "complete": True,
+                    "late_evidence": False,
+                    "remote_residuals": ["secret path"],
+                },
+                "passed": True,
+            }
+        ],
+        "cycles_aborted": False,
+        "passed": True,
+        "environment_check": {"stdout": "secret command"},
+        "host_pcm_capture": {"before": ["secret process"]},
+        "deployment_assets": {"model": {"sha256": "model"}},
+    }
+
+    acceptance._redact_field_report(report)
+
+    assert "environment_check" not in report
+    assert "host_pcm_capture" not in report
+    assert "evidence_details" not in report["cycles"][0]
+    assert report["readiness"] == {"status": "READY"}
+    assert report["cycles"][0]["cleanup"] == {
+        "complete": True,
+        "late_evidence": False,
+    }
+
+
+def test_field_acceptance_stops_before_hardware_when_automatic_gate_is_missing(
+    tmp_path,
+) -> None:
+    report = acceptance.run_field_acceptance(
+        model_dir=tmp_path / "vosk-model",
+        config_file=tmp_path / "voice.yaml",
+        automated_report=tmp_path / "missing-issue37.json",
+        helper_path=tmp_path / "r818_pcm_base64",
+    )
+
+    assert report["passed"] is False
+    assert report["readiness"]["status"] == "BLOCKED"
+    assert report["cycles"] == []
+    assert [entry["name"] for entry in report["field_matrix"]] == [
+        "first_window_pass",
+        "second_window_pass",
+        "two_windows_not_passed",
+    ]
 
 
 def test_hardware_failure_matrix_allows_second_window_stage(monkeypatch, tmp_path) -> None:

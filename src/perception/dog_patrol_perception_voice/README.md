@@ -55,6 +55,17 @@ ADB/AC107/R818，并需要部署机提供 3 条代表性任务结果、Vosk mode
 远端残留、厂商 `demo` owner 和 fixture provenance 证据。完整命令、fixture 格式和验收边界见
 [`docs/perception/voice/issue37_voice_hardware_acceptance.md`](../../../docs/perception/voice/issue37_voice_hardware_acceptance.md)。
 
+### 最终用户现场验收
+
+`perception_voice_acceptance --mode field` 使用真实 R818/Vosk 结果执行固定的三项最小用户矩阵：
+首窗通过、首窗无应答后次窗通过、两窗无应答。它不接受 fixture，且必须传入同一 model、config
+和安装 `acceptance.py` 指纹已通过的 #37 硬件报告；报告只保存 PASSED/NOT_PASSED、ROS 任务关联和清理证据，
+不保存 PCM、识别文本或口令。取消、替换和故障的无迟到输出由该 #37 报告覆盖。现场验收尚未完成，
+2026-08-07 的 `field` 报告已通过，固定来源映射归档为
+`archive/dog-patrol-deployment-b979a7f-issue38`；这不构成最终口令、错误口令拒绝、FRR/FAR
+或安全准入声明。完整命令、报告摘要和归档边界见
+[`docs/perception/voice/issue38_voice_field_acceptance.md`](../../../docs/perception/voice/issue38_voice_field_acceptance.md)。
+
 ## 配置和安装资产
 
 - 默认配置：`config/voice.yaml`，只包含当前 `blue star` 口令、两条 Prompt、响应窗和 R818/Prompt
