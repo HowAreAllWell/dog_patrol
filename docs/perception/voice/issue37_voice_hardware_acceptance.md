@@ -14,8 +14,13 @@ ros2 run dog_patrol_perception_voice perception_voice_acceptance \
   --cycles 33 \
   --model-dir /srv/dog-patrol/vosk-model \
   --config-file /absolute/path/to/dog_patrol/install/dog_patrol_perception_voice/share/dog_patrol_perception_voice/config/voice.yaml \
+  --environment-check-command "python3 /srv/dog-patrol/check_perception_environment.py --target perception-orin --params-file /srv/dog-patrol/orin_tracking.yaml --tracker-config /srv/dog-patrol/bot_sort.yaml --voice-model-dir /srv/dog-patrol/vosk-model --voice-config-file /absolute/path/to/dog_patrol/install/dog_patrol_perception_voice/share/dog_patrol_perception_voice/config/voice.yaml --install-prefix /absolute/path/to/dog_patrol/install --build-base /absolute/path/to/dog_patrol/build" \
   --report /srv/dog-patrol/issue37_voice_acceptance.json
 ```
+
+`--environment-check-command` 是统一感知环境门禁的部署命令；它必须返回
+`PERCEPTION ENVIRONMENT: PASS`，否则不会接管设备。该命令由部署侧提供，验收 CLI
+本身只依赖 clean install，不从源码目录导入运行时。
 
 `voice.yaml` 中的 ADB serial、AC107 播放设备和 mixer 必须是部署机实际值。
 `--fixture` 是部署机上的任务结果清单，不包含 PCM、录音、模型或口令；命令不等待
@@ -53,11 +58,13 @@ R818 stream，并在每个任务结束后恢复厂商音频服务。因此它验
 - 每个 `state_seq + target_id` 的 evidence、最终 `MissionEvent` 和目标关联；
 - 每个任务清理后的 `/tmp/dog-patrol-r818-stream.{pcm,pid,err}`、远端 helper 和
   `arecord` 进程均不存在；
-- host 默认不生成 PCM，报告只保存 JSON 摘要。
+- 每个任务结束后确认 AC107 仍为 `RUNNING`，且 `owner_pid` 属于厂商 `demo` 进程；
+- host 默认不生成 PCM，报告保存主机前后快照、fixture/model/config/helper 指纹和 JSON 摘要。
 
-每次运行还执行不需要真实设备的故障矩阵：Prompt 取消、第一/第二响应窗取消、
-`state_seq`/`target_id` 替换、stream/ADB/播放/恢复故障。矩阵要求旧任务完成清理、
-最多一个硬件 session、迟到 evidence 不通过 ROS authorization adapter 形成事件。
+每次 `--mode hardware` 运行还用真实 R818/ALSA 资源执行自动故障矩阵，并在资源 seam
+注入 Prompt 取消、第一/第二响应窗取消、`state_seq`/`target_id` 替换、stream/ADB/
+播放/恢复故障。矩阵要求旧任务完成清理、最多一个硬件 session、迟到 evidence 不通过
+ROS authorization adapter 形成事件；`--mode fixture` 使用同一矩阵的 fake seam。
 
 ## 运行边界
 

@@ -14,11 +14,14 @@ from collections import deque
 from collections.abc import Callable, Iterator, Sequence
 from dataclasses import dataclass
 from datetime import datetime, timezone
+import hashlib
 import json
 import math
 from pathlib import Path
 import platform
+import re
 import shlex
+import subprocess
 import sys
 import threading
 import time
@@ -26,13 +29,16 @@ from typing import Any
 
 try:
     import rclpy
+except ImportError as exc:  # pragma: no cover - only used on non-ROS development hosts.
+    rclpy = None  # type: ignore[assignment]
+    ROS_IMPORT_ERROR = exc
+else:
     from dog_patrol_interfaces.msg import MissionEvent, MissionState
     from dog_patrol_perception_interfaces.msg import AuthorizationEvidence, CapabilityStatus
     from rclpy.node import Node
     from rclpy.parameter import Parameter
     from rclpy.qos import DurabilityPolicy, HistoryPolicy, QoSProfile, ReliabilityPolicy
-except ImportError:  # pragma: no cover - only used on non-ROS development hosts.
-    rclpy = None  # type: ignore[assignment]
+    ROS_IMPORT_ERROR = None
 
 from .adapter import R818VoiceAdapter
 from .adb import SubprocessAdbFileTransfer
@@ -408,6 +414,150 @@ class _HardwareAdapterFactory:
         )
 
 
+class _HardwareFailureStream:
+    """Wrap a real stream while injecting one controlled failure."""
+
+    def __init__(
+        self,
+        stream: SubprocessAdbEncodedPcmStream,
+        behavior: _TaskBehavior,
+        record: _LifecycleRecord,
+        active_changed: Callable[[int], None],
+    ) -> None:
+        self._stream = stream
+        self._behavior = behavior
+        self._record = record
+        self._active_changed = active_changed
+        self._active = False
+
+    def start(self) -> None:
+        if self._behavior.failure == "adb":
+            raise RuntimeError("injected ADB transport failure")
+        self._stream.start()
+        self._active = True
+        self._active_changed(1)
+        self._record.start_called = True
+        self._record.started.set()
+
+    def window_chunks(self, timeout_seconds: float) -> Iterator[bytes]:
+        if self._behavior.failure == "stream":
+            raise RuntimeError("injected R818 stream failure")
+        return self._stream.window_chunks(timeout_seconds)
+
+    def close(self) -> None:
+        self._record.close_called = True
+        try:
+            self._stream.close()
+        finally:
+            if self._active:
+                self._active = False
+                self._active_changed(-1)
+            self._record.closed.set()
+            self._record.close_finished.set()
+        if self._behavior.close_failure:
+            self._record.close_error = "injected R818 restore failure"
+            raise RuntimeError(self._record.close_error)
+
+    def request_stop(self) -> None:
+        self._record.stop_requested.set()
+        self._stream.request_stop()
+
+
+class _HardwareFailurePromptPlayer:
+    def __init__(
+        self,
+        player: FfmpegAlsaPromptPlayer,
+        behavior: _TaskBehavior,
+        record: _LifecycleRecord,
+    ) -> None:
+        self._player = player
+        self._behavior = behavior
+        self._record = record
+
+    def reset_stop(self) -> None:
+        self._player.reset_stop()
+
+    def request_stop(self) -> None:
+        self._record.stop_requested.set()
+        self._player.request_stop()
+
+    def play(self, prompt: str) -> None:
+        self._record.prompt_started.set()
+        if self._behavior.failure == "playback":
+            raise RuntimeError("injected Prompt playback failure")
+        self._player.play(prompt)
+
+
+class _HardwareFailureAdapterFactory:
+    """Build real hardware adapters for the automatic failure matrix."""
+
+    def __init__(
+        self,
+        config: VoiceConfig,
+        helper_path: Path,
+        adb: SubprocessAdbFileTransfer,
+        behaviors: Sequence[_TaskBehavior],
+    ) -> None:
+        self._config = config
+        self._helper_path = helper_path
+        self._adb = adb
+        self._behaviors = deque(behaviors)
+        self.records: list[_LifecycleRecord] = []
+        self.active_sessions = 0
+        self.max_active_sessions = 0
+        self._active_lock = threading.Lock()
+
+    def __call__(self) -> R818VoiceAdapter:
+        if not self._behaviors:
+            raise RuntimeError("hardware failure matrix created too many tasks")
+        behavior = self._behaviors.popleft()
+        record = _LifecycleRecord.create(
+            behavior.failure or behavior.cancel_at or "hardware"
+        )
+        self.records.append(record)
+        stream = _HardwareFailureStream(
+            SubprocessAdbEncodedPcmStream(
+                self._adb,
+                helper_path=self._helper_path,
+                start_timeout_seconds=self._config.start_timeout_seconds,
+                restore_timeout_seconds=self._config.restore_timeout_seconds,
+                max_buffer_seconds=self._config.max_buffer_seconds,
+            ),
+            behavior,
+            record,
+            self._active_changed,
+        )
+        recognizer = _FixtureRecognizer(
+            behavior,
+            record,
+            stream,
+            consume_stream=True,
+        )
+        player = _HardwareFailurePromptPlayer(
+            FfmpegAlsaPromptPlayer(
+                device=self._config.prompt_device,
+                mixer_card=self._config.prompt_mixer_card,
+                mixer_control=self._config.prompt_mixer_control,
+                volume_percent=self._config.prompt_volume_percent,
+            ),
+            behavior,
+            record,
+        )
+        return R818VoiceAdapter(
+            config=self._config,
+            stream=stream,
+            recognizer=recognizer,
+            prompt_player=player,
+        )
+
+    def _active_changed(self, delta: int) -> None:
+        with self._active_lock:
+            self.active_sessions += delta
+            self.max_active_sessions = max(
+                self.max_active_sessions, self.active_sessions
+            )
+
+
 def _qos(*, transient: bool, depth: int) -> QoSProfile:
     return QoSProfile(
         reliability=ReliabilityPolicy.RELIABLE,
@@ -426,7 +576,10 @@ class _RosAcceptanceHarness:
         preflight: Callable[[], VoicePreflightOutcome],
     ) -> None:
         if rclpy is None:
-            raise RuntimeError("ROS 2 Python bindings are unavailable on this host")
+            detail = f": {ROS_IMPORT_ERROR}" if ROS_IMPORT_ERROR else ""
+            raise RuntimeError(
+                f"ROS 2 Python bindings are unavailable on this host{detail}"
+            )
         from .provider import VoiceEvidenceProviderNode
         from .readiness_node import VoiceReadinessNode
 
@@ -568,7 +721,7 @@ def _run_cycles(
     *,
     cycles: int,
     adapter_factory: Callable[[], R818VoiceAdapter],
-    cleanup_checker: Callable[[], list[str]] | None = None,
+    cleanup_checker: Callable[[], dict[str, Any]] | None = None,
     preflight: Callable[[], VoicePreflightOutcome],
 ) -> dict[str, Any]:
     if len(fixture.tasks) != cycles:
@@ -624,7 +777,8 @@ def _run_cycles(
             if task.windows[0].accepted:
                 expected_evidence = expected_evidence[:1]
             expected_event = _event_for_windows(task.windows)
-            residuals = cleanup_checker() if cleanup_checker is not None else []
+            cleanup = cleanup_checker() if cleanup_checker is not None else {}
+            residuals = cleanup.get("remote_residuals", [])
             cycle_reports.append(
                 {
                     "index": index + 1,
@@ -638,6 +792,7 @@ def _run_cycles(
                     "cleanup": {
                         "complete": evidence_ok and event_ok and not residuals,
                         "remote_residuals": residuals,
+                        "vendor_owner": cleanup.get("vendor_owner"),
                     },
                     "passed": (
                         task_started
@@ -689,12 +844,22 @@ def _scenario_behaviors(name: str) -> tuple[list[_TaskBehavior], str]:
     raise ValueError(f"unknown acceptance scenario: {name}")
 
 
-def _run_failure_scenario(name: str) -> dict[str, Any]:
+def _run_failure_scenario(
+    name: str,
+    *,
+    factory_builder: Callable[[Sequence[_TaskBehavior]], Any] | None = None,
+    preflight: Callable[[], VoicePreflightOutcome] | None = None,
+    cleanup_checker: Callable[[], dict[str, Any]] | None = None,
+) -> dict[str, Any]:
     behaviors, kind = _scenario_behaviors(name)
-    factory = _FixtureAdapterFactory(behaviors)
+    factory = (
+        factory_builder(behaviors)
+        if factory_builder is not None
+        else _FixtureAdapterFactory(behaviors)
+    )
     harness = _RosAcceptanceHarness(
         factory,
-        lambda: VoicePreflightOutcome(READY, "fixture readiness ready"),
+        preflight or (lambda: VoicePreflightOutcome(READY, "fixture readiness ready")),
     )
     expected_evidence: list[int]
     expected_events: list[int]
@@ -751,7 +916,17 @@ def _run_failure_scenario(name: str) -> dict[str, Any]:
             raise RuntimeError(f"scenario {name} did not publish expected event")
         evidence = [message.result for message in harness.evidence]
         events = [message.event for message in harness.events]
-        cleanup_complete = all(record.close_called for record in factory.records)
+        cleanup = cleanup_checker() if cleanup_checker is not None else {}
+        remote_residuals = cleanup.get("remote_residuals", [])
+        vendor_owner = cleanup.get("vendor_owner")
+        cleanup_complete = (
+            all(record.close_called for record in factory.records)
+            and not remote_residuals
+            and (
+                vendor_owner is None
+                or vendor_owner.get("status") == "READY"
+            )
+        )
         passed = (
             evidence == expected_evidence
             and events == expected_events
@@ -773,6 +948,8 @@ def _run_failure_scenario(name: str) -> dict[str, Any]:
                     for record in factory.records
                     if record.close_error
                 ],
+                "remote_residuals": remote_residuals,
+                "vendor_owner": vendor_owner,
             },
             "max_active_sessions": factory.max_active_sessions,
             "late_evidence": evidence != expected_evidence,
@@ -785,6 +962,7 @@ def _run_failure_scenario(name: str) -> dict[str, Any]:
             "cleanup": {
                 "complete": all(record.close_called for record in factory.records),
                 "tasks": len(factory.records),
+                "remote_residuals": [],
             },
             "max_active_sessions": factory.max_active_sessions,
             "late_evidence": False,
@@ -798,6 +976,25 @@ def _run_failure_scenario(name: str) -> dict[str, Any]:
 def run_failure_matrix() -> list[dict[str, Any]]:
     """Run deterministic lifecycle and ROS fault scenarios without hardware."""
     return [_run_failure_scenario(name) for name in _FAILURE_SCENARIOS]
+
+
+def run_hardware_failure_matrix(
+    config: VoiceConfig,
+    *,
+    helper_path: Path,
+    adb: SubprocessAdbFileTransfer,
+) -> list[dict[str, Any]]:
+    """Run the same fault matrix with real R818/ALSA resources and injected faults."""
+    return [
+        _run_failure_scenario(
+            name,
+            factory_builder=lambda behaviors: _HardwareFailureAdapterFactory(
+                config, helper_path, adb, behaviors
+            ),
+            cleanup_checker=lambda: check_remote_state(adb),
+        )
+        for name in _FAILURE_SCENARIOS
+    ]
 
 
 def run_fixture_acceptance(
@@ -838,6 +1035,129 @@ def check_remote_residue(adb: SubprocessAdbFileTransfer) -> list[str]:
     return [line.strip() for line in str(output).splitlines() if line.strip()]
 
 
+def check_vendor_owner(adb: SubprocessAdbFileTransfer) -> dict[str, Any]:
+    """Confirm that the vendor ``demo`` process owns AC107 after cleanup."""
+    try:
+        status = str(
+            adb.shell(("cat", "/proc/asound/card1/pcm0c/sub0/status"), timeout_seconds=2.0).stdout
+        )
+        demo_output = str(adb.shell(("pidof", "demo"), allow_failure=True).stdout)
+    except Exception as exc:
+        return {"status": "ERROR", "diagnostic": f"owner probe failed: {exc}"}
+    owner_match = re.search(r"^owner_pid:\s*(\d+)\s*$", status, re.MULTILINE)
+    owner_pid = int(owner_match.group(1)) if owner_match else None
+    demo_pids = sorted(
+        int(value) for value in re.findall(r"\b\d+\b", demo_output)
+    )
+    owner_is_demo = owner_pid is not None and owner_pid in demo_pids
+    return {
+        "status": "READY" if owner_is_demo and "state: RUNNING" in status else "FAILED",
+        "state": "RUNNING" if "state: RUNNING" in status else "UNKNOWN",
+        "owner_pid": owner_pid,
+        "demo_pids": demo_pids,
+        "owner_is_demo": owner_is_demo,
+    }
+
+
+def check_remote_state(adb: SubprocessAdbFileTransfer) -> dict[str, Any]:
+    return {
+        "remote_residuals": check_remote_residue(adb),
+        "vendor_owner": check_vendor_owner(adb),
+    }
+
+
+def run_unified_environment_check(command: Sequence[str] | None) -> dict[str, Any]:
+    """Run the deployment's complete perception environment gate."""
+    if not command:
+        return {
+            "status": "NOT_RUN",
+            "passed": False,
+            "diagnostic": "hardware mode requires --environment-check-command",
+        }
+    try:
+        completed = subprocess.run(
+            list(command),
+            check=False,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+        )
+    except OSError as exc:
+        return {
+            "status": "ERROR",
+            "passed": False,
+            "command": list(command),
+            "diagnostic": f"environment check could not start: {exc}",
+        }
+    output = completed.stdout.strip()
+    passed = completed.returncode == 0 and "PERCEPTION ENVIRONMENT: PASS" in output
+    return {
+        "status": "PASS" if passed else "FAIL",
+        "passed": passed,
+        "command": list(command),
+        "returncode": completed.returncode,
+        "output": output[-4000:],
+    }
+
+
+def _host_pcm_snapshot() -> dict[str, list[str]]:
+    paths: set[str] = set()
+    for directory in (Path.cwd(), Path("/tmp")):
+        if directory.is_dir():
+            for suffix in ("*.pcm", "*.wav", "*.raw"):
+                paths.update(str(path) for path in directory.glob(suffix))
+    process = subprocess.run(
+        ["pgrep", "-af", "[a]record"],
+        check=False,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.DEVNULL,
+        text=True,
+    )
+    return {
+        "paths": sorted(paths),
+        "arecord_processes": sorted(
+            line.strip() for line in process.stdout.splitlines() if line.strip()
+        ),
+    }
+
+
+def _host_pcm_check(before: dict[str, list[str]], after: dict[str, list[str]]) -> dict[str, Any]:
+    new_paths = sorted(set(after["paths"]) - set(before["paths"]))
+    new_processes = sorted(
+        set(after["arecord_processes"]) - set(before["arecord_processes"])
+    )
+    return {
+        "passed": not new_paths and not new_processes,
+        "before": before,
+        "after": after,
+        "new_paths": new_paths,
+        "new_arecord_processes": new_processes,
+    }
+
+
+def _path_fingerprint(path: str | Path) -> dict[str, Any]:
+    selected = Path(path)
+    if not selected.exists():
+        return {"path": str(selected), "exists": False}
+    digest = hashlib.sha256()
+    files = [selected] if selected.is_file() else sorted(
+        candidate for candidate in selected.rglob("*") if candidate.is_file()
+    )
+    for candidate in files:
+        relative = candidate.relative_to(selected) if selected.is_dir() else candidate.name
+        digest.update(str(relative).encode())
+        digest.update(b"\0")
+        with candidate.open("rb") as stream:
+            for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+                digest.update(chunk)
+    return {
+        "path": str(selected),
+        "exists": True,
+        "files": len(files),
+        "sha256": digest.hexdigest(),
+    }
+
+
 def run_hardware_acceptance(
     fixture: AcceptanceFixture,
     *,
@@ -845,10 +1165,31 @@ def run_hardware_acceptance(
     model_dir: str | Path,
     config_file: str | Path,
     helper_path: str | Path | None = None,
+    environment_check_command: Sequence[str] | None = None,
 ) -> dict[str, Any]:
-    """Run clean-install preflight, real R818 cycles, and the fault matrix."""
+    """Run the complete clean-install gate, real R818 cycles, and fault matrix."""
     config = load_voice_config(config_file)
     selected_helper = Path(helper_path) if helper_path else default_helper_path()
+    host_before = _host_pcm_snapshot()
+    environment_check = run_unified_environment_check(environment_check_command)
+    report: dict[str, Any] = {
+        "mode": "hardware",
+        "environment_check": environment_check,
+        "host_pcm_capture": False,
+        "failure_matrix_scope": "real_hardware_with_injected_faults",
+    }
+    if not environment_check["passed"]:
+        report["readiness"] = {
+            "status": "BLOCKED",
+            "diagnostic": "unified perception environment check did not pass",
+        }
+        report["cycles"] = []
+        report["failure_matrix"] = []
+        report["passed"] = False
+        report["host_pcm_capture"] = _host_pcm_check(
+            host_before, _host_pcm_snapshot()
+        )
+        return report
     preflight = VoicePreflight(
         model_dir=model_dir,
         config_file=config_file,
@@ -861,15 +1202,14 @@ def run_hardware_acceptance(
         ),
         "diagnostic": outcome.diagnostic,
     }
-    report: dict[str, Any] = {
-        "mode": "hardware",
-        "readiness": readiness,
-        "host_pcm_capture": False,
-    }
+    report["readiness"] = readiness
     if outcome.status != READY:
         report["cycles"] = []
-        report["failure_matrix"] = run_failure_matrix()
+        report["failure_matrix"] = []
         report["passed"] = False
+        report["host_pcm_capture"] = _host_pcm_check(
+            host_before, _host_pcm_snapshot()
+        )
         return report
 
     adb = SubprocessAdbFileTransfer(
@@ -882,16 +1222,27 @@ def run_hardware_acceptance(
         fixture,
         cycles=cycles,
         adapter_factory=factory,
-        cleanup_checker=lambda: check_remote_residue(adb),
+        cleanup_checker=lambda: check_remote_state(adb),
         preflight=preflight.run,
     )
-    matrix = run_failure_matrix()
+    matrix = run_hardware_failure_matrix(
+        config,
+        helper_path=selected_helper,
+        adb=adb,
+    )
     report["preflight"] = readiness
     report.update(cycle_report)
     report["failure_matrix"] = matrix
     report["passed"] = cycle_report["passed"] and all(
         scenario["passed"] for scenario in matrix
     )
+    report["host_pcm_capture"] = _host_pcm_check(host_before, _host_pcm_snapshot())
+    report["passed"] = report["passed"] and report["host_pcm_capture"]["passed"]
+    report["deployment_assets"] = {
+        "model": _path_fingerprint(model_dir),
+        "config": _path_fingerprint(config_file),
+        "helper": _path_fingerprint(selected_helper),
+    }
     return report
 
 
@@ -926,6 +1277,10 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--model-dir", help="Vosk model directory (required in hardware mode)")
     parser.add_argument("--config-file", default=str(_default_config_path()))
     parser.add_argument("--helper-path")
+    parser.add_argument(
+        "--environment-check-command",
+        help="quoted command for the complete perception environment gate",
+    )
     parser.add_argument("--report", type=Path, help="write a JSON report at this path")
     return parser
 
@@ -946,6 +1301,11 @@ def main(argv: Sequence[str] | None = None) -> int:
                 model_dir=args.model_dir,
                 config_file=args.config_file,
                 helper_path=args.helper_path,
+                environment_check_command=(
+                    shlex.split(args.environment_check_command)
+                    if args.environment_check_command
+                    else None
+                ),
             )
         else:
             report = run_fixture_acceptance(fixture, cycles=args.cycles)
@@ -956,7 +1316,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             "python": sys.version.split()[0],
             "fixture": str(args.fixture),
             "cycles_requested": args.cycles,
-            "host_pcm_capture": False,
+            "fixture_fingerprint": _path_fingerprint(args.fixture),
         }
         report["command"] = shlex.join(["perception_voice_acceptance", *sys.argv[1:]])
         if args.report:

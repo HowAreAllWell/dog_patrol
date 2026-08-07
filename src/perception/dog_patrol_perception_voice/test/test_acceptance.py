@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from types import SimpleNamespace
 
 import pytest
 
@@ -71,3 +72,34 @@ def test_fixture_acceptance_covers_ros_lifecycle_and_failure_matrix() -> None:
     assert len(report["cycles"]) == 2
     assert all(cycle["cleanup"]["complete"] for cycle in report["cycles"])
     assert all(scenario["passed"] for scenario in report["failure_matrix"])
+
+
+def test_hardware_environment_gate_requires_explicit_unified_pass(monkeypatch) -> None:
+    assert acceptance.run_unified_environment_check(None)["passed"] is False
+
+    monkeypatch.setattr(
+        acceptance.subprocess,
+        "run",
+        lambda *args, **kwargs: SimpleNamespace(
+            returncode=0,
+            stdout="PERCEPTION ENVIRONMENT: PASS\n",
+        ),
+    )
+    result = acceptance.run_unified_environment_check(("environment-check",))
+
+    assert result["passed"] is True
+    assert result["status"] == "PASS"
+
+
+def test_host_pcm_check_only_reports_new_capture_artifacts() -> None:
+    before = {"paths": ["/tmp/old.wav"], "arecord_processes": ["old arecord"]}
+    after = {
+        "paths": ["/tmp/old.wav", "/tmp/new.pcm"],
+        "arecord_processes": ["old arecord", "new arecord"],
+    }
+
+    result = acceptance._host_pcm_check(before, after)
+
+    assert result["passed"] is False
+    assert result["new_paths"] == ["/tmp/new.pcm"]
+    assert result["new_arecord_processes"] == ["new arecord"]
