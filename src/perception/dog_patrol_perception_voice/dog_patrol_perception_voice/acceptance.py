@@ -1530,6 +1530,12 @@ def _issue37_matrix_diagnostic(payload: dict[str, Any]) -> str | None:
 def _redact_field_report(report: dict[str, Any]) -> None:
     """Keep field reports to outcomes, task linkage, cleanup, and fingerprints."""
     automatic_gate = report.get("automatic_gate", {})
+    if isinstance(automatic_gate, dict):
+        automatic_gate = {
+            key: automatic_gate[key]
+            for key in ("report", "passed", "assets")
+            if key in automatic_gate
+        }
     deployment_assets = report.get("deployment_assets", {})
     passed = report.get("passed") is True
     cycles_aborted = report.get("cycles_aborted", False)
