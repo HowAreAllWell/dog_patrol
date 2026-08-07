@@ -1477,6 +1477,8 @@ def _issue37_matrix_diagnostic(payload: dict[str, Any]) -> str | None:
         ]
         expected_event = "AUTHORIZED" if task.windows[-1].accepted else "UNAUTHORIZED"
         cleanup = cycle.get("cleanup") if isinstance(cycle, dict) else None
+        evidence = cycle.get("evidence") if isinstance(cycle, dict) else None
+        events = cycle.get("events") if isinstance(cycle, dict) else None
         if (
             not isinstance(cycle, dict)
             or cycle.get("passed") is not True
@@ -1486,6 +1488,16 @@ def _issue37_matrix_diagnostic(payload: dict[str, Any]) -> str | None:
             or not isinstance(cleanup, dict)
             or cleanup.get("complete") is not True
             or cleanup.get("late_evidence") is not False
+            or cleanup.get("remote_residuals") not in ([], None)
+            or (
+                cleanup.get("vendor_owner") is not None
+                and (
+                    not isinstance(cleanup.get("vendor_owner"), dict)
+                    or cleanup["vendor_owner"].get("status") != "READY"
+                )
+            )
+            or evidence != expected_evidence
+            or events != [expected_event]
         ):
             return f"issue37 normal task {index} did not pass the required shape"
     matrix = payload.get("failure_matrix")
@@ -1513,6 +1525,65 @@ def _issue37_matrix_diagnostic(payload: dict[str, Any]) -> str | None:
         ):
             return f"issue37 failure scenario {name} did not pass cleanly"
     return None
+
+
+def _redact_field_report(report: dict[str, Any]) -> None:
+    """Keep field reports to outcomes, task linkage, cleanup, and fingerprints."""
+    automatic_gate = report.get("automatic_gate", {})
+    deployment_assets = report.get("deployment_assets", {})
+    passed = report.get("passed") is True
+    cycles_aborted = report.get("cycles_aborted", False)
+    cycles = []
+    for cycle in report.get("cycles", []):
+        cleanup = cycle.get("cleanup", {})
+        cycles.append(
+            {
+                "index": cycle.get("index"),
+                "state_seq": cycle.get("state_seq"),
+                "target_id": cycle.get("target_id"),
+                "evidence": cycle.get("evidence", []),
+                "expected_evidence": cycle.get("expected_evidence", []),
+                "events": cycle.get("events", []),
+                "expected_event": cycle.get("expected_event"),
+                "cleanup": {
+                    "complete": cleanup.get("complete") is True,
+                    "late_evidence": cleanup.get("late_evidence") is True,
+                },
+                "passed": cycle.get("passed") is True,
+            }
+        )
+    readiness = report.get("readiness", {})
+    report.clear()
+    report.update(
+        {
+            "mode": "field",
+            "automatic_gate": automatic_gate,
+            "field_matrix": [
+                {
+                    "name": "first_window_pass",
+                    "expected_evidence": ["PASSED"],
+                    "expected_event": "AUTHORIZED",
+                },
+                {
+                    "name": "second_window_pass",
+                    "expected_evidence": ["NOT_PASSED", "PASSED"],
+                    "expected_event": "AUTHORIZED",
+                },
+                {
+                    "name": "two_windows_not_passed",
+                    "expected_evidence": ["NOT_PASSED", "NOT_PASSED"],
+                    "expected_event": "UNAUTHORIZED",
+                },
+            ],
+            "failure_matrix_scope": "verified separately by issue37 hardware acceptance",
+            "readiness": {"status": readiness.get("status", "UNKNOWN")},
+            "cycles": cycles,
+            "cycles_completed": len(cycles),
+            "cycles_aborted": cycles_aborted,
+            "passed": passed,
+            "deployment_assets": deployment_assets,
+        }
+    )
 
 
 def _field_automatic_gate(
@@ -1844,6 +1915,7 @@ def run_field_acceptance(
         _block_hardware_acceptance(
             report, host_before, str(automatic_gate["diagnostic"])
         )
+        _redact_field_report(report)
         return report
     prepared = _prepare_hardware_acceptance(
         report=report,
@@ -1853,6 +1925,7 @@ def run_field_acceptance(
         environment_check_command=environment_check_command,
     )
     if prepared is None:
+        _redact_field_report(report)
         return report
     factory = _LiveHardwareAdapterFactory(
         prepared.config,
@@ -1881,6 +1954,7 @@ def run_field_acceptance(
         model_dir=model_dir,
         config_file=config_file,
     )
+    _redact_field_report(report)
     return report
 
 

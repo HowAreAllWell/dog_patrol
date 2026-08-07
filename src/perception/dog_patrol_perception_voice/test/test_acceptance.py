@@ -197,23 +197,44 @@ def test_field_mode_requires_a_matching_passed_issue37_hardware_report(tmp_path)
                 {
                     "passed": True,
                     "hardware_sessions_started": 1,
+                    "evidence": ["PASSED"],
+                    "events": ["AUTHORIZED"],
                     "expected_evidence": ["PASSED"],
                     "expected_event": "AUTHORIZED",
-                    "cleanup": {"complete": True, "late_evidence": False},
+                    "cleanup": {
+                        "complete": True,
+                        "late_evidence": False,
+                        "remote_residuals": [],
+                        "vendor_owner": {"status": "READY"},
+                    },
                 },
                 {
                     "passed": True,
                     "hardware_sessions_started": 1,
+                    "evidence": ["NOT_PASSED", "PASSED"],
+                    "events": ["AUTHORIZED"],
                     "expected_evidence": ["NOT_PASSED", "PASSED"],
                     "expected_event": "AUTHORIZED",
-                    "cleanup": {"complete": True, "late_evidence": False},
+                    "cleanup": {
+                        "complete": True,
+                        "late_evidence": False,
+                        "remote_residuals": [],
+                        "vendor_owner": {"status": "READY"},
+                    },
                 },
                 {
                     "passed": True,
                     "hardware_sessions_started": 1,
+                    "evidence": ["NOT_PASSED", "NOT_PASSED"],
+                    "events": ["UNAUTHORIZED"],
                     "expected_evidence": ["NOT_PASSED", "NOT_PASSED"],
                     "expected_event": "UNAUTHORIZED",
-                    "cleanup": {"complete": True, "late_evidence": False},
+                    "cleanup": {
+                        "complete": True,
+                        "late_evidence": False,
+                        "remote_residuals": [],
+                        "vendor_owner": {"status": "READY"},
+                    },
                 },
             ],
             "failure_matrix": [
@@ -250,6 +271,49 @@ def test_field_mode_requires_a_matching_passed_issue37_hardware_report(tmp_path)
 
     assert mismatched_gate["passed"] is False
     assert mismatched_gate["diagnostic"].endswith("helper")
+
+
+def test_field_report_redacts_diagnostics_and_audio_metadata() -> None:
+    report = {
+        "mode": "field",
+        "automatic_gate": {"passed": True, "assets": {"sha256": "x"}},
+        "readiness": {"status": "READY", "diagnostic": "secret"},
+        "cycles": [
+            {
+                "index": 1,
+                "state_seq": 1000,
+                "target_id": 2000,
+                "evidence": ["PASSED"],
+                "evidence_details": ["secret recognition text"],
+                "events": ["AUTHORIZED"],
+                "event_details": ["secret detail"],
+                "expected_evidence": ["PASSED"],
+                "expected_event": "AUTHORIZED",
+                "cleanup": {
+                    "complete": True,
+                    "late_evidence": False,
+                    "remote_residuals": ["secret path"],
+                },
+                "passed": True,
+            }
+        ],
+        "cycles_aborted": False,
+        "passed": True,
+        "environment_check": {"stdout": "secret command"},
+        "host_pcm_capture": {"before": ["secret process"]},
+        "deployment_assets": {"model": {"sha256": "model"}},
+    }
+
+    acceptance._redact_field_report(report)
+
+    assert "environment_check" not in report
+    assert "host_pcm_capture" not in report
+    assert "evidence_details" not in report["cycles"][0]
+    assert report["readiness"] == {"status": "READY"}
+    assert report["cycles"][0]["cleanup"] == {
+        "complete": True,
+        "late_evidence": False,
+    }
 
 
 def test_field_acceptance_stops_before_hardware_when_automatic_gate_is_missing(
