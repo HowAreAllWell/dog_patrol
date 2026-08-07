@@ -6,8 +6,10 @@ from collections.abc import Callable
 import math
 import subprocess
 import threading
-import time
 from typing import Any
+
+
+MIXER_COMMAND_TIMEOUT_SECONDS = 3.0
 
 
 class FfmpegAlsaPromptPlayer:
@@ -68,6 +70,8 @@ class FfmpegAlsaPromptPlayer:
                 "lavfi",
                 "-i",
                 f"flite=text='{escaped_prompt}':voice=kal16",
+                "-af",
+                "acompressor=threshold=0.03:ratio=6:attack=2:release=80:makeup=20",
                 "-ar",
                 "48000",
                 "-ac",
@@ -95,7 +99,7 @@ class FfmpegAlsaPromptPlayer:
                 f"{self._volume_percent}%",
             ],
             stage="Prompt volume update",
-            timeout_seconds=self._command_timeout_seconds,
+            timeout_seconds=MIXER_COMMAND_TIMEOUT_SECONDS,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             cancel_event=self._cancel_requested,
@@ -148,24 +152,17 @@ def _run_command(
     if process_callback is not None:
         process_callback(process)
     try:
-        started_at = time.monotonic()
-        pending_input = input_data
-        while True:
-            if cancel_event is not None and cancel_event.is_set():
-                _terminate_process(process)
-                raise RuntimeError(f"{stage} was cancelled")
-            remaining = timeout_seconds - (time.monotonic() - started_at)
-            if remaining <= 0:
-                _terminate_process(process)
-                raise RuntimeError(f"{stage} timed out after {timeout_seconds:g} seconds")
-            try:
-                stdout, stderr = process.communicate(
-                    input=pending_input,
-                    timeout=min(remaining, 0.05),
-                )
-                break
-            except subprocess.TimeoutExpired:
-                pending_input = None
+        if cancel_event is not None and cancel_event.is_set():
+            _terminate_process(process)
+            raise RuntimeError(f"{stage} was cancelled")
+        try:
+            stdout, stderr = process.communicate(
+                input=input_data,
+                timeout=timeout_seconds,
+            )
+        except subprocess.TimeoutExpired as exc:
+            _terminate_process(process)
+            raise RuntimeError(f"{stage} timed out after {timeout_seconds:g} seconds") from exc
         result = subprocess.CompletedProcess(
             command,
             process.returncode,

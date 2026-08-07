@@ -6,6 +6,7 @@ import base64
 import binascii
 import json
 import math
+import re
 import subprocess
 import threading
 import time
@@ -391,10 +392,21 @@ class SubprocessAdbEncodedPcmStream:
                 ).stdout
             except OSError:
                 status = ""
-            if "state: RUNNING" in status and "owner_pid" in status:
+            owner_match = re.search(
+                r"^owner_pid\s*:\s*(\d+)\s*$", status, re.MULTILINE
+            )
+            demo = self._adb.shell(("pidof", "demo"), allow_failure=True).stdout
+            demo_pids = {int(value) for value in re.findall(r"\b\d+\b", str(demo))}
+            if (
+                "state: RUNNING" in status
+                and owner_match is not None
+                and int(owner_match.group(1)) in demo_pids
+            ):
                 return
             self._sleep(0.25)
-        raise TimeoutError("R818 vendor audio service did not reacquire AC107")
+        raise TimeoutError(
+            "R818 vendor audio service did not reacquire AC107 under demo"
+        )
 
     @staticmethod
     def _remote_capture_script() -> str:

@@ -91,6 +91,44 @@ def test_prompt_player_request_stop_terminates_active_command(monkeypatch) -> No
     assert "cancelled" in str(errors[0])
 
 
+def test_run_command_keeps_complete_audio_input_until_process_finishes(monkeypatch) -> None:
+    calls: list[tuple[bytes | None, float | None]] = []
+
+    class FakeProcess:
+        returncode = 0
+
+        def __init__(self, command, **_settings):
+            self.command = command
+
+        def communicate(self, *, input=None, timeout=None):
+            calls.append((input, timeout))
+            if timeout is not None and timeout < 1.0:
+                raise subprocess.TimeoutExpired(self.command, timeout)
+            return b"", b""
+
+        def terminate(self):
+            self.returncode = -15
+
+        def kill(self):
+            self.returncode = -9
+
+        def wait(self, timeout=None):
+            del timeout
+            return self.returncode
+
+    monkeypatch.setattr(prompt_module.subprocess, "Popen", FakeProcess)
+
+    result = prompt_module._run_command(
+        ["aplay"],
+        stage="Prompt playback",
+        timeout_seconds=2.0,
+        input=b"complete-wav",
+    )
+
+    assert result.returncode == 0
+    assert calls == [(b"complete-wav", 2.0)]
+
+
 def _capture_error(errors: list[BaseException], operation, *args) -> None:
     try:
         operation(*args)

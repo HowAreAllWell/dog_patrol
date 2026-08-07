@@ -104,6 +104,8 @@ class FakeAdb:
         self.calls.append(("shell", arguments, timeout_seconds, allow_failure))
         if arguments[:2] == ("cat", "/proc/asound/card1/pcm0c/sub0/status"):
             return SimpleNamespace(stdout="state: RUNNING\nowner_pid: 123\n")
+        if arguments[:2] == ("pidof", "demo"):
+            return SimpleNamespace(stdout="123\n")
         return SimpleNamespace(stdout="")
 
     def start_shell_script(self, script):

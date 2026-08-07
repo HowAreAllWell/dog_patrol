@@ -155,7 +155,17 @@ class R818TaskSession:
         if callable(reset_stop):
             reset_stop()
         self._raise_if_cancelled()
-        self._stream.start()
+        try:
+            self._stream.start()
+        except BaseException:
+            self._closed = True
+            try:
+                self._stream.close()
+            except BaseException as cleanup_error:
+                raise VoiceTaskCleanupError(
+                    "R818 task cleanup failed after stream startup"
+                ) from cleanup_error
+            raise
         self._active = True
         if self._cancel_requested.is_set():
             try:
