@@ -53,7 +53,8 @@ from .preflight import (
 )
 from .prompt import FfmpegAlsaPromptPlayer
 from .result import VoiceWindowResult
-from .r818_stream import SubprocessAdbEncodedPcmStream
+from .r818_stream import R818StreamingVoskSession, SubprocessAdbEncodedPcmStream
+from .vosk import load_vosk_model
 
 
 _SCHEMA_VERSION = 1
@@ -419,7 +420,7 @@ class _HardwareAdapterFactory:
         behavior = _TaskBehavior(windows=task.windows)
         record = _LifecycleRecord.create("hardware")
         self.records.append(record)
-        stream = _HardwareFailureStream(
+        stream = _HardwareTrackedStream(
             SubprocessAdbEncodedPcmStream(
                 self._adb,
                 helper_path=self._helper_path,
@@ -456,13 +457,13 @@ class _HardwareAdapterFactory:
         return index < len(self.records) and self.records[index].started.is_set()
 
 
-class _HardwareFailureStream:
-    """Wrap a real stream while injecting one controlled failure."""
+class _HardwareTrackedStream:
+    """Track real R818 ownership and optionally inject one controlled failure."""
 
     def __init__(
         self,
         stream: SubprocessAdbEncodedPcmStream,
-        behavior: _TaskBehavior,
+        behavior: _TaskBehavior | None,
         record: _LifecycleRecord,
         active_changed: Callable[[int], None],
     ) -> None:
@@ -474,7 +475,7 @@ class _HardwareFailureStream:
 
     def start(self) -> None:
         self._record.start_called = True
-        if self._behavior.failure == "adb":
+        if self._behavior is not None and self._behavior.failure == "adb":
             raise RuntimeError("injected ADB transport failure")
         self._stream.start()
         self._active = True
@@ -482,7 +483,7 @@ class _HardwareFailureStream:
         self._record.started.set()
 
     def window_chunks(self, timeout_seconds: float) -> Iterator[bytes]:
-        if self._behavior.failure == "stream":
+        if self._behavior is not None and self._behavior.failure == "stream":
             raise RuntimeError("injected R818 stream failure")
         return self._stream.window_chunks(timeout_seconds)
 
@@ -496,7 +497,7 @@ class _HardwareFailureStream:
                 self._active_changed(-1)
             self._record.closed.set()
             self._record.close_finished.set()
-        if self._behavior.close_failure:
+        if self._behavior is not None and self._behavior.close_failure:
             self._record.close_error = "injected R818 restore failure"
             raise RuntimeError(self._record.close_error)
 
@@ -557,7 +558,7 @@ class _HardwareFailureAdapterFactory:
             behavior.failure or behavior.cancel_at or "hardware"
         )
         self.records.append(record)
-        stream = _HardwareFailureStream(
+        stream = _HardwareTrackedStream(
             SubprocessAdbEncodedPcmStream(
                 self._adb,
                 helper_path=self._helper_path,
@@ -598,6 +599,70 @@ class _HardwareFailureAdapterFactory:
             self.max_active_sessions = max(
                 self.max_active_sessions, self.active_sessions
             )
+
+
+class _LiveHardwareAdapterFactory:
+    """Build production adapters that derive results from the live R818 stream."""
+
+    def __init__(
+        self,
+        config: VoiceConfig,
+        helper_path: Path,
+        adb: SubprocessAdbFileTransfer,
+        model_dir: str | Path,
+    ) -> None:
+        self._config = config
+        self._helper_path = helper_path
+        self._adb = adb
+        self._model, self._recognizer_factory = load_vosk_model(model_dir)
+        self._prompt_player = FfmpegAlsaPromptPlayer(
+            device=config.prompt_device,
+            mixer_card=config.prompt_mixer_card,
+            mixer_control=config.prompt_mixer_control,
+            volume_percent=config.prompt_volume_percent,
+        )
+        self.records: list[_LifecycleRecord] = []
+        self.active_sessions = 0
+        self.max_active_sessions = 0
+        self._active_lock = threading.Lock()
+
+    def __call__(self) -> R818VoiceAdapter:
+        record = _LifecycleRecord.create("field")
+        self.records.append(record)
+        stream = _HardwareTrackedStream(
+            SubprocessAdbEncodedPcmStream(
+                self._adb,
+                helper_path=self._helper_path,
+                start_timeout_seconds=self._config.start_timeout_seconds,
+                restore_timeout_seconds=self._config.restore_timeout_seconds,
+                max_buffer_seconds=self._config.max_buffer_seconds,
+            ),
+            None,
+            record,
+            self._active_changed,
+        )
+        recognizer = R818StreamingVoskSession(
+            stream,
+            self._config,
+            model=self._model,
+            recognizer_factory=self._recognizer_factory,
+        )
+        return R818VoiceAdapter(
+            config=self._config,
+            stream=stream,
+            recognizer=recognizer,
+            prompt_player=self._prompt_player,
+        )
+
+    def _active_changed(self, delta: int) -> None:
+        with self._active_lock:
+            self.active_sessions += delta
+            self.max_active_sessions = max(
+                self.max_active_sessions, self.active_sessions
+            )
+
+    def task_started(self, index: int) -> bool:
+        return index < len(self.records) and self.records[index].started.is_set()
 
 
 def _qos(*, transient: bool, depth: int) -> QoSProfile:
@@ -772,6 +837,17 @@ def _cycle_behaviors(fixture: AcceptanceFixture) -> list[_TaskBehavior]:
     return [_TaskBehavior(windows=task.windows) for task in fixture.tasks]
 
 
+def minimal_field_matrix() -> AcceptanceFixture:
+    """Return the three live-speech outcome shapes required by issue #38."""
+    return AcceptanceFixture.from_tasks(
+        [
+            [{"accepted": True}],
+            [{"accepted": False}, {"accepted": True}],
+            [{"accepted": False}, {"accepted": False}],
+        ]
+    )
+
+
 def _run_cycles(
     fixture: AcceptanceFixture,
     *,
@@ -781,6 +857,7 @@ def _run_cycles(
     preflight: Callable[[], VoicePreflightOutcome],
     task_started_checker: Callable[[int], bool] | None = None,
     wait_for_idle: Callable[[], bool] | None = None,
+    session_count: Callable[[], int] | None = None,
     task_timeout_seconds: float = 5.0,
     cancel_timeout_seconds: float = 5.0,
 ) -> dict[str, Any]:
@@ -813,6 +890,7 @@ def _run_cycles(
         for index, task in enumerate(fixture.tasks):
             state_seq = 1000 + index
             target_id = 2000 + index
+            sessions_before = session_count() if session_count is not None else None
             evidence_start = len(harness.evidence)
             events_start = len(harness.events)
             harness.publish_state(state_seq, target_id)
@@ -847,6 +925,12 @@ def _run_cycles(
             quiet_ok = harness.wait_quiet(
                 len(harness.evidence), len(harness.events)
             )
+            sessions_started = (
+                session_count() - sessions_before
+                if session_count is not None and sessions_before is not None
+                else None
+            )
+            sessions_ok = sessions_started is None or sessions_started == 1
             evidence = harness.evidence[evidence_start:]
             events = harness.events[events_start:]
             evidence_matches_session = all(
@@ -875,6 +959,7 @@ def _run_cycles(
                     "state_seq": state_seq,
                     "target_id": target_id,
                     "task_started": task_started,
+                    "hardware_sessions_started": sessions_started,
                     "evidence": [_result_name(message.result) for message in evidence],
                     "evidence_details": [message.detail for message in evidence],
                     "evidence_sessions": [
@@ -893,6 +978,7 @@ def _run_cycles(
                         and event_ok
                         and quiet_ok
                         and idle_ok
+                        and sessions_ok
                         and evidence_matches_session
                         and not residuals
                         and owner_ok,
@@ -905,6 +991,7 @@ def _run_cycles(
                         and evidence_ok
                         and event_ok
                         and idle_ok
+                        and sessions_ok
                         and evidence_matches_session
                         and [message.result for message in evidence] == expected_evidence
                         and len(events) == 1
@@ -1360,6 +1447,131 @@ def _path_fingerprint(path: str | Path) -> dict[str, Any]:
     }
 
 
+def _deployment_assets(
+    *,
+    model_dir: str | Path,
+    config_file: str | Path,
+    helper_path: Path,
+) -> dict[str, dict[str, Any]]:
+    return {
+        "model": _path_fingerprint(model_dir),
+        "config": _path_fingerprint(config_file),
+        "helper": _path_fingerprint(helper_path),
+        "acceptance": _path_fingerprint(Path(__file__)),
+    }
+
+
+def _issue37_matrix_diagnostic(payload: dict[str, Any]) -> str | None:
+    expected_tasks = minimal_field_matrix().tasks
+    cycles = payload.get("cycles")
+    if not isinstance(cycles, list) or len(cycles) != len(expected_tasks):
+        return "issue37 normal task matrix is incomplete"
+    if payload.get("cycles_completed") != len(expected_tasks) or payload.get(
+        "cycles_aborted"
+    ) is not False:
+        return "issue37 normal task matrix did not complete cleanly"
+    for index, (cycle, task) in enumerate(zip(cycles, expected_tasks), start=1):
+        expected_evidence = [
+            "PASSED" if window.accepted else "NOT_PASSED"
+            for window in task.windows
+        ]
+        expected_event = "AUTHORIZED" if task.windows[-1].accepted else "UNAUTHORIZED"
+        cleanup = cycle.get("cleanup") if isinstance(cycle, dict) else None
+        if (
+            not isinstance(cycle, dict)
+            or cycle.get("passed") is not True
+            or cycle.get("hardware_sessions_started") != 1
+            or cycle.get("expected_evidence") != expected_evidence
+            or cycle.get("expected_event") != expected_event
+            or not isinstance(cleanup, dict)
+            or cleanup.get("complete") is not True
+            or cleanup.get("late_evidence") is not False
+        ):
+            return f"issue37 normal task {index} did not pass the required shape"
+    matrix = payload.get("failure_matrix")
+    if not isinstance(matrix, list):
+        return "issue37 failure matrix is missing"
+    scenarios = {
+        scenario.get("name"): scenario
+        for scenario in matrix
+        if isinstance(scenario, dict) and isinstance(scenario.get("name"), str)
+    }
+    if len(scenarios) != len(matrix) or set(scenarios) != set(_FAILURE_SCENARIOS):
+        return "issue37 failure matrix does not cover every required scenario"
+    for name in _FAILURE_SCENARIOS:
+        scenario = scenarios[name]
+        cleanup = scenario.get("cleanup")
+        max_active_sessions = scenario.get("max_active_sessions")
+        if (
+            scenario.get("passed") is not True
+            or scenario.get("late_evidence") is not False
+            or not isinstance(max_active_sessions, int)
+            or max_active_sessions < 0
+            or max_active_sessions > 1
+            or not isinstance(cleanup, dict)
+            or cleanup.get("complete") is not True
+        ):
+            return f"issue37 failure scenario {name} did not pass cleanly"
+    return None
+
+
+def _field_automatic_gate(
+    report_path: str | Path,
+    *,
+    model_dir: str | Path,
+    config_file: str | Path,
+    helper_path: Path,
+) -> dict[str, Any]:
+    """Validate that the same deployment already passed issue #37."""
+    path = Path(report_path)
+    result: dict[str, Any] = {"report": str(path), "passed": False}
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        result["diagnostic"] = f"cannot read issue37 automated report: {exc}"
+        return result
+    if not isinstance(payload, dict):
+        result["diagnostic"] = "issue37 automated report root must be an object"
+        return result
+    if payload.get("issue") != 37 or payload.get("mode") != "hardware":
+        result["diagnostic"] = "automated report must be a hardware report for issue 37"
+        return result
+    if payload.get("passed") is not True:
+        result["diagnostic"] = "issue37 automated report did not pass"
+        return result
+    expected_assets = payload.get("deployment_assets")
+    if not isinstance(expected_assets, dict):
+        result["diagnostic"] = "issue37 automated report lacks deployment assets"
+        return result
+    current_assets = _deployment_assets(
+        model_dir=model_dir,
+        config_file=config_file,
+        helper_path=helper_path,
+    )
+    mismatches = []
+    for name, current in current_assets.items():
+        expected = expected_assets.get(name)
+        if not isinstance(expected, dict) or any(
+            expected.get(field) != current.get(field)
+            for field in ("exists", "files", "sha256")
+        ):
+            mismatches.append(name)
+    if mismatches:
+        result["diagnostic"] = (
+            "issue37 automated report assets do not match this field deployment: "
+            + ", ".join(mismatches)
+        )
+        return result
+    matrix_diagnostic = _issue37_matrix_diagnostic(payload)
+    if matrix_diagnostic is not None:
+        result["diagnostic"] = matrix_diagnostic
+        return result
+    result["passed"] = True
+    result["diagnostic"] = "matching issue37 hardware acceptance passed"
+    result["assets"] = current_assets
+    return result
+
+
 def _runtime_install_check() -> dict[str, Any]:
     """Reject hardware acceptance when this module was imported from source."""
     module_path = Path(__file__).resolve()
@@ -1380,85 +1592,90 @@ def _runtime_install_check() -> dict[str, Any]:
     }
 
 
-def run_hardware_acceptance(
-    fixture: AcceptanceFixture,
+@dataclass(frozen=True)
+class _PreparedHardwareAcceptance:
+    config: VoiceConfig
+    helper_path: Path
+    adb: SubprocessAdbFileTransfer
+    preflight: VoicePreflight
+    readiness: dict[str, str]
+    host_before: dict[str, list[str]]
+    task_timeout_seconds: float
+
+
+def _hardware_fixture_provenance_diagnostic(
+    provenance: dict[str, str] | None,
+) -> str | None:
+    values = provenance or {}
+    missing = _REQUIRED_HARDWARE_PROVENANCE - set(values)
+    invalid = []
+    if "source_commit" in values and not re.fullmatch(
+        r"[0-9a-fA-F]{40}", values["source_commit"]
+    ):
+        invalid.append("source_commit must be a 40-digit hexadecimal commit")
+    if "source_matrix" in values and not values["source_matrix"].strip():
+        invalid.append("source_matrix must not be empty")
+    if "task_manifest_sha256" in values and not re.fullmatch(
+        r"[0-9a-fA-F]{64}", values["task_manifest_sha256"]
+    ):
+        invalid.append("task_manifest_sha256 must be a 64-digit hexadecimal SHA-256")
+    diagnostics = []
+    if missing:
+        diagnostics.append(
+            "hardware fixture provenance is incomplete: " + ", ".join(sorted(missing))
+        )
+    diagnostics.extend(invalid)
+    return "; ".join(diagnostics) if diagnostics else None
+
+
+def _block_hardware_acceptance(
+    report: dict[str, Any],
+    host_before: dict[str, list[str]],
+    diagnostic: str,
+) -> None:
+    report["readiness"] = {"status": "BLOCKED", "diagnostic": diagnostic}
+    report["cycles"] = []
+    report["failure_matrix"] = []
+    report["passed"] = False
+    report["host_pcm_capture"] = _host_pcm_check(host_before, _host_pcm_snapshot())
+
+
+def _prepare_hardware_acceptance(
     *,
-    cycles: int,
+    report: dict[str, Any],
     model_dir: str | Path,
     config_file: str | Path,
-    helper_path: str | Path | None = None,
-    environment_check_command: Sequence[str] | None = None,
-) -> dict[str, Any]:
-    """Run the complete clean-install gate, real R818 cycles, and fault matrix."""
+    helper_path: str | Path | None,
+    environment_check_command: Sequence[str] | None,
+    fixture_provenance: dict[str, str] | None = None,
+) -> _PreparedHardwareAcceptance | None:
     runtime_check = _runtime_install_check()
     config = load_voice_config(config_file)
     selected_helper = Path(helper_path) if helper_path else default_helper_path()
     host_before = _host_pcm_snapshot()
     environment_check = run_unified_environment_check(environment_check_command)
-    report: dict[str, Any] = {
-        "mode": "hardware",
-        "runtime_check": runtime_check,
-        "environment_check": environment_check,
-        "fixture_provenance": fixture.provenance,
-        "host_pcm_capture": False,
-        "failure_matrix_scope": "real_hardware_with_injected_faults",
-    }
+    report.update(
+        {
+            "runtime_check": runtime_check,
+            "environment_check": environment_check,
+            "host_pcm_capture": False,
+        }
+    )
     if not runtime_check["passed"]:
-        report["readiness"] = {
-            "status": "BLOCKED",
-            "diagnostic": runtime_check["diagnostic"],
-        }
-        report["cycles"] = []
-        report["failure_matrix"] = []
-        report["passed"] = False
-        report["host_pcm_capture"] = _host_pcm_check(
-            host_before, _host_pcm_snapshot()
-        )
-        return report
-    missing_provenance = _REQUIRED_HARDWARE_PROVENANCE - set(fixture.provenance or {})
-    provenance = fixture.provenance or {}
-    invalid_provenance = []
-    if "source_commit" in provenance and not re.fullmatch(
-        r"[0-9a-fA-F]{40}", provenance["source_commit"]
-    ):
-        invalid_provenance.append("source_commit must be a 40-digit hexadecimal commit")
-    if "source_matrix" in provenance and not provenance["source_matrix"].strip():
-        invalid_provenance.append("source_matrix must not be empty")
-    if "task_manifest_sha256" in provenance and not re.fullmatch(
-        r"[0-9a-fA-F]{64}", provenance["task_manifest_sha256"]
-    ):
-        invalid_provenance.append("task_manifest_sha256 must be a 64-digit hexadecimal SHA-256")
-    if missing_provenance or invalid_provenance:
-        diagnostics = []
-        if missing_provenance:
-            diagnostics.append(
-                "hardware fixture provenance is incomplete: "
-                + ", ".join(sorted(missing_provenance))
-            )
-        diagnostics.extend(invalid_provenance)
-        report["readiness"] = {
-            "status": "BLOCKED",
-            "diagnostic": "; ".join(diagnostics),
-        }
-        report["cycles"] = []
-        report["failure_matrix"] = []
-        report["passed"] = False
-        report["host_pcm_capture"] = _host_pcm_check(
-            host_before, _host_pcm_snapshot()
-        )
-        return report
+        _block_hardware_acceptance(report, host_before, runtime_check["diagnostic"])
+        return None
+    if fixture_provenance is not None:
+        diagnostic = _hardware_fixture_provenance_diagnostic(fixture_provenance)
+        if diagnostic is not None:
+            _block_hardware_acceptance(report, host_before, diagnostic)
+            return None
     if not environment_check["passed"]:
-        report["readiness"] = {
-            "status": "BLOCKED",
-            "diagnostic": "unified perception environment check did not pass",
-        }
-        report["cycles"] = []
-        report["failure_matrix"] = []
-        report["passed"] = False
-        report["host_pcm_capture"] = _host_pcm_check(
-            host_before, _host_pcm_snapshot()
+        _block_hardware_acceptance(
+            report,
+            host_before,
+            "unified perception environment check did not pass",
         )
-        return report
+        return None
     preflight = VoicePreflight(
         model_dir=model_dir,
         config_file=config_file,
@@ -1476,17 +1693,14 @@ def run_hardware_acceptance(
         report["cycles"] = []
         report["failure_matrix"] = []
         report["passed"] = False
-        report["host_pcm_capture"] = _host_pcm_check(
-            host_before, _host_pcm_snapshot()
-        )
-        return report
-
+        report["host_pcm_capture"] = _host_pcm_check(host_before, _host_pcm_snapshot())
+        return None
     adb = SubprocessAdbFileTransfer(
         config.adb_executable,
         device_serial=config.device_serial,
         timeout_seconds=config.adb_timeout_seconds,
     )
-    hardware_timeout_seconds = max(
+    timeout_seconds = max(
         30.0,
         2.0 * config.response_timeout_seconds
         + config.start_timeout_seconds
@@ -1496,37 +1710,177 @@ def run_hardware_acceptance(
         + config.restore_timeout_seconds
         + 10.0,
     )
-    factory = _HardwareAdapterFactory(config, selected_helper, adb, fixture)
+    return _PreparedHardwareAcceptance(
+        config=config,
+        helper_path=selected_helper,
+        adb=adb,
+        preflight=preflight,
+        readiness=readiness,
+        host_before=host_before,
+        task_timeout_seconds=timeout_seconds,
+    )
+
+
+def _finalize_hardware_report(
+    report: dict[str, Any],
+    prepared: _PreparedHardwareAcceptance,
+    *,
+    model_dir: str | Path,
+    config_file: str | Path,
+) -> None:
+    report["host_pcm_capture"] = _host_pcm_check(
+        prepared.host_before, _host_pcm_snapshot()
+    )
+    report["passed"] = report["passed"] and report["host_pcm_capture"]["passed"]
+    report["deployment_assets"] = _deployment_assets(
+        model_dir=model_dir,
+        config_file=config_file,
+        helper_path=prepared.helper_path,
+    )
+
+
+def run_hardware_acceptance(
+    fixture: AcceptanceFixture,
+    *,
+    cycles: int,
+    model_dir: str | Path,
+    config_file: str | Path,
+    helper_path: str | Path | None = None,
+    environment_check_command: Sequence[str] | None = None,
+) -> dict[str, Any]:
+    """Run the complete clean-install gate, real R818 cycles, and fault matrix."""
+    report: dict[str, Any] = {
+        "mode": "hardware",
+        "fixture_provenance": fixture.provenance,
+        "failure_matrix_scope": "real_hardware_with_injected_faults",
+    }
+    prepared = _prepare_hardware_acceptance(
+        report=report,
+        model_dir=model_dir,
+        config_file=config_file,
+        helper_path=helper_path,
+        environment_check_command=environment_check_command,
+        fixture_provenance=fixture.provenance,
+    )
+    if prepared is None:
+        return report
+    factory = _HardwareAdapterFactory(
+        prepared.config, prepared.helper_path, prepared.adb, fixture
+    )
     cycle_report = _run_cycles(
         fixture,
         cycles=cycles,
         adapter_factory=factory,
-        cleanup_checker=lambda: check_remote_state(adb),
-        preflight=preflight.run,
+        cleanup_checker=lambda: check_remote_state(prepared.adb),
+        preflight=prepared.preflight.run,
         task_started_checker=factory.task_started,
         wait_for_idle=lambda: factory.active_sessions == 0,
-        task_timeout_seconds=hardware_timeout_seconds,
-        cancel_timeout_seconds=config.restore_timeout_seconds + 5.0,
+        session_count=lambda: len(factory.records),
+        task_timeout_seconds=prepared.task_timeout_seconds,
+        cancel_timeout_seconds=prepared.config.restore_timeout_seconds + 5.0,
     )
     matrix = run_hardware_failure_matrix(
-        config,
-        helper_path=selected_helper,
-        adb=adb,
-        timeout_seconds=hardware_timeout_seconds,
+        prepared.config,
+        helper_path=prepared.helper_path,
+        adb=prepared.adb,
+        timeout_seconds=prepared.task_timeout_seconds,
     )
-    report["preflight"] = readiness
+    report["preflight"] = prepared.readiness
     report.update(cycle_report)
     report["failure_matrix"] = matrix
     report["passed"] = cycle_report["passed"] and all(
         scenario["passed"] for scenario in matrix
     )
-    report["host_pcm_capture"] = _host_pcm_check(host_before, _host_pcm_snapshot())
-    report["passed"] = report["passed"] and report["host_pcm_capture"]["passed"]
-    report["deployment_assets"] = {
-        "model": _path_fingerprint(model_dir),
-        "config": _path_fingerprint(config_file),
-        "helper": _path_fingerprint(selected_helper),
+    _finalize_hardware_report(
+        report,
+        prepared,
+        model_dir=model_dir,
+        config_file=config_file,
+    )
+    return report
+
+
+def run_field_acceptance(
+    *,
+    model_dir: str | Path,
+    config_file: str | Path,
+    automated_report: str | Path,
+    helper_path: str | Path | None = None,
+    environment_check_command: Sequence[str] | None = None,
+) -> dict[str, Any]:
+    """Run the final live-speech matrix without storing speech or passphrases."""
+    matrix = minimal_field_matrix()
+    selected_helper = Path(helper_path) if helper_path else default_helper_path()
+    automatic_gate = _field_automatic_gate(
+        automated_report,
+        model_dir=model_dir,
+        config_file=config_file,
+        helper_path=selected_helper,
+    )
+    report: dict[str, Any] = {
+        "mode": "field",
+        "automatic_gate": automatic_gate,
+        "field_matrix": [
+            {
+                "name": "first_window_pass",
+                "expected_evidence": ["PASSED"],
+                "expected_event": "AUTHORIZED",
+            },
+            {
+                "name": "second_window_pass",
+                "expected_evidence": ["NOT_PASSED", "PASSED"],
+                "expected_event": "AUTHORIZED",
+            },
+            {
+                "name": "two_windows_not_passed",
+                "expected_evidence": ["NOT_PASSED", "NOT_PASSED"],
+                "expected_event": "UNAUTHORIZED",
+            },
+        ],
+        "failure_matrix_scope": "verified separately by issue37 hardware acceptance",
     }
+    if not automatic_gate["passed"]:
+        host_before = _host_pcm_snapshot()
+        _block_hardware_acceptance(
+            report, host_before, str(automatic_gate["diagnostic"])
+        )
+        return report
+    prepared = _prepare_hardware_acceptance(
+        report=report,
+        model_dir=model_dir,
+        config_file=config_file,
+        helper_path=selected_helper,
+        environment_check_command=environment_check_command,
+    )
+    if prepared is None:
+        return report
+    factory = _LiveHardwareAdapterFactory(
+        prepared.config,
+        prepared.helper_path,
+        prepared.adb,
+        model_dir,
+    )
+    cycle_report = _run_cycles(
+        matrix,
+        cycles=len(matrix.tasks),
+        adapter_factory=factory,
+        cleanup_checker=lambda: check_remote_state(prepared.adb),
+        preflight=prepared.preflight.run,
+        task_started_checker=factory.task_started,
+        wait_for_idle=lambda: factory.active_sessions == 0,
+        session_count=lambda: len(factory.records),
+        task_timeout_seconds=prepared.task_timeout_seconds,
+        cancel_timeout_seconds=prepared.config.restore_timeout_seconds + 5.0,
+    )
+    report["preflight"] = prepared.readiness
+    report.update(cycle_report)
+    report["passed"] = cycle_report["passed"]
+    _finalize_hardware_report(
+        report,
+        prepared,
+        model_dir=model_dir,
+        config_file=config_file,
+    )
     return report
 
 
@@ -1553,10 +1907,15 @@ def _write_report(path: Path, report: dict[str, Any]) -> None:
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        description="Run unattended dog_patrol voice deployment acceptance."
+        description="Run dog_patrol voice deployment or final field acceptance."
     )
-    parser.add_argument("--mode", choices=("fixture", "hardware"), default="fixture")
-    parser.add_argument("--fixture", required=True, help="deployment-local task outcome JSON")
+    parser.add_argument(
+        "--mode", choices=("fixture", "hardware", "field"), default="fixture"
+    )
+    parser.add_argument(
+        "--fixture",
+        help="deployment-local task outcome JSON (required in fixture and hardware modes)",
+    )
     parser.add_argument(
         "--cycles",
         type=int,
@@ -1566,51 +1925,89 @@ def build_parser() -> argparse.ArgumentParser:
             f"(default: {_DEFAULT_ACCEPTANCE_CYCLES})"
         ),
     )
-    parser.add_argument("--model-dir", help="Vosk model directory (required in hardware mode)")
+    parser.add_argument(
+        "--model-dir", help="Vosk model directory (required in hardware and field modes)"
+    )
     parser.add_argument("--config-file", default=str(_default_config_path()))
     parser.add_argument("--helper-path")
     parser.add_argument(
         "--environment-check-command",
         help="quoted command for the complete perception environment gate",
     )
+    parser.add_argument(
+        "--automated-report",
+        help="passed issue37 hardware report required in field mode",
+    )
     parser.add_argument("--report", type=Path, help="write a JSON report at this path")
     return parser
 
 
 def main(argv: Sequence[str] | None = None) -> int:
-    args = build_parser().parse_args(argv)
+    command_args = list(sys.argv[1:] if argv is None else argv)
+    args = build_parser().parse_args(command_args)
     if args.cycles <= 0:
         print("acceptance cycles must be positive")
         return 2
     try:
-        fixture = load_acceptance_fixture(args.fixture, expected_cycles=args.cycles)
+        environment_check_command = (
+            shlex.split(args.environment_check_command)
+            if args.environment_check_command
+            else None
+        )
         if args.mode == "hardware":
+            if args.automated_report:
+                raise ValueError("--automated-report is accepted only in field mode")
+            if not args.fixture:
+                raise ValueError("--fixture is required in hardware mode")
             if not args.model_dir:
                 raise ValueError("--model-dir is required in hardware mode")
+            fixture = load_acceptance_fixture(args.fixture, expected_cycles=args.cycles)
             report = run_hardware_acceptance(
                 fixture,
                 cycles=args.cycles,
                 model_dir=args.model_dir,
                 config_file=args.config_file,
                 helper_path=args.helper_path,
-                environment_check_command=(
-                    shlex.split(args.environment_check_command)
-                    if args.environment_check_command
-                    else None
-                ),
+                environment_check_command=environment_check_command,
             )
-        else:
+        elif args.mode == "fixture":
+            if args.automated_report:
+                raise ValueError("--automated-report is accepted only in field mode")
+            if not args.fixture:
+                raise ValueError("--fixture is required in fixture mode")
+            fixture = load_acceptance_fixture(args.fixture, expected_cycles=args.cycles)
             report = run_fixture_acceptance(fixture, cycles=args.cycles)
-        report["issue"] = 37
+        else:
+            if args.fixture:
+                raise ValueError("--fixture is not accepted in field mode")
+            if not args.model_dir:
+                raise ValueError("--model-dir is required in field mode")
+            if not args.automated_report:
+                raise ValueError("--automated-report is required in field mode")
+            if args.cycles != _DEFAULT_ACCEPTANCE_CYCLES:
+                raise ValueError(
+                    "field mode uses the fixed three-scenario minimal matrix"
+                )
+            report = run_field_acceptance(
+                model_dir=args.model_dir,
+                config_file=args.config_file,
+                automated_report=args.automated_report,
+                helper_path=args.helper_path,
+                environment_check_command=environment_check_command,
+            )
+        report["issue"] = 38 if args.mode == "field" else 37
         report["started_at_utc"] = datetime.now(timezone.utc).isoformat()
         report["environment"] = {
             "architecture": platform.machine(),
             "python": sys.version.split()[0],
-            "fixture": str(args.fixture),
             "cycles_requested": args.cycles,
-            "fixture_fingerprint": _path_fingerprint(args.fixture),
         }
-        report["command"] = shlex.join(["perception_voice_acceptance", *sys.argv[1:]])
+        if args.fixture:
+            report["environment"]["fixture"] = str(args.fixture)
+            report["environment"]["fixture_fingerprint"] = _path_fingerprint(
+                args.fixture
+            )
+        report["command"] = shlex.join(["perception_voice_acceptance", *command_args])
         if args.report:
             _write_report(args.report, report)
         print(json.dumps(report, ensure_ascii=False, sort_keys=True))
