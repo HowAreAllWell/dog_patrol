@@ -392,7 +392,9 @@ class SubprocessAdbEncodedPcmStream:
                 ).stdout
             except OSError:
                 status = ""
-            owner_match = re.search(r"^owner_pid:\s*(\d+)\s*$", status, re.MULTILINE)
+            owner_match = re.search(
+                r"^owner_pid\s*:\s*(\d+)\s*$", status, re.MULTILINE
+            )
             demo = self._adb.shell(("pidof", "demo"), allow_failure=True).stdout
             demo_pids = {int(value) for value in re.findall(r"\b\d+\b", str(demo))}
             if (

@@ -57,6 +57,12 @@ from .r818_stream import SubprocessAdbEncodedPcmStream
 
 
 _SCHEMA_VERSION = 1
+_ENVIRONMENT_CHECK_TIMEOUT_SECONDS = 300.0
+_REQUIRED_HARDWARE_PROVENANCE = {
+    "source_commit",
+    "source_matrix",
+    "task_manifest_sha256",
+}
 _FAILURE_SCENARIOS = (
     "prompt_cancel",
     "first_window_cancel",
@@ -105,9 +111,14 @@ class AcceptanceFixture:
     """Validated task outcomes loaded from a deployment-local JSON file."""
 
     tasks: tuple[FixtureTask, ...]
+    provenance: dict[str, str] | None = None
 
     @classmethod
-    def from_tasks(cls, tasks: Sequence[Sequence[dict[str, Any]]]) -> AcceptanceFixture:
+    def from_tasks(
+        cls,
+        tasks: Sequence[Sequence[dict[str, Any]]],
+        provenance: dict[str, str] | None = None,
+    ) -> AcceptanceFixture:
         return cls(
             tuple(
                 FixtureTask(
@@ -122,7 +133,8 @@ class AcceptanceFixture:
                     )
                 )
                 for task in tasks
-            )
+            ),
+            provenance=provenance,
         )
 
 
@@ -141,6 +153,17 @@ def load_acceptance_fixture(
         raise ValueError("acceptance fixture root must be an object")
     if payload.get("schema_version") != _SCHEMA_VERSION:
         raise ValueError(f"acceptance fixture schema_version must be {_SCHEMA_VERSION}")
+    unknown_root_fields = set(payload) - {"schema_version", "tasks", "provenance"}
+    if unknown_root_fields:
+        names = ", ".join(sorted(unknown_root_fields))
+        raise ValueError(f"acceptance fixture has unsupported field(s): {names}")
+    provenance = payload.get("provenance")
+    if provenance is not None:
+        if not isinstance(provenance, dict) or any(
+            not isinstance(key, str) or not isinstance(value, str)
+            for key, value in provenance.items()
+        ):
+            raise ValueError("acceptance fixture provenance must be a string map")
     tasks = payload.get("tasks")
     if not isinstance(tasks, list):
         raise ValueError("acceptance fixture tasks must be an array")
@@ -192,7 +215,7 @@ def load_acceptance_fixture(
         except ValueError as exc:
             raise ValueError(f"task {task_index}: {exc}") from exc
     try:
-        return AcceptanceFixture.from_tasks(parsed_tasks)
+        return AcceptanceFixture.from_tasks(parsed_tasks, provenance=provenance)
     except (KeyError, TypeError, ValueError) as exc:
         raise ValueError(f"invalid acceptance fixture: {exc}") from exc
 
@@ -374,6 +397,10 @@ class _HardwareAdapterFactory:
         self._adb = adb
         self._tasks = deque(fixture.tasks)
         self.created = 0
+        self.records: list[_LifecycleRecord] = []
+        self.active_sessions = 0
+        self.max_active_sessions = 0
+        self._active_lock = threading.Lock()
 
         self._prompt_player = FfmpegAlsaPromptPlayer(
             device=config.prompt_device,
@@ -387,31 +414,44 @@ class _HardwareAdapterFactory:
             raise RuntimeError("acceptance created more tasks than the fixture provides")
         task = self._tasks.popleft()
         self.created += 1
-
-        def stream_factory() -> SubprocessAdbEncodedPcmStream:
-            return SubprocessAdbEncodedPcmStream(
+        behavior = _TaskBehavior(windows=task.windows)
+        record = _LifecycleRecord.create("hardware")
+        self.records.append(record)
+        stream = _HardwareFailureStream(
+            SubprocessAdbEncodedPcmStream(
                 self._adb,
                 helper_path=self._helper_path,
                 start_timeout_seconds=self._config.start_timeout_seconds,
                 restore_timeout_seconds=self._config.restore_timeout_seconds,
                 max_buffer_seconds=self._config.max_buffer_seconds,
-            )
-
-        def recognizer_factory(stream: SubprocessAdbEncodedPcmStream) -> _FixtureRecognizer:
-            behavior = _TaskBehavior(windows=task.windows)
-            return _FixtureRecognizer(
-                behavior,
-                _LifecycleRecord.create("hardware"),
-                stream,
-                consume_stream=True,
-            )
+            ),
+            behavior,
+            record,
+            self._active_changed,
+        )
+        recognizer = _FixtureRecognizer(
+            behavior,
+            record,
+            stream,
+            consume_stream=True,
+        )
 
         return R818VoiceAdapter(
             config=self._config,
-            stream_factory=stream_factory,
-            recognizer_factory=recognizer_factory,
+            stream=stream,
+            recognizer=recognizer,
             prompt_player=self._prompt_player,
         )
+
+    def _active_changed(self, delta: int) -> None:
+        with self._active_lock:
+            self.active_sessions += delta
+            self.max_active_sessions = max(
+                self.max_active_sessions, self.active_sessions
+            )
+
+    def task_started(self, index: int) -> bool:
+        return index < len(self.records) and self.records[index].started.is_set()
 
 
 class _HardwareFailureStream:
@@ -431,12 +471,12 @@ class _HardwareFailureStream:
         self._active = False
 
     def start(self) -> None:
+        self._record.start_called = True
         if self._behavior.failure == "adb":
             raise RuntimeError("injected ADB transport failure")
         self._stream.start()
         self._active = True
         self._active_changed(1)
-        self._record.start_called = True
         self._record.started.set()
 
     def window_chunks(self, timeout_seconds: float) -> Iterator[bytes]:
@@ -677,6 +717,20 @@ class _RosAcceptanceHarness:
             self.executor.spin_once(timeout_sec=0.05)
         return predicate()
 
+    def wait_quiet(
+        self,
+        evidence_count: int,
+        event_count: int,
+        duration: float = 0.25,
+    ) -> bool:
+        """Spin a bounded grace period and reject any late ROS output."""
+        deadline = time.monotonic() + duration
+        while time.monotonic() < deadline:
+            self.executor.spin_once(timeout_sec=0.05)
+            if len(self.evidence) != evidence_count or len(self.events) != event_count:
+                return False
+        return len(self.evidence) == evidence_count and len(self.events) == event_count
+
     def close(self) -> None:
         for node in (
             self.provider,
@@ -723,6 +777,10 @@ def _run_cycles(
     adapter_factory: Callable[[], R818VoiceAdapter],
     cleanup_checker: Callable[[], dict[str, Any]] | None = None,
     preflight: Callable[[], VoicePreflightOutcome],
+    task_started_checker: Callable[[int], bool] | None = None,
+    wait_for_idle: Callable[[], bool] | None = None,
+    task_timeout_seconds: float = 5.0,
+    cancel_timeout_seconds: float = 5.0,
 ) -> dict[str, Any]:
     if len(fixture.tasks) != cycles:
         raise ValueError(f"fixture contains {len(fixture.tasks)} tasks; expected {cycles}")
@@ -749,6 +807,7 @@ def _run_cycles(
             ),
             "diagnostic": harness.statuses[0].diagnostic if harness.statuses else "missing",
         }
+        aborted = False
         for index, task in enumerate(fixture.tasks):
             state_seq = 1000 + index
             target_id = 2000 + index
@@ -756,18 +815,43 @@ def _run_cycles(
             events_start = len(harness.events)
             harness.publish_state(state_seq, target_id)
             task_started = harness.wait(
-                lambda: len(harness.evidence) > evidence_start
-                or len(harness.events) > events_start,
-                timeout=0.5,
+                lambda: (
+                    len(harness.evidence) > evidence_start
+                    or len(harness.events) > events_start
+                    or (
+                        task_started_checker is not None
+                        and task_started_checker(index)
+                    )
+                ),
+                timeout=min(5.0, task_timeout_seconds),
             )
             evidence_ok = harness.wait(
-                lambda: len(harness.evidence) >= evidence_start + len(task.windows)
+                lambda: len(harness.evidence) >= evidence_start + len(task.windows),
+                timeout=task_timeout_seconds,
             )
             event_ok = harness.wait(
-                lambda: len(harness.events) > events_start
+                lambda: len(harness.events) > events_start,
+                timeout=task_timeout_seconds,
+            )
+            if task_started_checker is not None:
+                task_started = task_started or task_started_checker(index)
+            idle_ok = True
+            if wait_for_idle is not None and not (evidence_ok and event_ok):
+                harness.publish_state(state_seq, target_id, state=MissionState.PATROL)
+                idle_ok = harness.wait(
+                    wait_for_idle,
+                    timeout=cancel_timeout_seconds,
+                )
+            quiet_ok = harness.wait_quiet(
+                len(harness.evidence), len(harness.events)
             )
             evidence = harness.evidence[evidence_start:]
             events = harness.events[events_start:]
+            evidence_matches_session = all(
+                message.observed_state_seq == state_seq
+                and message.target_id == target_id
+                for message in evidence
+            )
             expected_evidence = [
                 AuthorizationEvidence.PASSED
                 if window.accepted
@@ -779,6 +863,10 @@ def _run_cycles(
             expected_event = _event_for_windows(task.windows)
             cleanup = cleanup_checker() if cleanup_checker is not None else {}
             residuals = cleanup.get("remote_residuals", [])
+            vendor_owner = cleanup.get("vendor_owner")
+            owner_ok = (
+                vendor_owner is None or vendor_owner.get("status") == "READY"
+            )
             cycle_reports.append(
                 {
                     "index": index + 1,
@@ -786,31 +874,57 @@ def _run_cycles(
                     "target_id": target_id,
                     "task_started": task_started,
                     "evidence": [_result_name(message.result) for message in evidence],
+                    "evidence_details": [message.detail for message in evidence],
+                    "evidence_sessions": [
+                        {
+                            "state_seq": int(message.observed_state_seq),
+                            "target_id": int(message.target_id),
+                        }
+                        for message in evidence
+                    ],
                     "events": [_event_name(message.event) for message in events],
+                    "event_details": [message.detail for message in events],
                     "expected_evidence": [_result_name(result) for result in expected_evidence],
                     "expected_event": _event_name(expected_event),
                     "cleanup": {
-                        "complete": evidence_ok and event_ok and not residuals,
+                        "complete": evidence_ok
+                        and event_ok
+                        and quiet_ok
+                        and idle_ok
+                        and evidence_matches_session
+                        and not residuals
+                        and owner_ok,
                         "remote_residuals": residuals,
-                        "vendor_owner": cleanup.get("vendor_owner"),
+                        "vendor_owner": vendor_owner,
+                        "late_evidence": not quiet_ok,
                     },
                     "passed": (
                         task_started
                         and evidence_ok
                         and event_ok
+                        and idle_ok
+                        and evidence_matches_session
                         and [message.result for message in evidence] == expected_evidence
                         and len(events) == 1
                         and events[0].event == expected_event
                         and events[0].observed_state_seq == state_seq
                         and events[0].target_id == target_id
                         and not residuals
+                        and owner_ok
+                        and quiet_ok
                     ),
                 }
             )
+            if wait_for_idle is not None and not (evidence_ok and event_ok and idle_ok):
+                aborted = True
+                break
         return {
             "readiness": readiness_report,
             "cycles": cycle_reports,
+            "cycles_completed": len(cycle_reports),
+            "cycles_aborted": aborted,
             "passed": readiness_report["status"] == "READY"
+            and len(cycle_reports) == cycles
             and all(cycle["passed"] for cycle in cycle_reports),
         }
     finally:
@@ -850,6 +964,8 @@ def _run_failure_scenario(
     factory_builder: Callable[[Sequence[_TaskBehavior]], Any] | None = None,
     preflight: Callable[[], VoicePreflightOutcome] | None = None,
     cleanup_checker: Callable[[], dict[str, Any]] | None = None,
+    stage_timeout_seconds: float = 2.0,
+    completion_timeout_seconds: float = 4.0,
 ) -> dict[str, Any]:
     behaviors, kind = _scenario_behaviors(name)
     factory = (
@@ -863,6 +979,7 @@ def _run_failure_scenario(
     )
     expected_evidence: list[int]
     expected_events: list[int]
+    result: dict[str, Any] | None = None
     try:
         harness.publish_state(10, 1)
         if not harness.wait(lambda: len(factory.records) >= 1):
@@ -875,7 +992,7 @@ def _run_failure_scenario(
                 stage_ready = first.recognition_started[1]
             else:
                 stage_ready = first.recognition_started[2]
-            if not stage_ready.wait(timeout=2.0):
+            if not stage_ready.wait(timeout=stage_timeout_seconds):
                 raise RuntimeError(f"scenario did not reach {name} stage")
             harness.publish_state(10, 1, state=MissionState.PATROL)
             expected_evidence = [AuthorizationEvidence.CANCELLED]
@@ -883,7 +1000,7 @@ def _run_failure_scenario(
                 expected_evidence.insert(0, AuthorizationEvidence.NOT_PASSED)
             expected_events = []
         elif kind == "replace":
-            if not first.recognition_started[1].wait(timeout=2.0):
+            if not first.recognition_started[1].wait(timeout=stage_timeout_seconds):
                 raise RuntimeError(f"scenario did not reach {name} replacement stage")
             if name == "state_seq_replace":
                 replacement = (11, 2)
@@ -899,21 +1016,24 @@ def _run_failure_scenario(
             expected_evidence = [AuthorizationEvidence.ERROR]
             expected_events = [MissionEvent.EXECUTION_ERROR]
 
-        if not harness.wait(lambda: first.closed.is_set(), timeout=4.0):
+        if not harness.wait(lambda: first.closed.is_set(), timeout=completion_timeout_seconds):
             raise RuntimeError(f"scenario {name} did not complete cleanup")
         if kind == "replace" and not harness.wait(
             lambda: len(factory.records) == 2 and factory.records[1].closed.is_set(),
-            timeout=4.0,
+            timeout=completion_timeout_seconds,
         ):
             raise RuntimeError(f"scenario {name} did not complete replacement cleanup")
         if not harness.wait(
-            lambda: len(harness.evidence) >= len(expected_evidence), timeout=4.0
+            lambda: len(harness.evidence) >= len(expected_evidence),
+            timeout=completion_timeout_seconds,
         ):
             raise RuntimeError(f"scenario {name} did not publish expected evidence")
         if expected_events and not harness.wait(
-            lambda: len(harness.events) >= len(expected_events), timeout=4.0
+            lambda: len(harness.events) >= len(expected_events),
+            timeout=completion_timeout_seconds,
         ):
             raise RuntimeError(f"scenario {name} did not publish expected event")
+        quiet_ok = harness.wait_quiet(len(harness.evidence), len(harness.events))
         evidence = [message.result for message in harness.evidence]
         events = [message.event for message in harness.events]
         cleanup = cleanup_checker() if cleanup_checker is not None else {}
@@ -922,6 +1042,7 @@ def _run_failure_scenario(
         cleanup_complete = (
             all(record.close_called for record in factory.records)
             and not remote_residuals
+            and quiet_ok
             and (
                 vendor_owner is None
                 or vendor_owner.get("status") == "READY"
@@ -933,7 +1054,7 @@ def _run_failure_scenario(
             and cleanup_complete
             and factory.max_active_sessions <= 1
         )
-        return {
+        result = {
             "name": name,
             "passed": passed,
             "evidence": [_result_name(result) for result in evidence],
@@ -952,25 +1073,50 @@ def _run_failure_scenario(
                 "vendor_owner": vendor_owner,
             },
             "max_active_sessions": factory.max_active_sessions,
-            "late_evidence": evidence != expected_evidence,
+            "late_evidence": not quiet_ok or evidence != expected_evidence,
         }
     except Exception as exc:
-        return {
+        result = {
             "name": name,
             "passed": False,
             "error": f"{type(exc).__name__}: {exc}",
             "cleanup": {
-                "complete": all(record.close_called for record in factory.records),
+                "complete": False,
                 "tasks": len(factory.records),
                 "remote_residuals": [],
             },
             "max_active_sessions": factory.max_active_sessions,
-            "late_evidence": False,
+            "late_evidence": not harness.wait_quiet(
+                len(harness.evidence), len(harness.events)
+            ),
         }
     finally:
         for record in factory.records:
             record.stop_requested.set()
         harness.close()
+    assert result is not None
+    if cleanup_checker is not None:
+        try:
+            post_cleanup = cleanup_checker()
+        except Exception as exc:
+            post_cleanup = {
+                "remote_residuals": [
+                    f"post-cleanup probe failed: {type(exc).__name__}: {exc}"
+                ],
+                "vendor_owner": None,
+            }
+        cleanup = result["cleanup"]
+        cleanup["remote_residuals"] = post_cleanup.get("remote_residuals", [])
+        cleanup["vendor_owner"] = post_cleanup.get("vendor_owner")
+        owner = cleanup.get("vendor_owner")
+        cleanup["complete"] = (
+            all(record.close_called for record in factory.records)
+            and not cleanup["remote_residuals"]
+            and (owner is None or owner.get("status") == "READY")
+        )
+        if not cleanup["complete"]:
+            result["passed"] = False
+    return result
 
 
 def run_failure_matrix() -> list[dict[str, Any]]:
@@ -983,8 +1129,25 @@ def run_hardware_failure_matrix(
     *,
     helper_path: Path,
     adb: SubprocessAdbFileTransfer,
+    timeout_seconds: float = 30.0,
 ) -> list[dict[str, Any]]:
     """Run the same fault matrix with real R818/ALSA resources and injected faults."""
+    # A matrix stage is expected to become observable after startup, not after a
+    # full recognition window.  Keep a hard upper bound here so a missing stream
+    # cannot turn one matrix item into an unattended multi-minute wait.
+    stage_timeout_seconds = min(
+        timeout_seconds,
+        max(10.0, config.start_timeout_seconds + 5.0),
+    )
+    completion_timeout_seconds = min(
+        timeout_seconds,
+        max(
+            60.0,
+            3.0 * config.adb_timeout_seconds
+            + config.restore_timeout_seconds
+            + 10.0,
+        ),
+    )
     return [
         _run_failure_scenario(
             name,
@@ -992,6 +1155,8 @@ def run_hardware_failure_matrix(
                 config, helper_path, adb, behaviors
             ),
             cleanup_checker=lambda: check_remote_state(adb),
+            stage_timeout_seconds=stage_timeout_seconds,
+            completion_timeout_seconds=completion_timeout_seconds,
         )
         for name in _FAILURE_SCENARIOS
     ]
@@ -1026,7 +1191,14 @@ def check_remote_residue(adb: SubprocessAdbFileTransfer) -> list[str]:
         "/tmp/dog-patrol-r818-stream.pid /tmp/dog-patrol-r818-stream.err "
         "/tmp/dog-patrol-r818-base64; do "
         "test ! -e \"$path\" || echo \"path:$path\"; done; "
-        "ps | grep '[a]record -q -D hw:1,0' && echo 'process:arecord' || true"
+        "ps_output=$(ps 2>&1); ps_status=$?; "
+        "test $ps_status -eq 0 || echo probe-error:ps:$ps_status; "
+        "recorder_name=arecord; recorder_args='-q -D hw:1,0'; "
+        "helper_prefix=dog-patrol-r818; helper_suffix=base64; "
+        "if printf '%s\\n' \"$ps_output\" | grep -F \"$recorder_name $recorder_args\" >/dev/null; then "
+        "echo 'process:arecord'; fi; "
+        "if printf '%s\\n' \"$ps_output\" | grep -F \"$helper_prefix-$helper_suffix\" >/dev/null; then "
+        "echo 'process:helper'; fi; exit 0"
     )
     try:
         output = adb.shell_script(probe).stdout
@@ -1044,7 +1216,7 @@ def check_vendor_owner(adb: SubprocessAdbFileTransfer) -> dict[str, Any]:
         demo_output = str(adb.shell(("pidof", "demo"), allow_failure=True).stdout)
     except Exception as exc:
         return {"status": "ERROR", "diagnostic": f"owner probe failed: {exc}"}
-    owner_match = re.search(r"^owner_pid:\s*(\d+)\s*$", status, re.MULTILINE)
+    owner_match = re.search(r"^owner_pid\s*:\s*(\d+)\s*$", status, re.MULTILINE)
     owner_pid = int(owner_match.group(1)) if owner_match else None
     demo_pids = sorted(
         int(value) for value in re.findall(r"\b\d+\b", demo_output)
@@ -1081,7 +1253,18 @@ def run_unified_environment_check(command: Sequence[str] | None) -> dict[str, An
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
             text=True,
+            timeout=_ENVIRONMENT_CHECK_TIMEOUT_SECONDS,
         )
+    except subprocess.TimeoutExpired as exc:
+        return {
+            "status": "ERROR",
+            "passed": False,
+            "command": list(command),
+            "diagnostic": (
+                "environment check timed out after "
+                f"{_ENVIRONMENT_CHECK_TIMEOUT_SECONDS:g} seconds: {exc}"
+            ),
+        }
     except OSError as exc:
         return {
             "status": "ERROR",
@@ -1106,18 +1289,29 @@ def _host_pcm_snapshot() -> dict[str, list[str]]:
         if directory.is_dir():
             for suffix in ("*.pcm", "*.wav", "*.raw"):
                 paths.update(str(path) for path in directory.glob(suffix))
-    process = subprocess.run(
-        ["pgrep", "-af", "[a]record"],
-        check=False,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.DEVNULL,
-        text=True,
-    )
+    try:
+        process = subprocess.run(
+            ["pgrep", "-af", "[a]record"],
+            check=False,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            text=True,
+        )
+    except OSError as exc:
+        return {
+            "paths": sorted(paths),
+            "arecord_processes": [],
+            "errors": [f"host process probe failed: {exc}"],
+        }
+    errors = [] if process.returncode in (0, 1) else [
+        f"host process probe exited with status {process.returncode}"
+    ]
     return {
         "paths": sorted(paths),
         "arecord_processes": sorted(
             line.strip() for line in process.stdout.splitlines() if line.strip()
         ),
+        "errors": errors,
     }
 
 
@@ -1127,11 +1321,17 @@ def _host_pcm_check(before: dict[str, list[str]], after: dict[str, list[str]]) -
         set(after["arecord_processes"]) - set(before["arecord_processes"])
     )
     return {
-        "passed": not new_paths and not new_processes,
+        "passed": (
+            not new_paths
+            and not new_processes
+            and not before.get("errors")
+            and not after.get("errors")
+        ),
         "before": before,
         "after": after,
         "new_paths": new_paths,
         "new_arecord_processes": new_processes,
+        "errors": before.get("errors", []) + after.get("errors", []),
     }
 
 
@@ -1158,6 +1358,26 @@ def _path_fingerprint(path: str | Path) -> dict[str, Any]:
     }
 
 
+def _runtime_install_check() -> dict[str, Any]:
+    """Reject hardware acceptance when this module was imported from source."""
+    module_path = Path(__file__).resolve()
+    marker = ("src", "perception", "dog_patrol_perception_voice")
+    parts = module_path.parts
+    source_import = any(
+        parts[index : index + len(marker)] == marker
+        for index in range(len(parts) - len(marker) + 1)
+    )
+    return {
+        "passed": not source_import,
+        "module": str(module_path),
+        "diagnostic": (
+            "installed package runtime"
+            if not source_import
+            else "voice acceptance was imported from the source tree"
+        ),
+    }
+
+
 def run_hardware_acceptance(
     fixture: AcceptanceFixture,
     *,
@@ -1168,16 +1388,63 @@ def run_hardware_acceptance(
     environment_check_command: Sequence[str] | None = None,
 ) -> dict[str, Any]:
     """Run the complete clean-install gate, real R818 cycles, and fault matrix."""
+    runtime_check = _runtime_install_check()
     config = load_voice_config(config_file)
     selected_helper = Path(helper_path) if helper_path else default_helper_path()
     host_before = _host_pcm_snapshot()
     environment_check = run_unified_environment_check(environment_check_command)
     report: dict[str, Any] = {
         "mode": "hardware",
+        "runtime_check": runtime_check,
         "environment_check": environment_check,
+        "fixture_provenance": fixture.provenance,
         "host_pcm_capture": False,
         "failure_matrix_scope": "real_hardware_with_injected_faults",
     }
+    if not runtime_check["passed"]:
+        report["readiness"] = {
+            "status": "BLOCKED",
+            "diagnostic": runtime_check["diagnostic"],
+        }
+        report["cycles"] = []
+        report["failure_matrix"] = []
+        report["passed"] = False
+        report["host_pcm_capture"] = _host_pcm_check(
+            host_before, _host_pcm_snapshot()
+        )
+        return report
+    missing_provenance = _REQUIRED_HARDWARE_PROVENANCE - set(fixture.provenance or {})
+    provenance = fixture.provenance or {}
+    invalid_provenance = []
+    if "source_commit" in provenance and not re.fullmatch(
+        r"[0-9a-fA-F]{40}", provenance["source_commit"]
+    ):
+        invalid_provenance.append("source_commit must be a 40-digit hexadecimal commit")
+    if "source_matrix" in provenance and not provenance["source_matrix"].strip():
+        invalid_provenance.append("source_matrix must not be empty")
+    if "task_manifest_sha256" in provenance and not re.fullmatch(
+        r"[0-9a-fA-F]{64}", provenance["task_manifest_sha256"]
+    ):
+        invalid_provenance.append("task_manifest_sha256 must be a 64-digit hexadecimal SHA-256")
+    if missing_provenance or invalid_provenance:
+        diagnostics = []
+        if missing_provenance:
+            diagnostics.append(
+                "hardware fixture provenance is incomplete: "
+                + ", ".join(sorted(missing_provenance))
+            )
+        diagnostics.extend(invalid_provenance)
+        report["readiness"] = {
+            "status": "BLOCKED",
+            "diagnostic": "; ".join(diagnostics),
+        }
+        report["cycles"] = []
+        report["failure_matrix"] = []
+        report["passed"] = False
+        report["host_pcm_capture"] = _host_pcm_check(
+            host_before, _host_pcm_snapshot()
+        )
+        return report
     if not environment_check["passed"]:
         report["readiness"] = {
             "status": "BLOCKED",
@@ -1217,6 +1484,16 @@ def run_hardware_acceptance(
         device_serial=config.device_serial,
         timeout_seconds=config.adb_timeout_seconds,
     )
+    hardware_timeout_seconds = max(
+        30.0,
+        2.0 * config.response_timeout_seconds
+        + config.start_timeout_seconds
+        + config.restore_timeout_seconds
+        + 5.0,
+        3.0 * config.adb_timeout_seconds
+        + config.restore_timeout_seconds
+        + 10.0,
+    )
     factory = _HardwareAdapterFactory(config, selected_helper, adb, fixture)
     cycle_report = _run_cycles(
         fixture,
@@ -1224,11 +1501,16 @@ def run_hardware_acceptance(
         adapter_factory=factory,
         cleanup_checker=lambda: check_remote_state(adb),
         preflight=preflight.run,
+        task_started_checker=factory.task_started,
+        wait_for_idle=lambda: factory.active_sessions == 0,
+        task_timeout_seconds=hardware_timeout_seconds,
+        cancel_timeout_seconds=config.restore_timeout_seconds + 5.0,
     )
     matrix = run_hardware_failure_matrix(
         config,
         helper_path=selected_helper,
         adb=adb,
+        timeout_seconds=hardware_timeout_seconds,
     )
     report["preflight"] = readiness
     report.update(cycle_report)

@@ -34,6 +34,11 @@ fixture 只允许记录每个任务的一到两个响应窗最终结果：
 ```json
 {
   "schema_version": 1,
+  "provenance": {
+    "source_commit": "b979a7fd33aac5c9ced9591bb507e483faf4aef5",
+    "source_matrix": "r818-stream-acceptance-20260730",
+    "task_manifest_sha256": "<deployment-computed-sha256>"
+  },
   "tasks": [
     {"windows": [{"accepted": true, "decision_time_seconds": 0.4}]},
     {"windows": [
@@ -43,6 +48,10 @@ fixture 只允许记录每个任务的一到两个响应窗最终结果：
   ]
 }
 ```
+
+硬件模式要求 `provenance` 中的源仓 commit、33 次任务矩阵标识和任务清单 SHA-256
+齐全；fixture 本身只保存结果，不保存 PCM/录音。这样报告可以复现结果来源而不把现场
+资产提交到仓库。
 
 fixture 只注入识别结果；硬件模式仍会加载 Vosk model、播放 Prompt、接管真实 AC107
 R818 stream，并在每个任务结束后恢复厂商音频服务。因此它验证的是安装、硬件所有权、

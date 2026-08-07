@@ -64,4 +64,6 @@ jobs:
             dog_patrol_perception_voice \
             dog_patrol_perception_tracking \
             --event-handlers console_direct+
-          colcon test-result --verbose
+          test_result="$(colcon test-result --verbose)"
+          printf '%s\n' "$test_result"
+          grep -Eq '^Summary: [1-9][0-9]* tests, 0 errors, 0 failures, 0 skipped$' <<< "$test_result"

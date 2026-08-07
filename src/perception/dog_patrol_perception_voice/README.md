@@ -52,7 +52,7 @@ FAR/FRR 验收。
 不保存 PCM，也不等待用户说话。`--mode fixture` 适合 CI；`--mode hardware` 才接管真实
 ADB/AC107/R818，并需要部署机提供 33 条任务结果、Vosk model、实际配置和通过统一感知环境
 门禁的 `--environment-check-command`。硬件模式会对真实资源执行故障矩阵，并记录主机 PCM、
-远端残留和厂商 `demo` owner 证据。完整命令、fixture 格式和验收边界见
+远端残留、厂商 `demo` owner 和 fixture provenance 证据。完整命令、fixture 格式和验收边界见
 [`docs/perception/voice/issue37_voice_hardware_acceptance.md`](../../../docs/perception/voice/issue37_voice_hardware_acceptance.md)。
 
 ## 配置和安装资产
