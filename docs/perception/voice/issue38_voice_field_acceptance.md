@@ -2,9 +2,22 @@
 
 ## 当前状态
 
-已提供 clean-install 的 `perception_voice_acceptance --mode field` 入口和自动门禁
-核验；**尚未执行真人说话矩阵，尚未创建来源归档 tag**。只有该命令返回 0 且报告中的
-`passed` 为 `true`，才可以把本票标记为通过。
+已从主仓 clean install 完成 `perception_voice_acceptance --mode field` 自动门禁和真人
+说话矩阵，命令返回 0 且报告 `passed=true`；固定来源映射已经 annotated archive tag
+归档。该结论仍不覆盖错误口令、最终口令、FRR/FAR 或安全准入。
+
+## 现场验收结果（2026-08-07）
+
+- 来源提交：`moonshine_voice_commands@b979a7fd33aac5c9ced9591bb507e483faf4aef5`
+- 执行提交：`dog_patrol@cf78d028aed921ea4a3e107fb9b3574cea5e98b6`
+- #37 报告 SHA-256：`8c5f571da6f65f1e0eb01502190918d1c39d23c122a8725f67d2abd412b7fad3`
+- #38 报告 SHA-256：`f8ab6fcd7387a062a12abd1993abbd14ac979ee6347047dc9e08e0d25ffc8a5f`
+- 结果：首窗 `PASSED/AUTHORIZED`；次窗 `NOT_PASSED,PASSED/AUTHORIZED`；双窗无应答
+  `NOT_PASSED,NOT_PASSED/UNAUTHORIZED`。三项均完成清理且无迟到 evidence。
+- 归档 tag：`archive/dog-patrol-deployment-b979a7f-issue38`
+
+验收使用 496 项零失败的非 symlink clean install；统一环境检查、#37 的 3 个正常生命周期与
+9 个真实硬件故障场景全部通过。报告不进入 Git；上方摘要只记录允许归档的结果和指纹。
 
 ## 前置条件
 
