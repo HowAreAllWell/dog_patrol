@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -89,6 +90,32 @@ def test_hardware_environment_gate_requires_explicit_unified_pass(monkeypatch) -
 
     assert result["passed"] is True
     assert result["status"] == "PASS"
+
+
+def test_acceptance_defaults_to_minimal_representative_cycle_set() -> None:
+    args = acceptance.build_parser().parse_args(["--fixture", "fixture.json"])
+
+    assert args.cycles == 3
+
+
+def test_hardware_failure_matrix_allows_second_window_stage(monkeypatch, tmp_path) -> None:
+    observed: list[float] = []
+
+    def fake_run_failure_scenario(name, **kwargs):
+        del name
+        observed.append(kwargs["stage_timeout_seconds"])
+        return {"passed": True}
+
+    monkeypatch.setattr(acceptance, "_run_failure_scenario", fake_run_failure_scenario)
+    config = acceptance.VoiceConfig()
+
+    acceptance.run_hardware_failure_matrix(
+        config,
+        helper_path=Path(tmp_path / "helper"),
+        adb=object(),
+    )
+
+    assert observed == [30.0] * len(acceptance._FAILURE_SCENARIOS)
 
 
 def test_host_pcm_check_only_reports_new_capture_artifacts() -> None:

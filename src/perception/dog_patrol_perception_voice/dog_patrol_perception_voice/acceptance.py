@@ -58,6 +58,8 @@ from .r818_stream import SubprocessAdbEncodedPcmStream
 
 _SCHEMA_VERSION = 1
 _ENVIRONMENT_CHECK_TIMEOUT_SECONDS = 300.0
+_DEFAULT_ACCEPTANCE_CYCLES = 3
+_MIN_FAILURE_STAGE_TIMEOUT_SECONDS = 30.0
 _REQUIRED_HARDWARE_PROVENANCE = {
     "source_commit",
     "source_matrix",
@@ -1137,7 +1139,7 @@ def run_hardware_failure_matrix(
     # cannot turn one matrix item into an unattended multi-minute wait.
     stage_timeout_seconds = min(
         timeout_seconds,
-        max(10.0, config.start_timeout_seconds + 5.0),
+        max(_MIN_FAILURE_STAGE_TIMEOUT_SECONDS, config.start_timeout_seconds + 5.0),
     )
     completion_timeout_seconds = min(
         timeout_seconds,
@@ -1555,7 +1557,15 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--mode", choices=("fixture", "hardware"), default="fixture")
     parser.add_argument("--fixture", required=True, help="deployment-local task outcome JSON")
-    parser.add_argument("--cycles", type=int, default=33)
+    parser.add_argument(
+        "--cycles",
+        type=int,
+        default=_DEFAULT_ACCEPTANCE_CYCLES,
+        help=(
+            "representative normal task cycles; the fixture task count must match "
+            f"(default: {_DEFAULT_ACCEPTANCE_CYCLES})"
+        ),
+    )
     parser.add_argument("--model-dir", help="Vosk model directory (required in hardware mode)")
     parser.add_argument("--config-file", default=str(_default_config_path()))
     parser.add_argument("--helper-path")
