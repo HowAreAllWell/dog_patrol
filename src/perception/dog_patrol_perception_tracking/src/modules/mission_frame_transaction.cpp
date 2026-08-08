@@ -1,6 +1,7 @@
 #include "dog_patrol_perception_tracking/modules/mission_frame_transaction.hpp"
 
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <utility>
 
@@ -8,6 +9,8 @@ namespace dog_patrol_perception_tracking {
 namespace {
 
 bool IsFinite(const float value) { return std::isfinite(value); }
+
+constexpr auto kTargetConfirmationRetryInterval = std::chrono::milliseconds{100};
 
 }  // namespace
 
@@ -71,8 +74,13 @@ MissionFrameTransaction::Output MissionFrameTransaction::Update(const FrameInput
       mission.block_cause == MissionBlockCause::kNone && mission.target_id == 0 &&
       input.metadata.source_timestamp_ns != 0U &&
       IsTrustedPrimary(output.primary, output.primary.primary_target_id) &&
-      confirmed_patrol_state_seq_ != mission.state_seq) {
-    confirmed_patrol_state_seq_ = mission.state_seq;
+      (confirmation_attempt_patrol_state_seq_ != mission.state_seq ||
+       !last_confirmation_attempt_source_time_.has_value() ||
+       (input.source_time >= last_confirmation_attempt_source_time_.value() &&
+        input.source_time - last_confirmation_attempt_source_time_.value() >=
+            kTargetConfirmationRetryInterval))) {
+    confirmation_attempt_patrol_state_seq_ = mission.state_seq;
+    last_confirmation_attempt_source_time_ = input.source_time;
     output.events.push_back({PerceptionMissionEvent::kTargetConfirmed,
                              output.primary.primary_target_id, mission.state_seq});
   }

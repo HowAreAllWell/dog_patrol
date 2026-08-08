@@ -414,6 +414,55 @@ TEST_F(MissionRosAdapterTest, PublishesOnlyTrackingCapabilityStatusForCurrentSta
   (void)status_subscription;
 }
 
+TEST_F(MissionRosAdapterTest, RetriesTargetConfirmationWhenTargetWasVisibleDuringStartup) {
+  auto adapter_node = std::make_shared<rclcpp::Node>("startup_visible_adapter");
+  MissionRosAdapter::Config config;
+  config.mission_state_topic = "/issue84/startup_visible/mission/state";
+  config.mission_event_topic = "/issue84/startup_visible/mission/event";
+  config.target_bbox_topic = "/issue84/startup_visible/perception/selected_target_bbox";
+  config.capability_status_topic = "/issue84/startup_visible/perception/capability_status";
+  MissionRosAdapter adapter(*adapter_node, config);
+
+  auto probe = std::make_shared<rclcpp::Node>("startup_visible_probe");
+  auto state_publisher = probe->create_publisher<MissionStateMessage>(
+      config.mission_state_topic, MissionRosAdapter::MissionStateQos());
+  std::vector<MissionEventMessage> events;
+
+  rclcpp::executors::SingleThreadedExecutor executor;
+  executor.add_node(adapter_node);
+  executor.add_node(probe);
+  const auto trusted = TrustedPerson(1, 7);
+  state_publisher->publish(State(1U, MissionStateMessage::STARTUP));
+  ASSERT_TRUE(SpinUntil(executor, [&adapter] {
+    return adapter.CurrentMission().has_value() && adapter.CurrentMission()->state_seq == 1U;
+  }));
+  adapter.ProcessFrame({trusted}, MissionCoordinator::TimePoint{}, Metadata(1710000000000000000ULL));
+  EXPECT_TRUE(events.empty());
+
+  state_publisher->publish(State(2U, MissionStateMessage::PATROL));
+  ASSERT_TRUE(SpinUntil(executor, [&adapter] {
+    return adapter.CurrentMission().has_value() && adapter.CurrentMission()->state_seq == 2U;
+  }));
+  adapter.ProcessFrame({trusted}, MissionCoordinator::TimePoint{}, Metadata(1710000000033333333ULL));
+
+  auto event_subscription = probe->create_subscription<MissionEventMessage>(
+      config.mission_event_topic, MissionRosAdapter::MissionEventQos(),
+      [&events](const MissionEventMessage::SharedPtr message) { events.push_back(*message); });
+  ASSERT_TRUE(SpinUntil(executor, [&event_subscription] {
+    return event_subscription->get_publisher_count() > 0U;
+  }));
+  adapter.ProcessFrame({trusted}, MissionCoordinator::TimePoint{} + std::chrono::milliseconds{100},
+                       Metadata(1710000000133333333ULL));
+  ASSERT_TRUE(SpinUntil(executor, [&events] { return !events.empty(); }));
+  EXPECT_EQ(events.back().event, MissionEventMessage::TARGET_CONFIRMED);
+  EXPECT_EQ(events.back().target_id, 1U);
+  EXPECT_EQ(events.back().observed_state_seq, 2U);
+
+  executor.remove_node(probe);
+  executor.remove_node(adapter_node);
+  (void)event_subscription;
+}
+
 TEST_F(MissionRosAdapterTest, HeadlessRosSmokeForReadyTargetAndLossReacquisition) {
   auto adapter_node = std::make_shared<rclcpp::Node>("mission_ros_adapter_smoke");
   MissionRosAdapter::Config config;

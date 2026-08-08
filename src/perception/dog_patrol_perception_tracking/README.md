@@ -121,8 +121,9 @@ src/perception/dog_patrol_perception_tracking/scripts/bench_hik_mvs_camera.sh
 source-time，不按固定帧数计时；输出当前 target 的新鲜 bbox 只允许在
 `CONFIRM_TARGET`、`APPROACH_TARGET`、`VERIFY_IDENTITY`、`TRACK_INTRUDER`。
 live node 将它绑定到上述 ROS 参数：`TARGET_LOST` / `TARGET_REACQUIRED` 只由
-coordinator 的 one-shot action 转发，绝不缓存 bbox。`PATROL` 只会在当前帧
-锁定语义 ID 后发送一次 `TARGET_CONFIRMED`，不会发送 bbox；收到相同目标的
+coordinator 的 one-shot action 转发，绝不缓存 bbox。`PATROL` 在当前帧锁定语义 ID 后发送
+`TARGET_CONFIRMED`，不会发送 bbox；由于 mission event 是 volatile transport，在 authoritative
+state 未推进时会按至多每 100 ms 重试同一 state sequence 的确认；收到相同目标的
 authoritative `CONFIRM_TARGET`、`APPROACH_TARGET`、`VERIFY_IDENTITY` 或
 `TRACK_INTRUDER` state 后才发布新的 bbox。
 
