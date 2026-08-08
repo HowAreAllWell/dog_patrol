@@ -12,7 +12,7 @@
 | 模块 | 状态 | 平台与部署输入 | 验收边界 |
 | --- | --- | --- | --- |
 | tracking | `implemented` | Jetson Orin；CUDA/TensorRT、Hikrobot MVS SDK、相机、本机 engine、ROS 参数；仅 `osnet_onnx` 后端需要 ReID ONNX | 完整 Orin build/test；相机可枚举；live 节点加载 engine 并稳定输出 tracking 指标 |
-| face | `not-integrated` | 预期从 `TrackedTargetImage` 消费同帧主目标 crop；实现、模型和白名单尚未进入本仓 | 当前只验证 crop transport；不得把测试 provider 当作生产 readiness |
+| face | `scaffolded/not-integrated` | `dog_patrol_perception_face` 已建立可构建骨架；必须从 `TrackedTargetImage` 消费同帧主目标 crop；实现、模型和白名单尚未进入本仓 | 当前只验证 package 和 crop transport；接入遵守库内 `COLLABORATION.md`；不得把测试 provider 当作生产 readiness |
 | voice | `integrating` | `dog_patrol_perception_voice` 的 R818/Vosk 核心、异步 evidence provider、只读 voice preflight/readiness、无人参与和最终现场验收 CLI、Prompt player、安装 helper 和受控配置；设备与 Vosk 模型由部署机提供 | preflight、安装产物、transient-local `voice` capability、#37 自动验收和 #38 真人最小矩阵均已通过并归档；最终口令、错误口令拒绝、FRR/FAR 和安全准入仍待完成 |
 | orchestrator | `integrating` | ROS 2 Humble；已有 readiness 聚合、ROS-independent 授权规则和通用授权事件 adapter | tracking/face/voice 对当前 STARTUP sequence 都 ready 才能发布感知整体 READY；真实 face/voice provider 尚未接入 |
 
@@ -48,7 +48,8 @@ ID `2bdf:0001`）。已验收模式为 `BayerGB8` (`0x0108000a`)、`1280x1024@30
 - 部署专用 ROS 参数文件和 tracker YAML。参数文件不得携带 RTSP userinfo、凭据、白名单、
   特征向量、录像或本机临时目录。
 
-face 的模型、隐私数据与设备需求要在实现接入时由各自模块补充；voice 的 Vosk 模型、ADB serial 和
+face 的模型、隐私数据与设备需求要在实现接入时由各自模块补充；接入边界见
+[`dog_patrol_perception_face/COLLABORATION.md`](dog_patrol_perception_face/COLLABORATION.md)。voice 的 Vosk 模型、ADB serial 和
 音频设备同样由部署机提供，不进入 Git。voice 的 provider 参数和验收边界见
 [`../../docs/perception/voice/issue34_voice_provider.md`](../../docs/perception/voice/issue34_voice_provider.md)，
 readiness/preflight 入口见 [`../../docs/perception/voice/issue35_voice_readiness.md`](../../docs/perception/voice/issue35_voice_readiness.md)，
@@ -71,6 +72,7 @@ colcon build --packages-select \
   dog_patrol_interfaces dog_patrol_perception_interfaces \
   dog_patrol_manager \
   dog_patrol_perception_orchestrator \
+  dog_patrol_perception_face \
   dog_patrol_perception_voice \
   dog_patrol_perception_tracking \
   --cmake-args -DTRACKING_ENABLE_ORIN_RUNTIME=ON
@@ -79,6 +81,7 @@ colcon test --packages-select \
   dog_patrol_interfaces dog_patrol_perception_interfaces \
   dog_patrol_manager \
   dog_patrol_perception_orchestrator \
+  dog_patrol_perception_face \
   dog_patrol_perception_voice \
   dog_patrol_perception_tracking \
   --event-handlers console_direct+

@@ -37,6 +37,7 @@ jobs:
             dog_patrol_interfaces dog_patrol_perception_interfaces \
             dog_patrol_manager \
             dog_patrol_perception_orchestrator \
+            dog_patrol_perception_face \
             dog_patrol_perception_voice \
             dog_patrol_perception_tracking \
             --cmake-args -DTRACKING_ENABLE_ORIN_RUNTIME=OFF
@@ -52,6 +53,13 @@ jobs:
           source install/setup.bash
           ros2 run dog_patrol_perception_voice perception_voice_acceptance --help
 
+      - name: Check installed face integration boundary
+        shell: bash
+        run: |
+          test -f install/dog_patrol_perception_face/share/dog_patrol_perception_face/COLLABORATION.md
+          source install/setup.bash
+          ros2 pkg prefix dog_patrol_perception_face
+
       - name: Test
         shell: bash
         run: |
@@ -61,6 +69,7 @@ jobs:
             dog_patrol_interfaces dog_patrol_perception_interfaces \
             dog_patrol_manager \
             dog_patrol_perception_orchestrator \
+            dog_patrol_perception_face \
             dog_patrol_perception_voice \
             dog_patrol_perception_tracking \
             --event-handlers console_direct+
