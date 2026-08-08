@@ -1,7 +1,7 @@
 # 感知模块
 
 感知团队的实现入口。tracking 和可移植 voice 核心已正式迁入本仓；异步 voice evidence provider
-已接入，人脸实现尚未建立。
+已接入；人脸已建立主仓 package 骨架和强制接入边界，算法及生产 provider 尚未迁入。
 整个感知域的 Orin 平台、SDK、资产、参数、模块状态和统一环境检查见
 [`requirements.md`](requirements.md)。该入口不替代各 ROS package manifest 或模块内部配置。
 
@@ -17,6 +17,10 @@ preflight 并发布 `CapabilityStatus`。它不提供常驻监听、落盘 PCM �
 安装资产和迁入边界见 [`dog_patrol_perception_voice/README.md`](dog_patrol_perception_voice/README.md)、
 [`../../docs/perception/voice/issue34_voice_provider.md`](../../docs/perception/voice/issue34_voice_provider.md)
 以及 [`../../docs/perception/voice/issue33_voice_import.md`](../../docs/perception/voice/issue33_voice_import.md)。
+
+`dog_patrol_perception_face` 是人脸算法的唯一正式接入目录，当前仅包含可构建 package 骨架。
+后续算法必须消费 tracking 的 `TrackedTargetImage`，并遵守主目标、mission 会话、隐私和唯一预览
+边界；详见 [`dog_patrol_perception_face/COLLABORATION.md`](dog_patrol_perception_face/COLLABORATION.md)。
 
 `dog_patrol_perception_interfaces` 是感知团队内部 ROS 2 interface package，当前提供：
 
@@ -53,6 +57,7 @@ colcon build --packages-select \
   dog_patrol_interfaces dog_patrol_perception_interfaces \
   dog_patrol_manager \
   dog_patrol_perception_orchestrator \
+  dog_patrol_perception_face \
   dog_patrol_perception_voice \
   dog_patrol_perception_tracking \
   --cmake-args -DTRACKING_ENABLE_ORIN_RUNTIME=OFF
@@ -61,6 +66,7 @@ colcon test --packages-select \
   dog_patrol_interfaces dog_patrol_perception_interfaces \
   dog_patrol_manager \
   dog_patrol_perception_orchestrator \
+  dog_patrol_perception_face \
   dog_patrol_perception_voice \
   dog_patrol_perception_tracking \
   --event-handlers console_direct+
