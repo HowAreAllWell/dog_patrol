@@ -56,7 +56,7 @@ MissionFrameTransaction ConfiguredTransaction() {
   return MissionFrameTransaction(config);
 }
 
-TEST(MissionFrameTransactionTest, ConfirmsLargestPatrolTargetOnce) {
+TEST(MissionFrameTransactionTest, ThrottlesDuplicatePatrolConfirmation) {
   auto transaction = ConfiguredTransaction();
   const auto patrol = Mission(MissionPhase::kPatrol, 101U);
   const auto source_time = MissionCoordinator::TimePoint{};
@@ -80,6 +80,29 @@ TEST(MissionFrameTransactionTest, ConfirmsLargestPatrolTargetOnce) {
   EXPECT_EQ(duplicate.primary.primary_target_id, 99);
   EXPECT_TRUE(duplicate.events.empty());
   EXPECT_FALSE(duplicate.target_box.has_value());
+}
+
+TEST(MissionFrameTransactionTest, RetriesPatrolConfirmationWhenStateHasNotAdvanced) {
+  auto transaction = ConfiguredTransaction();
+  const auto startup = Mission(MissionPhase::kStartup, 100U);
+  const auto patrol = Mission(MissionPhase::kPatrol, 101U);
+  const std::vector<IdentityObservation> identities{TrustedPerson(42, 7)};
+  const auto start = MissionCoordinator::TimePoint{};
+
+  transaction.Update({startup, std::nullopt, identities, start, Metadata()});
+  const auto first = transaction.Update({patrol, startup, identities, start + std::chrono::milliseconds{1}, Metadata()});
+  ASSERT_EQ(first.events.size(), 1U);
+  EXPECT_EQ(first.events.front().event, PerceptionMissionEvent::kTargetConfirmed);
+
+  const auto before_retry = transaction.Update(
+      {patrol, startup, identities, start + std::chrono::milliseconds{50}, Metadata()});
+  EXPECT_TRUE(before_retry.events.empty());
+
+  const auto retry = transaction.Update(
+      {patrol, startup, identities, start + std::chrono::milliseconds{101}, Metadata()});
+  ASSERT_EQ(retry.events.size(), 1U);
+  EXPECT_EQ(retry.events.front().event, PerceptionMissionEvent::kTargetConfirmed);
+  EXPECT_EQ(retry.events.front().observed_state_seq, 101U);
 }
 
 TEST(MissionFrameTransactionTest, TreatsUnrepresentableTargetBoxAsMissing) {

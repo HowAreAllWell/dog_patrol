@@ -48,7 +48,8 @@ class MissionFrameTransaction {
 
   PrimaryTargetManager primary_manager_;
   MissionCoordinator coordinator_;
-  std::optional<std::uint32_t> confirmed_patrol_state_seq_;
+  std::optional<std::uint32_t> confirmation_attempt_patrol_state_seq_;
+  std::optional<MissionCoordinator::TimePoint> last_confirmation_attempt_source_time_;
 };
 
 }  // namespace dog_patrol_perception_tracking
