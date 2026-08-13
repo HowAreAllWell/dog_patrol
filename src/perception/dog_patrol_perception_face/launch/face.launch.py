@@ -5,58 +5,68 @@ from launch_ros.actions import Node
 
 
 def generate_launch_description():
-    model_dir = LaunchConfiguration("model_dir")
+    detector_engine = LaunchConfiguration("detector_engine")
+    recognition_engine = LaunchConfiguration("recognition_engine")
+    whitelist_dir = LaunchConfiguration("whitelist_dir")
     config_file = LaunchConfiguration("config_file")
-    helper_path = LaunchConfiguration("helper_path")
     state_topic = LaunchConfiguration("mission_state_topic")
     capability_status_topic = LaunchConfiguration("capability_status_topic")
+    crop_topic = LaunchConfiguration("tracked_target_image_topic")
     evidence_topic = LaunchConfiguration("authorization_evidence_topic")
     command_topic = LaunchConfiguration("authorization_command_topic")
     provider = LaunchConfiguration("provider")
 
     readiness = Node(
-        package="dog_patrol_perception_voice",
-        executable="perception_voice_readiness",
-        name="perception_voice_readiness",
+        package="dog_patrol_perception_face",
+        executable="perception_face_readiness",
+        name="perception_face_readiness",
         output="screen",
         parameters=[
             {
                 "mission_state_topic": state_topic,
                 "capability_status_topic": capability_status_topic,
                 "capability": provider,
-                "model_dir": model_dir,
                 "config_file": config_file,
-                "helper_path": helper_path,
+                "detector_engine": detector_engine,
+                "recognition_engine": recognition_engine,
+                "whitelist_dir": whitelist_dir,
             }
         ],
     )
     evidence = Node(
-        package="dog_patrol_perception_voice",
-        executable="perception_voice_provider",
-        name="perception_voice_provider",
+        package="dog_patrol_perception_face",
+        executable="perception_face_provider",
+        name="perception_face_provider",
         output="screen",
         parameters=[
             {
                 "mission_state_topic": state_topic,
+                "tracked_target_image_topic": crop_topic,
                 "authorization_evidence_topic": evidence_topic,
                 "authorization_command_topic": command_topic,
                 "provider": provider,
-                "model_dir": model_dir,
                 "config_file": config_file,
-                "helper_path": helper_path,
+                "detector_engine": detector_engine,
+                "recognition_engine": recognition_engine,
+                "whitelist_dir": whitelist_dir,
             }
         ],
     )
 
     return LaunchDescription(
         [
-            DeclareLaunchArgument("model_dir", default_value=""),
+            DeclareLaunchArgument("detector_engine", default_value=""),
+            DeclareLaunchArgument("recognition_engine", default_value=""),
+            DeclareLaunchArgument("whitelist_dir", default_value=""),
             DeclareLaunchArgument("config_file", default_value=""),
-            DeclareLaunchArgument("helper_path", default_value=""),
             DeclareLaunchArgument("mission_state_topic", default_value="/mission/state"),
             DeclareLaunchArgument(
                 "capability_status_topic",
                 default_value="/perception/capability_status",
+            ),
+            DeclareLaunchArgument(
+                "tracked_target_image_topic",
+                default_value="/perception/tracked_target_image",
             ),
             DeclareLaunchArgument(
                 "authorization_evidence_topic",
@@ -66,7 +76,7 @@ def generate_launch_description():
                 "authorization_command_topic",
                 default_value="/perception/authorization_command",
             ),
-            DeclareLaunchArgument("provider", default_value="voice"),
+            DeclareLaunchArgument("provider", default_value="face"),
             readiness,
             evidence,
         ]

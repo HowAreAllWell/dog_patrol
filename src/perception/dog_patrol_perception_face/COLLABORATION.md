@@ -1,8 +1,8 @@
 # 人脸算法接入协作规则
 
-本文是 `dog_patrol_perception_face` 的迁入和联调门禁。目标是让人脸算法独立演进，同时不改变
+本文记录 `dog_patrol_perception_face` 的接入边界。目标是让人脸算法独立演进，同时不改变
 tracking 的主目标选择、实时推理、现有预览、录制和 mission 行为。若算法源仓的实现与本文冲突，
-先在本仓 PR 中拆分或适配，不得直接绕过现有边界。
+在本 package 或公共消息 seam 中做最小适配。
 
 ## 1. 代码与所有权边界
 
@@ -12,8 +12,7 @@ tracking 的主目标选择、实时推理、现有预览、录制和 mission �
   链接或复制 `dog_patrol_perception_tracking` 的私有类、内部头文件和实现源码。
 - 不得修改 tracking 的 detector、tracker、semantic identity、主目标选择、相机接入或 mission 事件
   行为来迁就人脸算法。若现有公共消息确实不足，先提交最小合同变更并由 perception owner 评审。
-- 外部算法迁入必须记录来源仓、固定提交、许可证、允许迁入清单和排除项；不得把外部仓作为构建或
-  运行依赖。
+- 生产运行不得依赖外部算法工作区；所需实现、配置和安装入口由本 package 自持有。
 
 ## 2. 主目标图像输入合同
 
@@ -36,17 +35,18 @@ tracking 的主目标选择、实时推理、现有预览、录制和 mission �
 
 ## 3. Mission 会话与授权结果
 
-- provider 必须同时跟随 `/mission/state`。仅在未 blocked 的 `VERIFY_IDENTITY` 中处理与当前
-  `MissionState.target_id` 相同的新鲜 crop，并把结果绑定到当前 `state_seq + target_id`。
+- provider 必须同时跟随 `/mission/state` 和 `/perception/authorization_command`。MissionState 只维护
+  当前未 blocked 的 `VERIFY_IDENTITY` 会话；只有匹配当前 `state_seq + target_id` 的命令才启动算法窗口。
+- `INITIAL_FACE` 只运行人脸；`DUAL_FIRST` 和 `DUAL_SECOND` 各运行一个人脸窗口；`CANCEL` 停止当前
+  窗口。结果必须绑定到当前 `state_seq + target_id + stage`。
 - 状态离开 `VERIFY_IDENTITY`、`state_seq` 或 `target_id` 改变、任务 blocked、目标图像过期或节点
   shutdown 时，必须取消当前任务并清空队列。旧 worker 即使随后返回也不得发布迟到结果。
 - 结果通过现有 `/perception/authorization_evidence` 发布
   `dog_patrol_perception_interfaces/msg/AuthorizationEvidence`，`provider` 固定为 `face`；不得由人脸
   节点直接发布 mission `AUTHORIZED`、`UNAUTHORIZED` 或 `EXECUTION_ERROR` 事件。
-- readiness 与 evidence 分离。只有模型、受控白名单、运行时和必要设备均通过真实 preflight，且
+- readiness 与 evidence 分离。只有模型、白名单和运行时均通过真实 preflight，且
   `observed_startup_state_seq` 匹配当前 STARTUP 时，生产 readiness 节点才可发布 `face` READY。
   测试 fake provider 不能安装到生产入口，也不能作为 readiness 验收证据。
-- 日志和 `detail` 不得包含姓名、原始人脸图像、特征向量、白名单内容或其他生物识别隐私数据。
 
 ## 4. 唯一预览与 overlay 接入
 
@@ -62,29 +62,18 @@ tracking 的主目标选择、实时推理、现有预览、录制和 mission �
   结果、结果过期或 adapter 异常时，现有 tracking overlay、preview、record 和推理必须保持原行为。
 - 预览继续由现有 `visualization.enable`、统一 tracking launch 和同一个窗口控制。不得新增另一套
   face preview 开关作为生产入口。人脸 overlay 默认可缺省，关闭预览时不得创建 GUI 副作用。
-- 若轻量 overlay 结果需要新增 ROS 消息，先用单独 PR 说明字段、QoS、失效语义、隐私边界和测试，
-  放入 `dog_patrol_perception_interfaces`；不得让 tracking 依赖人脸包私有类型。
+- 轻量 overlay 使用 `dog_patrol_perception_interfaces/msg/FaceOverlay` 和 best-effort、volatile、
+  keep-last(1) QoS；tracking 不依赖人脸包私有类型。
 
-## 5. 资产、配置与隐私
+## 5. 验证重点
 
-- 模型、白名单、人脸图片、embedding/特征向量、现场录像、凭据和设备专用配置不进入 Git；通过
-  部署机受控路径提供。
-- 仓库只保存无隐私的配置模板、模型格式/校验要求和测试 fixture。测试图像必须具有明确授权和来源，
-  否则使用合成数据。
-- 默认不得保存输入 crop。诊断落盘必须显式开启、限定受控目录和保留期，并经过隐私评审；不得写入
-  tracking 的 clean capture dataset。
-
-## 6. PR 与验收门禁
-
-- 通过短分支和 PR 迁入，至少由 `.github/CODEOWNERS` 中的 perception owner 审查。PR 必须说明
-  外部来源固定提交、许可证、依赖、模型格式、资源预算、失败语义和回退方式。
 - 单元测试至少覆盖消息校验、latest-only 有界队列、图像过期、目标切换、mission 取消、旧结果拒绝、
-  readiness 失败和隐私字段清理。
+  readiness 失败。
 - ROS 集成测试至少覆盖 crop 到 evidence 的 `state_seq + target_id` 绑定，以及人脸 worker 变慢或退出
   时 tracking 不反压。
 - 预览验收必须证明：只打开一个相机和一个窗口；face overlay 在同一 tracking canvas；错目标、旧帧、
   旧会话不显示；关闭/杀死人脸节点不影响 tracking preview/record；关闭 preview 不产生 GUI。
 - Orin 验收记录功能结果、处理延迟、输入/推理/结果丢弃数、CPU/GPU/RAM 和温度。性能门槛须由项目
   owner 明确确认，不能在迁入时自行降低 tracking 的既有行为或验收标准。
-- 在上述实现和验收完成前，本 package 只能标记为 scaffold/not-integrated，不得声称生产人脸能力
-  已接入，也不得发布伪造 READY。
+- 当前实现和无人值守验证已经完成；最后一步是用户参与的仅导航 fake 整流程验收，并保留功能与
+  性能报告。

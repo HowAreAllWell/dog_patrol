@@ -7,8 +7,10 @@ find_package(builtin_interfaces REQUIRED)
 find_package(std_msgs REQUIRED)
 
 rosidl_generate_interfaces(${PROJECT_NAME}
+  "msg/AuthorizationCommand.msg"
   "msg/AuthorizationEvidence.msg"
   "msg/CapabilityStatus.msg"
+  "msg/FaceOverlay.msg"
   "msg/TrackedTargetImage.msg"
   DEPENDENCIES builtin_interfaces std_msgs
 )

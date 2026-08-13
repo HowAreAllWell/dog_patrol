@@ -14,6 +14,8 @@ Dog patrol 的正式 perception tracking 模块，包含相机接入、检测、
 - `primary_target_manager`：`person`-only 主目标规则（首锁最大框 + continuity-first）
 - `primary_target_observer`：ROS-independent 当前主目标 observation seam；只在当前帧主目标可信时返回 semantic target ID、源帧元数据、clamped bbox 和自持有目标图像，不依赖 mission state/state sequence；可注入 `PrimaryTargetObservationSink`
 - `target_image_ros_adapter`：mission/standalone 共用的 ROS transport seam；以有界异步丢旧队列向独立人脸进程发布当前 crop，并在无可信当前目标时显式取消排队或正在转换的旧值
+- `face_overlay_adapter`：缓存人脸 provider 返回的轻量 bbox；只在 target、source stamp 和可用帧号与
+  当前诊断 job 匹配且结果不超过 0.5 秒时，绘制到既有 `VisualizerRecorder` canvas
 - `mission_coordinator`：ROS-independent 任务输出协调 seam；按任务状态 / semantic target / state sequence 只产生当前帧可信 bbox，并负责配置化同目标 loss/reacquire event 时序
 - `mission_frame_transaction`：ROS-independent 一帧任务事务；在 identity 输出后统一执行 primary 更新、PATROL 目标确认、fresh bbox、loss/reacquire，并返回本帧 primary 诊断
 - `perception_readiness`：ROS-independent READY 聚合 seam；以 required capability contribution 和 `STARTUP state_seq` 产生至多一次 aggregate READY action
@@ -296,7 +298,11 @@ ros2 run dog_patrol_perception_tracking dog_patrol_perception_tracking_node --ro
 - record：`-p visualization.enable:=false -p recording.enable:=true -p recording.path:=/path/to/diagnostics/live.mkv`
 - preview+record：`-p visualization.enable:=true -p recording.enable:=true -p recording.path:=/path/to/diagnostics/live.mkv`
 
-预览和录制从同一 worker 产生同一 tracking/identity/primary overlay canvas。worker 队列有界、队满丢弃最新诊断帧而不等待编码或显示；每秒日志会输出 capture、inference、render/write 的 FPS、queue/render/write drop 和 p50/p95/p99。请将 live overlay 放在 `data/diagnostics/live_overlays/` 等结果目录，不能当作 source dataset。
+预览和录制从同一 worker 产生同一 tracking/identity/primary/face overlay canvas。face bbox 来自
+best-effort、keep-last(1) 的 `/perception/face_overlay`，错目标、未来帧和过期结果自动抑制；没有 face
+节点时原有行为不变。worker 队列有界、队满丢弃最新诊断帧而不等待编码或显示；每秒日志会输出
+capture、inference、render/write 的 FPS、queue/render/write drop 和 p50/p95/p99。请将 live overlay
+放在 `data/diagnostics/live_overlays/` 等结果目录，不能当作 source dataset。
 
 ## 基本验证重点
 

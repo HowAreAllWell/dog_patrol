@@ -207,6 +207,7 @@ class R818TaskSession:
         prompt: str | None = None,
         *,
         timeout_seconds: float | None = None,
+        retry: bool = False,
     ) -> VoiceWindowResult:
         self._raise_if_cancelled()
         if not self._active:
@@ -217,7 +218,9 @@ class R818TaskSession:
         selected_prompt = prompt
         if selected_prompt is None:
             selected_prompt = (
-                self._config.first_prompt if self._attempt_number == 1 else self._config.retry_prompt
+                self._config.retry_prompt
+                if retry or self._attempt_number > 1
+                else self._config.first_prompt
             )
         if not selected_prompt.strip():
             raise ValueError("prompt must not be empty")

@@ -1,0 +1,26 @@
+# Face verification production defaults. Engine and whitelist paths are
+# deployment inputs; this file keeps the recognition/verification defaults.
+detector_engine: ""
+recognition_engine: ""
+whitelist_dir: ""
+
+detector_conf_thres: 0.25
+detector_iou_thres: 0.5
+
+similarity_threshold: 0.55
+size_sigma: 20.0
+temporal_window: 10
+min_frames_for_decision: 5
+
+window_timeout_seconds: 3.0
+crop_freshness_timeout_seconds: 1.0
+
+# Overlay inference budget: cap the per-crop inference rate so the face model
+# never saturates the shared GPU (measured: full-rate peaks ~98%, capped at
+# 10 Hz the average delta is ~6%). Quality filter skips low-confidence/small
+# faces so recognition only runs on usable crops.
+overlay_inference_hz: 10.0
+face_min_score: 0.5
+face_min_box_ratio: 0.08
+stop_after_matched: true
+matched_hold_seconds: 5.0

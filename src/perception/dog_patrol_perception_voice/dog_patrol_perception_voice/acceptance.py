@@ -34,7 +34,10 @@ except ImportError as exc:  # pragma: no cover - only used on non-ROS developmen
     ROS_IMPORT_ERROR = exc
 else:
     from dog_patrol_interfaces.msg import MissionEvent, MissionState
-    from dog_patrol_perception_interfaces.msg import AuthorizationEvidence, CapabilityStatus
+    from dog_patrol_perception_interfaces.msg import (
+        AuthorizationEvidence,
+        CapabilityStatus,
+    )
     from rclpy.node import Node
     from rclpy.parameter import Parameter
     from rclpy.qos import DurabilityPolicy, HistoryPolicy, QoSProfile, ReliabilityPolicy
@@ -697,6 +700,7 @@ class _RosAcceptanceHarness:
         self.state_topic = f"/issue37/{suffix}/mission/state"
         self.event_topic = f"/issue37/{suffix}/mission/event"
         self.evidence_topic = f"/issue37/{suffix}/perception/authorization_evidence"
+        self.command_topic = f"/issue37/{suffix}/perception/authorization_command"
         self.status_topic = f"/issue37/{suffix}/perception/capability_status"
         self.source = Node(f"issue37_acceptance_source_{suffix}")
         self.probe = Node(f"issue37_acceptance_probe_{suffix}")
@@ -704,6 +708,7 @@ class _RosAcceptanceHarness:
             parameter_overrides=[
                 Parameter("mission_state_topic", value=self.state_topic),
                 Parameter("authorization_evidence_topic", value=self.evidence_topic),
+                Parameter("authorization_command_topic", value=self.command_topic),
             ],
             adapter_factory=adapter_factory,
         )
@@ -723,10 +728,16 @@ class _RosAcceptanceHarness:
                 Parameter("mission_state_topic", value=self.state_topic),
                 Parameter("mission_event_topic", value=self.event_topic),
                 Parameter("authorization_evidence_topic", value=self.evidence_topic),
+                Parameter("authorization_command_topic", value=self.command_topic),
             ]
         )
         self.state_pub = self.source.create_publisher(
             MissionState, self.state_topic, _qos(transient=True, depth=1)
+        )
+        self.evidence_pub = self.source.create_publisher(
+            AuthorizationEvidence,
+            self.evidence_topic,
+            _qos(transient=False, depth=20),
         )
         self.events: list[MissionEvent] = []
         self.evidence: list[AuthorizationEvidence] = []
@@ -784,6 +795,19 @@ class _RosAcceptanceHarness:
             self.executor.spin_once(timeout_sec=0.05)
         return predicate()
 
+    def publish_face_miss(self, state_seq: int, target_id: int, stage: int) -> None:
+        message = AuthorizationEvidence()
+        message.header.stamp = self.source.get_clock().now().to_msg()
+        message.observed_state_seq = state_seq
+        message.target_id = target_id
+        message.stage = stage
+        message.result = AuthorizationEvidence.NOT_PASSED
+        message.provider = "face"
+        message.detail = "acceptance face miss"
+        self.evidence_pub.publish(message)
+        for _ in range(5):
+            self.executor.spin_once(timeout_sec=0.02)
+
     def wait_quiet(
         self,
         evidence_count: int,
@@ -834,7 +858,11 @@ def _event_name(event: int) -> str:
 
 
 def _cycle_behaviors(fixture: AcceptanceFixture) -> list[_TaskBehavior]:
-    return [_TaskBehavior(windows=task.windows) for task in fixture.tasks]
+    return [
+        _TaskBehavior(windows=(window,))
+        for task in fixture.tasks
+        for window in task.windows
+    ]
 
 
 def minimal_field_matrix() -> AcceptanceFixture:
@@ -887,6 +915,7 @@ def _run_cycles(
             "diagnostic": harness.statuses[0].diagnostic if harness.statuses else "missing",
         }
         aborted = False
+        voice_task_offset = 0
         for index, task in enumerate(fixture.tasks):
             state_seq = 1000 + index
             target_id = 2000 + index
@@ -894,27 +923,52 @@ def _run_cycles(
             evidence_start = len(harness.evidence)
             events_start = len(harness.events)
             harness.publish_state(state_seq, target_id)
-            task_started = harness.wait(
-                lambda: (
-                    len(harness.evidence) > evidence_start
-                    or len(harness.events) > events_start
-                    or (
-                        task_started_checker is not None
-                        and task_started_checker(index)
+            harness.publish_face_miss(
+                state_seq, target_id, AuthorizationEvidence.INITIAL_FACE
+            )
+            expected_evidence = []
+            task_started = False
+            for window_index, window in enumerate(task.windows[:2]):
+                expected_evidence.append(
+                    AuthorizationEvidence.PASSED
+                    if window.accepted
+                    else AuthorizationEvidence.NOT_PASSED
+                )
+                expected_voice_count = len(expected_evidence)
+                window_completed = harness.wait(
+                    lambda expected=expected_voice_count: len(
+                        [
+                            message
+                            for message in harness.evidence[evidence_start:]
+                            if message.provider == "voice"
+                        ]
                     )
-                ),
-                timeout=min(5.0, task_timeout_seconds),
-            )
-            evidence_ok = harness.wait(
-                lambda: len(harness.evidence) >= evidence_start + len(task.windows),
-                timeout=task_timeout_seconds,
-            )
+                    >= expected,
+                    timeout=task_timeout_seconds,
+                )
+                task_started = task_started or window_completed
+                if task_started_checker is not None:
+                    task_started = task_started or task_started_checker(
+                        voice_task_offset + window_index
+                    )
+                if not window_completed or window.accepted:
+                    break
+                stage = (
+                    AuthorizationEvidence.DUAL_FIRST
+                    if window_index == 0
+                    else AuthorizationEvidence.DUAL_SECOND
+                )
+                harness.publish_face_miss(state_seq, target_id, stage)
+            evidence = [
+                message
+                for message in harness.evidence[evidence_start:]
+                if message.provider == "voice"
+            ]
+            evidence_ok = len(evidence) == len(expected_evidence)
             event_ok = harness.wait(
                 lambda: len(harness.events) > events_start,
                 timeout=task_timeout_seconds,
             )
-            if task_started_checker is not None:
-                task_started = task_started or task_started_checker(index)
             idle_ok = True
             if wait_for_idle is not None and not (evidence_ok and event_ok):
                 harness.publish_state(state_seq, target_id, state=MissionState.PATROL)
@@ -930,22 +984,16 @@ def _run_cycles(
                 if session_count is not None and sessions_before is not None
                 else None
             )
-            sessions_ok = sessions_started is None or sessions_started == 1
-            evidence = harness.evidence[evidence_start:]
+            sessions_ok = (
+                sessions_started is None
+                or sessions_started == len(expected_evidence)
+            )
             events = harness.events[events_start:]
             evidence_matches_session = all(
                 message.observed_state_seq == state_seq
                 and message.target_id == target_id
                 for message in evidence
             )
-            expected_evidence = [
-                AuthorizationEvidence.PASSED
-                if window.accepted
-                else AuthorizationEvidence.NOT_PASSED
-                for window in task.windows
-            ]
-            if task.windows[0].accepted:
-                expected_evidence = expected_evidence[:1]
             expected_event = _event_for_windows(task.windows)
             cleanup = cleanup_checker() if cleanup_checker is not None else {}
             residuals = cleanup.get("remote_residuals", [])
@@ -1007,6 +1055,7 @@ def _run_cycles(
             if wait_for_idle is not None and not (evidence_ok and event_ok and idle_ok):
                 aborted = True
                 break
+            voice_task_offset += len(expected_evidence)
         return {
             "readiness": readiness_report,
             "cycles": cycle_reports,
@@ -1029,7 +1078,8 @@ def _scenario_behaviors(name: str) -> tuple[list[_TaskBehavior], str]:
         return [_TaskBehavior(windows=(accepted,), cancel_at="window-1")], "cancel"
     if name == "second_window_cancel":
         return [
-            _TaskBehavior(windows=(rejected, accepted), cancel_at="window-2")
+            _TaskBehavior(windows=(rejected,)),
+            _TaskBehavior(windows=(accepted,), cancel_at="window-1"),
         ], "cancel"
     if name in {"state_seq_replace", "target_id_replace"}:
         return [
@@ -1071,6 +1121,7 @@ def _run_failure_scenario(
     result: dict[str, Any] | None = None
     try:
         harness.publish_state(10, 1)
+        harness.publish_face_miss(10, 1, AuthorizationEvidence.INITIAL_FACE)
         if not harness.wait(lambda: len(factory.records) >= 1):
             raise RuntimeError("provider did not create the first task")
         first = factory.records[0]
@@ -1080,7 +1131,22 @@ def _run_failure_scenario(
             elif name == "first_window_cancel":
                 stage_ready = first.recognition_started[1]
             else:
-                stage_ready = first.recognition_started[2]
+                if not harness.wait(
+                    lambda: first.closed.is_set()
+                    and any(
+                        message.provider == "voice"
+                        and message.result == AuthorizationEvidence.NOT_PASSED
+                        for message in harness.evidence
+                    ),
+                    timeout=completion_timeout_seconds,
+                ):
+                    raise RuntimeError("first voice round did not complete")
+                harness.publish_face_miss(
+                    10, 1, AuthorizationEvidence.DUAL_FIRST
+                )
+                if not harness.wait(lambda: len(factory.records) >= 2):
+                    raise RuntimeError("second voice round did not start")
+                stage_ready = factory.records[1].recognition_started[1]
             if not stage_ready.wait(timeout=stage_timeout_seconds):
                 raise RuntimeError(f"scenario did not reach {name} stage")
             harness.publish_state(10, 1, state=MissionState.PATROL)
@@ -1096,6 +1162,9 @@ def _run_failure_scenario(
             else:
                 replacement = (10, 2)
             harness.publish_state(*replacement)
+            harness.publish_face_miss(
+                replacement[0], replacement[1], AuthorizationEvidence.INITIAL_FACE
+            )
             expected_evidence = [
                 AuthorizationEvidence.CANCELLED,
                 AuthorizationEvidence.PASSED,
@@ -1113,7 +1182,10 @@ def _run_failure_scenario(
         ):
             raise RuntimeError(f"scenario {name} did not complete replacement cleanup")
         if not harness.wait(
-            lambda: len(harness.evidence) >= len(expected_evidence),
+            lambda: len(
+                [message for message in harness.evidence if message.provider == "voice"]
+            )
+            >= len(expected_evidence),
             timeout=completion_timeout_seconds,
         ):
             raise RuntimeError(f"scenario {name} did not publish expected evidence")
@@ -1123,7 +1195,11 @@ def _run_failure_scenario(
         ):
             raise RuntimeError(f"scenario {name} did not publish expected event")
         quiet_ok = harness.wait_quiet(len(harness.evidence), len(harness.events))
-        evidence = [message.result for message in harness.evidence]
+        evidence = [
+            message.result
+            for message in harness.evidence
+            if message.provider == "voice"
+        ]
         events = [message.event for message in harness.events]
         cleanup = cleanup_checker() if cleanup_checker is not None else {}
         remote_residuals = cleanup.get("remote_residuals", [])

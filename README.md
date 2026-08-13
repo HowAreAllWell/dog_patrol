@@ -19,10 +19,17 @@
 - tracking 已提供不创建 mission ROS adapter 的正式 standalone Orin 启动方式，并通过
   ROS-independent `PrimaryTargetObservation` 返回当前可信语义主目标及自持有目标图像；mission 与
   standalone 均通过有界异步 ROS adapter 以 `TrackedTargetImage` 向独立人脸进程交付同帧 crop。
-- `dog_patrol_perception_orchestrator`：已实现授权编排、授权事件 adapter 和 capability readiness ROS 节点；真实人脸尚未接入，因此生产环境不会提前发布感知 READY 或伪造授权结果。
-- `dog_patrol_perception_face`：已建立可构建的主仓 package 骨架和算法接入协作规则；真实算法、
-  provider、readiness、模型和白名单仍未迁入，不能作为生产人脸能力已接入的证据。
-- `dog_patrol_perception_voice`：已按 #33 allowlist 迁入可移植的 R818/Vosk 任务级核心，在 #34 接入异步 `perception_voice_provider`，在 #35 接入只读 `perception_voice_readiness` 与安装/部署 preflight，并在 #37 提供从 clean install 启动的无人参与 Orin 验收 CLI；#36 已使用冻结历史 PCM/model 完成源部署提交与 clean-installed main 的 57 窗口 A/B，逐字段一致且无新增技术错误，报告见 [`docs/perception/voice/issue36_voice_ab_report.md`](docs/perception/voice/issue36_voice_ab_report.md)。#38 已从 496 项零失败的 clean install 完成首窗通过、次窗通过和双窗无应答真人矩阵，并以 `archive/dog-patrol-deployment-b979a7f-issue38` 归档固定来源、执行提交和报告摘要。provider 按 `MissionState` 管理单一硬件 session，将两轮结果发布到现有 `AuthorizationEvidence`，默认不落盘 PCM。最终口令、错误口令拒绝、FAR/FRR 和安全准入仍未验收；#37/#38 的入口、证据与边界见 [`docs/perception/voice/issue37_voice_hardware_acceptance.md`](docs/perception/voice/issue37_voice_hardware_acceptance.md) 与 [`docs/perception/voice/issue38_voice_field_acceptance.md`](docs/perception/voice/issue38_voice_field_acceptance.md)。
+- `dog_patrol_perception_orchestrator`：已实现 capability readiness、分阶段授权命令与最终任务事件
+  adapter。授权流程固定为“初始仅人脸；未通过后人脸与语音并行第一轮；两者均未通过后并行第二轮”；
+  任一 provider 通过即授权，技术错误单独上报，只有第二轮两者均未通过才判未授权。
+- `dog_patrol_perception_face`：已迁入真实算法（detector/recognition/verifier/whitelist）与
+  `perception_face_provider`、真实 readiness 和 launch。模型与白名单由同一 face YAML 或 ROS 参数提供；
+  provider 严格消费 tracking 最新主目标 crop，并按授权阶段发布 evidence。真实 TensorRT 模型、会话取消、
+  跨会话隔离与 readiness 已在当前 Orin 验证。
+- `dog_patrol_perception_voice`：已迁入 R818/Vosk 核心、真实 readiness 和异步 provider。MissionState 只负责
+  会话门禁；provider 仅响应 orchestrator 发出的第一轮/第二轮并行授权命令，每条命令运行一个语音窗，
+  状态替换或取消会抑制迟到结果，默认不落盘 PCM。既有硬件与真人语音验收记录保留在
+  [`docs/perception/voice/`](docs/perception/voice/)；本次以整条感知流程的最终现场验收为准。
 - 语音部署候选源仓 `moonshine_voice_commands` 已以 `b979a7fd33aac5c9ced9591bb507e483faf4aef5` 冻结；#33 只从该版本选择性提炼，不把源仓作为构建或运行依赖。允许/排除清单与复现证据见 [`docs/issue32_voice_deployment_baseline_audit.md`](docs/issue32_voice_deployment_baseline_audit.md)，迁入说明见 [`docs/perception/voice/issue33_voice_import.md`](docs/perception/voice/issue33_voice_import.md)。
 - 感知域已提供整体部署 requirements 和统一 Orin 环境检查，显式区分 tracking、face、voice 和 orchestrator 当前状态。
 - tracking 已在当前感知 Orin 完成 full-runtime build/test、真实 Hik 30 FPS、standalone 隔离、
@@ -30,10 +37,9 @@
   [`docs/perception/tracking/issue14_tracking_hardware_acceptance.md`](docs/perception/tracking/issue14_tracking_hardware_acceptance.md)。
 - detection/tracking 接入父 Spec #3 已完成独立整体验收；子票、合并、CI、现场证据与明确后续边界见
   [`docs/perception/tracking/issue3_spec_acceptance.md`](docs/perception/tracking/issue3_spec_acceptance.md)。
-- 人脸算法实现尚未接入；后续迁入以 `dog_patrol_perception_face/COLLABORATION.md` 的主目标图像、
-  mission 会话、隐私及唯一预览边界为强制门禁。
-- 语音 provider 已完成 ROS 接入，但真实设备接管、模型/设备部署和导航整机验收尚未完成；它们与人脸 provider
-  接入继续作为后续工作，不属于 tracking 迁入和仓库切换的完成证据。
+- 人脸 bbox 已通过轻量 `FaceOverlay` 回传，在 tracking 既有 `VisualizerRecorder` 的同一 canvas/window
+  上绘制；错目标、未来帧和过期结果不显示。最终还需用户参加一次仅导航 fake 的感知整流程现场验收，
+  同时记录阶段耗时、CPU/GPU/RAM、温度及 tracking/face 指标。
 - 目标公开远程：`https://github.com/HowAreAllWell/dog_patrol`
 
 ## 目录
@@ -44,7 +50,7 @@ src/orchestration/dog_patrol_manager/      # 主状态机和 supervisor
 src/navigation/                            # 导航模块预留位置
 src/perception/                            # 感知业务编排入口
 src/perception/dog_patrol_perception_interfaces/ # 感知内部 ROS 2 合同
-src/perception/dog_patrol_perception_face/  # face 接入骨架和协作边界
+src/perception/dog_patrol_perception_face/  # face 算法、provider、readiness 与配置
 src/perception/dog_patrol_perception_voice/ # voice 核心、异步 evidence provider 与生产 Adapter
 src/perception/dog_patrol_perception_tracking/ # tracking 核心与可选 Orin runtime
 docs/contracts/                             # 可评审的接口协议
@@ -97,6 +103,8 @@ Apache-2.0。具体范围和许可证副本见 [`LICENSES/README.md`](LICENSES/R
 感知编排模块说明见 [`src/perception/README.md`](src/perception/README.md)。
 人脸算法迁入、主目标 crop、mission 会话和唯一预览规则见
 [`src/perception/dog_patrol_perception_face/COLLABORATION.md`](src/perception/dog_patrol_perception_face/COLLABORATION.md)。
+仅导航 fake 的最终感知整流程与性能记录入口见
+[`tools/fake_integration/README.md`](tools/fake_integration/README.md)。
 tracking 的 portable/Orin 构建、运行和配置说明见
 [`src/perception/dog_patrol_perception_tracking/README.md`](src/perception/dog_patrol_perception_tracking/README.md)。
 voice provider 的 ROS 参数、取消/会话门禁和验证边界见
