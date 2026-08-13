@@ -188,6 +188,10 @@ bool VisualizerRecorder::ValidateConfig(const Config &config, std::string *error
   if (config.queue_capacity == 0U) {
     return Fail(error, "visualization.queue_capacity must be positive");
   }
+  if (!std::isfinite(config.face_overlay_max_age_seconds) ||
+      config.face_overlay_max_age_seconds <= 0.0) {
+    return Fail(error, "face.overlay_max_age_s must be finite and positive");
+  }
   if (!config.enable_recording) {
     if (error != nullptr) {
       error->clear();
@@ -290,7 +294,8 @@ bool VisualizerRecorder::Initialize(const cv::Size &frame_size, std::string *err
 void VisualizerRecorder::Submit(cv::Mat frame, std::vector<Track> tracks, PrimaryTargetResult primary,
                                 IdentityManagerResult identity_result,
                                 std::string primary_decision_reason,
-                                std::string primary_reject_reason) {
+                                std::string primary_reject_reason,
+                                SourceFrameMetadata source) {
   if (!initialized_ || (!config_.enable_preview && !config_.enable_recording)) {
     return;
   }
@@ -321,6 +326,7 @@ void VisualizerRecorder::Submit(cv::Mat frame, std::vector<Track> tracks, Primar
       job.identity_result = std::move(identity_result);
       job.primary_decision_reason = std::move(primary_decision_reason);
       job.primary_reject_reason = std::move(primary_reject_reason);
+      job.source = std::move(source);
       job.enqueued_at = std::chrono::steady_clock::now();
       queue_.push_back(std::move(job));
       enqueued = true;
@@ -336,6 +342,21 @@ void VisualizerRecorder::Submit(cv::Mat frame, std::vector<Track> tracks, Primar
   }
   if (enqueued) {
     queue_changed_.notify_one();
+  }
+}
+
+void VisualizerRecorder::SetFaceOverlay(FaceOverlay overlay) {
+  {
+    std::lock_guard<std::mutex> lock(face_mutex_);
+    overlay.active = overlay.bbox_width > 0 && overlay.bbox_height > 0;
+    face_overlay_ = std::move(overlay);
+  }
+}
+
+void VisualizerRecorder::ClearFaceOverlay() {
+  {
+    std::lock_guard<std::mutex> lock(face_mutex_);
+    face_overlay_.active = false;
   }
 }
 
@@ -394,7 +415,51 @@ cv::Mat VisualizerRecorder::BuildOverlayCanvas(const Job &job) {
       job.primary, job.identity_result, job.primary_decision_reason, job.primary_reject_reason);
   cv::putText(canvas, primary_line, cv::Point(20, 28), cv::FONT_HERSHEY_SIMPLEX, 0.6,
               cv::Scalar(255, 255, 255), 2);
+  DrawFaceOverlay(job, canvas);
   return canvas;
+}
+
+void VisualizerRecorder::DrawFaceOverlay(const Job &job, cv::Mat &canvas) {
+  FaceOverlay overlay;
+  {
+    std::lock_guard<std::mutex> lock(face_mutex_);
+    overlay = face_overlay_;
+  }
+  if (!overlay.active || job.primary.primary_target_id <= 0 ||
+      overlay.target_id != job.primary.primary_target_id) {
+    return;
+  }
+  if (overlay.source_timestamp_ns == 0U || job.source.source_timestamp_ns == 0U ||
+      overlay.source_timestamp_ns > job.source.source_timestamp_ns) {
+    return;
+  }
+  const auto max_age_ns = static_cast<std::uint64_t>(
+      config_.face_overlay_max_age_seconds * 1000000000.0);
+  if (job.source.source_timestamp_ns - overlay.source_timestamp_ns > max_age_ns) {
+    return;
+  }
+  if (overlay.source_frame_number_available &&
+      job.source.camera_frame_number_available &&
+      overlay.source_frame_number > job.source.camera_frame_number) {
+    return;
+  }
+  const cv::Rect face_rect =
+      cv::Rect(overlay.bbox_x, overlay.bbox_y, overlay.bbox_width,
+               overlay.bbox_height) &
+      cv::Rect(0, 0, canvas.cols, canvas.rows);
+  if (face_rect.width <= 0 || face_rect.height <= 0) {
+    return;
+  }
+  const cv::Scalar color = overlay.matched ? cv::Scalar(255, 0, 255) : cv::Scalar(0, 165, 255);
+  cv::rectangle(canvas, face_rect, color, 2);
+  std::ostringstream label;
+  if (!overlay.label.empty()) {
+    label << overlay.label;
+  } else {
+    label << (overlay.matched ? "FACE MATCHED" : "FACE UNKNOWN");
+  }
+  cv::putText(canvas, label.str(), cv::Point(face_rect.x, std::max(0, face_rect.y - 8)),
+              cv::FONT_HERSHEY_SIMPLEX, 0.7, color, 2);
 }
 
 VisualizerRecorder::PercentileSummary VisualizerRecorder::Summarize(const std::vector<double> &samples) {

@@ -15,6 +15,7 @@
 #include <opencv2/core/mat.hpp>
 
 #include "dog_patrol_perception_tracking/types.hpp"
+#include "dog_patrol_perception_tracking/source_frame_metadata.hpp"
 
 namespace dog_patrol_perception_tracking {
 
@@ -75,6 +76,21 @@ class VisualizerRecorder {
     int sid_recover_relaxed_max_missing_frames{180};
     int sid_reid_input_width{128};
     int sid_reid_input_height{256};
+    double face_overlay_max_age_seconds{0.5};
+  };
+
+  struct FaceOverlay {
+    int target_id{-1};
+    std::uint64_t source_timestamp_ns{0U};
+    std::uint32_t source_frame_number{0U};
+    bool source_frame_number_available{false};
+    int bbox_x{-1};
+    int bbox_y{-1};
+    int bbox_width{-1};
+    int bbox_height{-1};
+    std::string label;
+    bool matched{false};
+    bool active{false};
   };
 
   struct PercentileSummary {
@@ -125,7 +141,13 @@ class VisualizerRecorder {
   // Pass a moved CameraIngest::AcquiredFrame::bgr8 to avoid a second frame copy.
   void Submit(cv::Mat frame, std::vector<Track> tracks, PrimaryTargetResult primary,
               IdentityManagerResult identity_result, std::string primary_decision_reason = {},
-              std::string primary_reject_reason = {});
+              std::string primary_reject_reason = {}, SourceFrameMetadata source = {});
+
+  // Overlay a face verification box (source-image coordinates) on subsequent
+  // frames. bbox_width < 0 (or an empty box) clears the face overlay. The value
+  // is copied under a lock and rendered on the worker thread.
+  void SetFaceOverlay(FaceOverlay overlay);
+  void ClearFaceOverlay();
   void Shutdown();
 
   MetricsSnapshot Metrics() const;
@@ -139,10 +161,12 @@ class VisualizerRecorder {
     IdentityManagerResult identity_result;
     std::string primary_decision_reason;
     std::string primary_reject_reason;
+    SourceFrameMetadata source;
     std::chrono::steady_clock::time_point enqueued_at;
   };
 
-  static cv::Mat BuildOverlayCanvas(const Job &job);
+  cv::Mat BuildOverlayCanvas(const Job &job);
+  void DrawFaceOverlay(const Job &job, cv::Mat &canvas);
   static PercentileSummary Summarize(const std::vector<double> &samples);
   static void Observe(std::vector<double> *samples, double milliseconds);
   void AddError(const std::string &error);
@@ -158,6 +182,9 @@ class VisualizerRecorder {
   mutable std::mutex queue_mutex_;
   std::condition_variable queue_changed_;
   std::deque<Job> queue_;
+
+  mutable std::mutex face_mutex_;
+  FaceOverlay face_overlay_;
 
   mutable std::mutex metrics_mutex_;
   MetricsSnapshot metrics_;

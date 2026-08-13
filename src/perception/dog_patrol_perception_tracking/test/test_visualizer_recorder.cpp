@@ -77,6 +77,50 @@ class BlockingOverlayArtifactWriterFactory final : public OverlayArtifactWriterF
   std::shared_ptr<BlockingOverlayArtifactWriter::State> state_;
 };
 
+class CapturingOverlayArtifactWriter final : public OverlayArtifactWriter {
+ public:
+  explicit CapturingOverlayArtifactWriter(std::shared_ptr<std::vector<cv::Mat>> canvases)
+      : canvases_(std::move(canvases)) {}
+
+  bool Open(const cv::Size &, double, std::string *error) override {
+    if (error != nullptr) {
+      error->clear();
+    }
+    return true;
+  }
+
+  bool Write(const cv::Mat &canvas, std::string *error) override {
+    canvases_->push_back(canvas.clone());
+    if (error != nullptr) {
+      error->clear();
+    }
+    return true;
+  }
+
+  bool Close(std::string *error) override {
+    if (error != nullptr) {
+      error->clear();
+    }
+    return true;
+  }
+
+ private:
+  std::shared_ptr<std::vector<cv::Mat>> canvases_;
+};
+
+class CapturingOverlayArtifactWriterFactory final : public OverlayArtifactWriterFactory {
+ public:
+  explicit CapturingOverlayArtifactWriterFactory(std::shared_ptr<std::vector<cv::Mat>> canvases)
+      : canvases_(std::move(canvases)) {}
+
+  std::unique_ptr<OverlayArtifactWriter> Create(const std::filesystem::path &, double) override {
+    return std::make_unique<CapturingOverlayArtifactWriter>(canvases_);
+  }
+
+ private:
+  std::shared_ptr<std::vector<cv::Mat>> canvases_;
+};
+
 IdentityManagerResult VisibleIdentity() {
   IdentityManagerResult result;
   IdentityObservation identity;
@@ -286,6 +330,92 @@ TEST(VisualizerRecorderTest, FullQueueDropsNewestOverlayWithoutBlockingInference
   EXPECT_EQ(metrics.dropped_frames(), 1U);
   EXPECT_EQ(metrics.written_frames, 2U);
   EXPECT_EQ(metrics.write_errors, 0U);
+}
+
+TEST(VisualizerRecorderTest, FaceBoxIsDrawnOnTheExistingCanvasForMatchingCurrentFrame) {
+  auto canvases = std::make_shared<std::vector<cv::Mat>>();
+  VisualizerRecorder::Config config;
+  config.enable_recording = true;
+  config.recording_output_root = "/tmp";
+  config.recording_path = "/tmp/face_overlay_current.mkv";
+  config.face_overlay_max_age_seconds = 0.5;
+  VisualizerRecorder recorder(
+      config, std::make_unique<CapturingOverlayArtifactWriterFactory>(canvases));
+  std::string error;
+  ASSERT_TRUE(recorder.Initialize(cv::Size(160, 100), &error)) << error;
+
+  VisualizerRecorder::FaceOverlay face;
+  face.target_id = 7;
+  face.source_timestamp_ns = 1'800'000'000U;
+  face.source_frame_number = 18U;
+  face.source_frame_number_available = true;
+  face.bbox_x = 30;
+  face.bbox_y = 40;
+  face.bbox_width = 20;
+  face.bbox_height = 20;
+  face.matched = true;
+  recorder.SetFaceOverlay(face);
+
+  SourceFrameMetadata source;
+  source.source_timestamp_ns = 2'000'000'000U;
+  source.camera_frame_number = 20U;
+  source.camera_frame_number_available = true;
+  const cv::Mat frame(100, 160, CV_8UC3, cv::Scalar(3, 5, 7));
+  const Track track = VisibleTrack();
+  recorder.Submit(frame, {track}, LockedPrimary(track), VisibleIdentity(), {}, {}, source);
+  recorder.Shutdown();
+
+  ASSERT_EQ(canvases->size(), 1U);
+  EXPECT_EQ(canvases->front().at<cv::Vec3b>(40, 30), cv::Vec3b(255, 0, 255));
+}
+
+TEST(VisualizerRecorderTest, FaceBoxIsSuppressedWhenStaleFutureOrWrongTarget) {
+  auto canvases = std::make_shared<std::vector<cv::Mat>>();
+  VisualizerRecorder::Config config;
+  config.enable_recording = true;
+  config.recording_output_root = "/tmp";
+  config.recording_path = "/tmp/face_overlay_suppressed.mkv";
+  config.face_overlay_max_age_seconds = 0.5;
+  config.queue_capacity = 4;
+  VisualizerRecorder recorder(
+      config, std::make_unique<CapturingOverlayArtifactWriterFactory>(canvases));
+  std::string error;
+  ASSERT_TRUE(recorder.Initialize(cv::Size(160, 100), &error)) << error;
+  const cv::Mat frame(100, 160, CV_8UC3, cv::Scalar(3, 5, 7));
+  const Track track = VisibleTrack();
+  SourceFrameMetadata source;
+  source.source_timestamp_ns = 2'000'000'000U;
+  source.camera_frame_number = 20U;
+  source.camera_frame_number_available = true;
+
+  const auto make_face = [](const int target_id, const std::uint64_t timestamp_ns,
+                            const std::uint32_t frame_number) {
+    VisualizerRecorder::FaceOverlay face;
+    face.target_id = target_id;
+    face.source_timestamp_ns = timestamp_ns;
+    face.source_frame_number = frame_number;
+    face.source_frame_number_available = true;
+    face.bbox_x = 30;
+    face.bbox_y = 40;
+    face.bbox_width = 20;
+    face.bbox_height = 20;
+    face.matched = true;
+    return face;
+  };
+  for (const auto &face : std::vector<VisualizerRecorder::FaceOverlay>{
+           make_face(7, 1'000'000'000U, 10U),
+           make_face(7, 2'100'000'000U, 21U),
+           make_face(8, 1'900'000'000U, 19U),
+       }) {
+    recorder.SetFaceOverlay(face);
+    recorder.Submit(frame.clone(), {track}, LockedPrimary(track), VisibleIdentity(), {}, {}, source);
+  }
+  recorder.Shutdown();
+
+  ASSERT_EQ(canvases->size(), 3U);
+  for (const auto &canvas : *canvases) {
+    EXPECT_EQ(canvas.at<cv::Vec3b>(40, 30), cv::Vec3b(3, 5, 7));
+  }
 }
 
 TEST(VisualizerRecorderTest, DefaultWriterPersistsTrackingIdentityAndPrimaryOverlay) {

@@ -26,3 +26,6 @@ MvSdkLog/
 *.pem
 *.key
 *.p12
+
+# Tool-local virtualenvs and runtime artifacts
+tools/face_verify/

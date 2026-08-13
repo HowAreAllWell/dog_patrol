@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""Run the fixed local fake-navigation/fake-face integration scenario.
+"""Run the fixed local integration scenario with fake navigation only.
 
-Real tracking and voice are launched as production executables. The fake nodes
-only provide navigation READY/transitions and face READY/crop observation.
+Supervisor, tracking, face, voice, readiness and authorization are production
+executables. The fake node only provides navigation READY/transitions.
 """
 
 from __future__ import annotations
@@ -20,6 +20,15 @@ import re
 import rclpy
 from dog_patrol_interfaces.msg import MissionEvent, MissionState
 from dog_patrol_perception_interfaces.msg import AuthorizationEvidence
+from dog_patrol_perception_orchestrator.acceptance import (
+    AcceptanceEvidence,
+    acceptance_case_passes,
+)
+from dog_patrol_perception_orchestrator.authorization import (
+    AuthorizationProvider,
+    AuthorizationResult,
+    AuthorizationStage,
+)
 from rclpy.node import Node
 from rclpy.qos import DurabilityPolicy, HistoryPolicy, QoSProfile, ReliabilityPolicy
 
@@ -52,8 +61,15 @@ class Observer(Node):
         self.final_state: int | None = None
         self.loss_seen = False
         self.reacquired_seen = False
-        self.create_subscription(MissionState, f"{prefix}/mission/state", self.on_state, qos())
-        self.create_subscription(MissionEvent, f"{prefix}/mission/event", self.on_event, volatile_qos())
+        self.create_subscription(
+            MissionState, f"{prefix}/mission/state", self.on_state, qos()
+        )
+        self.create_subscription(
+            MissionEvent,
+            f"{prefix}/mission/event",
+            self.on_event,
+            volatile_qos(),
+        )
         self.create_subscription(
             AuthorizationEvidence,
             f"{prefix}/perception/authorization_evidence",
@@ -95,8 +111,10 @@ class Observer(Node):
             "state_seq": int(msg.observed_state_seq),
             "target_id": int(msg.target_id),
             "result": int(msg.result),
+            "stage": int(msg.stage),
             "provider": str(msg.provider),
             "detail": str(msg.detail),
+            "stamp": self.get_clock().now().nanoseconds,
         })
 
 
@@ -107,6 +125,8 @@ def remaps(prefix: str) -> list[str]:
         "-r", f"/mission/event:={prefix}/mission/event",
         "-r", f"/perception/capability_status:={prefix}/perception/capability_status",
         "-r", f"/perception/authorization_evidence:={prefix}/perception/authorization_evidence",
+        "-r", f"/perception/authorization_command:={prefix}/perception/authorization_command",
+        "-r", f"/perception/face_overlay:={prefix}/perception/face_overlay",
         "-r", f"/perception/selected_target_bbox:={prefix}/perception/selected_target_bbox",
         "-r", f"/perception/tracked_target_image:={prefix}/perception/tracked_target_image",
     ]
@@ -114,7 +134,12 @@ def remaps(prefix: str) -> list[str]:
 
 def spawn(command: list[str], log: Path) -> subprocess.Popen:
     stream = log.open("w", encoding="utf-8")
-    return subprocess.Popen(command, stdout=stream, stderr=subprocess.STDOUT, start_new_session=True)
+    return subprocess.Popen(
+        command,
+        stdout=stream,
+        stderr=subprocess.STDOUT,
+        start_new_session=True,
+    )
 
 
 def _range(values: list[float]) -> dict[str, float | int] | None:
@@ -166,13 +191,20 @@ def process_snapshot(processes: list[subprocess.Popen]) -> list[dict]:
             )
             stat_fields = Path(f"/proc/{process.pid}/stat").read_text(encoding="utf-8").split()
             cpu_ticks = int(stat_fields[13]) + int(stat_fields[14])
-            command = Path(f"/proc/{process.pid}/cmdline").read_bytes().replace(b"\0", b" ").decode()
-            snapshots.append({
-                "pid": process.pid,
-                "command": command.strip(),
-                "rss_kb": rss,
-                "cpu_time_ticks": cpu_ticks,
-            })
+            command = (
+                Path(f"/proc/{process.pid}/cmdline")
+                .read_bytes()
+                .replace(b"\0", b" ")
+                .decode()
+            )
+            snapshots.append(
+                {
+                    "pid": process.pid,
+                    "command": command.strip(),
+                    "rss_kb": rss,
+                    "cpu_time_ticks": cpu_ticks,
+                }
+            )
         except (FileNotFoundError, StopIteration, PermissionError):
             continue
     return snapshots
@@ -190,9 +222,101 @@ def tracking_detection_samples(path: Path) -> list[dict]:
     return samples
 
 
+def flow_timings(states: list[dict], evidence: list[dict]) -> dict:
+    verify = next(
+        (item for item in states if item["state"] == MissionState.VERIFY_IDENTITY),
+        None,
+    )
+    final = next(
+        (
+            item
+            for item in states
+            if verify is not None
+            and item["stamp"] > verify["stamp"]
+            and item["state"] in (MissionState.PATROL, MissionState.TRACK_INTRUDER)
+        ),
+        None,
+    )
+    initial = next(
+        (
+            item
+            for item in evidence
+            if item["provider"] == "face"
+            and item["stage"] == AuthorizationEvidence.INITIAL_FACE
+        ),
+        None,
+    )
+    first_dual = [
+        item
+        for item in evidence
+        if item["stage"] == AuthorizationEvidence.DUAL_FIRST
+    ]
+    second_dual = [
+        item
+        for item in evidence
+        if item["stage"] == AuthorizationEvidence.DUAL_SECOND
+    ]
+
+    def elapsed_ms(start, end):
+        if start is None or end is None:
+            return None
+        return round((end - start) / 1_000_000.0, 3)
+
+    verify_stamp = None if verify is None else verify["stamp"]
+    return {
+        "verify_total_ms": elapsed_ms(
+            verify_stamp, None if final is None else final["stamp"]
+        ),
+        "initial_face_ms": elapsed_ms(
+            verify_stamp, None if initial is None else initial["stamp"]
+        ),
+        "dual_first_completion_ms": elapsed_ms(
+            None if initial is None else initial["stamp"],
+            max((item["stamp"] for item in first_dual), default=None),
+        ),
+        "dual_second_completion_ms": elapsed_ms(
+            max((item["stamp"] for item in first_dual), default=None),
+            max((item["stamp"] for item in second_dual), default=None),
+        ),
+    }
+
+
+def acceptance_observations(messages: list[dict]) -> list[AcceptanceEvidence]:
+    providers = {
+        "face": AuthorizationProvider.FACE,
+        "voice": AuthorizationProvider.VOICE,
+    }
+    stages = {
+        AuthorizationEvidence.INITIAL_FACE: AuthorizationStage.INITIAL_FACE,
+        AuthorizationEvidence.DUAL_FIRST: AuthorizationStage.DUAL_FIRST,
+        AuthorizationEvidence.DUAL_SECOND: AuthorizationStage.DUAL_SECOND,
+    }
+    results = {
+        AuthorizationEvidence.PASSED: AuthorizationResult.PASSED,
+        AuthorizationEvidence.NOT_PASSED: AuthorizationResult.NOT_PASSED,
+        AuthorizationEvidence.ERROR: AuthorizationResult.ERROR,
+        AuthorizationEvidence.CANCELLED: AuthorizationResult.CANCELLED,
+    }
+    return [
+        AcceptanceEvidence(
+            providers[item["provider"]],
+            stages[item["stage"]],
+            results[item["result"]],
+        )
+        for item in messages
+        if item["provider"] in providers
+        and item["stage"] in stages
+        and item["result"] in results
+    ]
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--output-root", type=Path, default=Path("data/diagnostics/fake_integration"))
+    parser.add_argument(
+        "--output-root",
+        type=Path,
+        default=Path("data/diagnostics/fake_integration"),
+    )
     parser.add_argument("--namespace", default="/dog_patrol/fake_it")
     parser.add_argument("--timeout", type=float, default=180.0)
     parser.add_argument(
@@ -211,6 +335,13 @@ def main() -> int:
     parser.add_argument("--voice-model-dir", type=Path)
     parser.add_argument("--voice-config", type=Path)
     parser.add_argument("--voice-helper", type=Path)
+    parser.add_argument("--face-config", type=Path)
+    parser.add_argument(
+        "--acceptance-case",
+        choices=("general", "initial_face_pass", "dual_pass", "dual_reject"),
+        default="general",
+        help="assert the expected perception-internal path for the normal scenario",
+    )
     parser.add_argument(
         "--preview",
         action="store_true",
@@ -225,16 +356,26 @@ def main() -> int:
     process_samples: list[dict] = []
     next_process_sample = 0.0
     try:
-        voice_scenarios = ("normal", "authorized_reencounter")
-        if args.scenario in voice_scenarios and not all(
-            (args.voice_model_dir, args.voice_config, args.voice_helper)
+        perception_scenarios = ("normal", "authorized_reencounter")
+        if args.scenario in perception_scenarios and not all(
+            (
+                args.voice_model_dir,
+                args.voice_config,
+                args.voice_helper,
+                args.face_config,
+            )
         ):
-            parser.error(f"{args.scenario} scenario requires voice model/config/helper")
+            parser.error(
+                f"{args.scenario} requires face config and voice model/config/helper"
+            )
         if args.preview and not os.environ.get("DISPLAY"):
-            parser.error("--preview requires an interactive graphical session with DISPLAY set")
+            parser.error(
+                "--preview requires an interactive graphical session with DISPLAY set"
+            )
         if args.scenario in ("tracking_reacquire", "tracking_loss_timeout", "startup_visible"):
             print(
-                "[fake-integration] tracking-only scenario: be visible before starting and remain visible "
+                "[fake-integration] tracking-only scenario: be visible before "
+                "starting and remain visible "
                 "until the result is printed",
                 flush=True,
             )
@@ -246,20 +387,48 @@ def main() -> int:
             )
         base = ["ros2", "run"]
         common = remaps(prefix)
-        processes.append(spawn(base + ["dog_patrol_manager", "mission_supervisor"] + common,
-                               root / "mission_supervisor.log"))
-        processes.append(spawn(base + ["dog_patrol_perception_orchestrator", "perception_readiness"] + common,
-                               root / "perception_readiness.log"))
-        if args.scenario in voice_scenarios:
-            processes.append(spawn(base + ["dog_patrol_perception_orchestrator", "perception_authorization"] + common,
-                                   root / "perception_authorization.log"))
-        tracking = base + ["dog_patrol_perception_tracking", "dog_patrol_perception_tracking_node",
-                           "--ros-args", "--params-file", str(args.tracking_params),
-                           "-p", f"tracker.config_path:={args.tracker_config}"] + common[1:]
+        processes.append(
+            spawn(
+                base + ["dog_patrol_manager", "mission_supervisor"] + common,
+                root / "mission_supervisor.log",
+            )
+        )
+        processes.append(
+            spawn(
+                base
+                + [
+                    "dog_patrol_perception_orchestrator",
+                    "perception_readiness",
+                ]
+                + common,
+                root / "perception_readiness.log",
+            )
+        )
+        if args.scenario in perception_scenarios:
+            processes.append(
+                spawn(
+                    base
+                    + [
+                        "dog_patrol_perception_orchestrator",
+                        "perception_authorization",
+                    ]
+                    + common,
+                    root / "perception_authorization.log",
+                )
+            )
+        tracking = base + [
+            "dog_patrol_perception_tracking",
+            "dog_patrol_perception_tracking_node",
+            "--ros-args",
+            "--params-file",
+            str(args.tracking_params),
+            "-p",
+            f"tracker.config_path:={args.tracker_config}",
+        ] + common[1:]
         if args.preview:
             tracking += ["-p", "visualization.enable:=true"]
         processes.append(spawn(tracking, root / "tracking.log"))
-        if args.scenario in voice_scenarios:
+        if args.scenario in perception_scenarios:
             for executable, log in (("perception_voice_readiness", "voice_readiness.log"),
                                     ("perception_voice_provider", "voice_provider.log")):
                 voice = base + ["dog_patrol_perception_voice", executable, "--ros-args",
@@ -267,23 +436,30 @@ def main() -> int:
                                 "-p", f"config_file:={args.voice_config}",
                                 "-p", f"helper_path:={args.voice_helper}"] + common[1:]
                 processes.append(spawn(voice, root / log))
+            for executable, log in (
+                ("perception_face_readiness", "face_readiness.log"),
+                ("perception_face_provider", "face_provider.log"),
+            ):
+                face = base + [
+                    "dog_patrol_perception_face",
+                    executable,
+                    "--ros-args",
+                    "-p",
+                    f"config_file:={args.face_config}",
+                ] + common[1:]
+                processes.append(spawn(face, root / log))
         fake = ["python3", str(Path(__file__).with_name("fake_nodes.py"))]
         nav = fake + ["--role", "navigation",
                       "--state-topic", f"{prefix}/mission/state",
                       "--event-topic", f"{prefix}/mission/event",
                       "--bbox-topic", f"{prefix}/perception/selected_target_bbox"]
-        if args.scenario in voice_scenarios:
-            face = fake + ["--role", "face",
-                           "--state-topic", f"{prefix}/mission/state",
-                           "--capability-topic", f"{prefix}/perception/capability_status",
-                           "--image-topic", f"{prefix}/perception/tracked_target_image"]
-        else:
+        if args.scenario not in perception_scenarios:
             face = fake + ["--role", "capabilities",
                            "--state-topic", f"{prefix}/mission/state",
                            "--capability-topic", f"{prefix}/perception/capability_status"]
         processes.append(spawn(nav, root / "fake_navigation.log"))
-        fake_capability_log = "fake_face.log" if args.scenario in voice_scenarios else "fake_capabilities.log"
-        processes.append(spawn(face, root / fake_capability_log))
+        if args.scenario not in perception_scenarios:
+            processes.append(spawn(face, root / "fake_capabilities.log"))
 
         rclpy.init()
         observer = Observer(prefix)
@@ -301,7 +477,12 @@ def main() -> int:
             rclpy.spin_once(observer, timeout_sec=0.2)
             now = time.monotonic()
             if now >= next_process_sample:
-                process_samples.append({"timestamp": time.time(), "processes": process_snapshot(processes)})
+                process_samples.append(
+                    {
+                        "timestamp": time.time(),
+                        "processes": process_snapshot(processes),
+                    }
+                )
                 next_process_sample = now + 1.0
             if args.scenario == "normal" and observer.final_state is not None:
                 break
@@ -330,7 +511,8 @@ def main() -> int:
                         absence_observed_wall_time = absent_sample["timestamp"]
                         return_prompt_wall_time = time.time()
                         print(
-                            "[fake-integration] target absence observed; return to camera view now",
+                            "[fake-integration] target absence observed; "
+                            "return to camera view now",
                             flush=True,
                         )
                 elif return_observed_wall_time is None:
@@ -348,7 +530,8 @@ def main() -> int:
                         return_observed_wall_time = returned_sample["timestamp"]
                         reencounter_observe_deadline = now + 10.0
                         print(
-                            "[fake-integration] target return observed; observing suppression for 10 seconds",
+                            "[fake-integration] target return observed; "
+                            "observing suppression for 10 seconds",
                             flush=True,
                         )
                 elif (
@@ -374,7 +557,11 @@ def main() -> int:
             if args.scenario == "tracking_loss_timeout":
                 if observer.loss_seen and loss_timeout_deadline is None:
                     loss_timeout_deadline = now + 8.0
-                    print("[fake-integration] TARGET_LOST observed; keep target out of view", flush=True)
+                    print(
+                        "[fake-integration] TARGET_LOST observed; "
+                        "keep target out of view",
+                        flush=True,
+                    )
                 if loss_timeout_deadline is not None and now >= loss_timeout_deadline:
                     break
         required_states = {
@@ -388,10 +575,12 @@ def main() -> int:
             observer.final_state is not None
             and observer.saw_verify
             and required_states.issubset(visited_states)
-            and any(item["result"] != AuthorizationEvidence.CANCELLED for item in observer.evidence)
+            and any(
+                item["result"] != AuthorizationEvidence.CANCELLED
+                for item in observer.evidence
+            )
         )
         post_authorization_states = []
-        detection_samples = tracking_detection_samples(root / "tracking.log")
         reencounter_observation = {
             "authorized_wall_time": authorized_wall_time,
             "absence_observed_wall_time": absence_observed_wall_time,
@@ -421,33 +610,51 @@ def main() -> int:
             functional_pass = (
                 authorized_at is not None
                 and reencounter_observe_deadline is not None
-                and any(item["result"] == AuthorizationEvidence.PASSED for item in observer.evidence)
+                and any(
+                    item["result"] == AuthorizationEvidence.PASSED
+                    for item in observer.evidence
+                )
                 and len(observer.evidence) == evidence_count_at_authorization
                 and all(item["state"] == MissionState.PATROL for item in post_authorization_states)
                 and reencounter_observation["absence_observed"]
                 and reencounter_observation["return_observed"]
             )
+        if args.scenario == "normal" and args.acceptance_case != "general":
+            outcome = (
+                AuthorizationResult.PASSED
+                if observer.final_state == MissionState.PATROL
+                else AuthorizationResult.NOT_PASSED
+            )
+            functional_pass = functional_pass and acceptance_case_passes(
+                args.acceptance_case,
+                outcome,
+                acceptance_observations(observer.evidence),
+            )
         report = {
             "test_config": {
                 "preview_enabled": args.preview,
+                "acceptance_case": args.acceptance_case,
             },
-            "functional": {"status": "PASS" if functional_pass else "FAIL",
-                            "scenario": args.scenario,
-                            "saw_verify_identity": observer.saw_verify,
-                            "target_lost_seen": observer.loss_seen,
-                            "target_reacquired_seen": observer.reacquired_seen,
-                            "visited_states": sorted(visited_states),
-                            "final_state": observer.final_state,
-                            "evidence_count": len(observer.evidence),
-                            "evidence_count_at_authorization": evidence_count_at_authorization,
-                            "post_authorization_states": post_authorization_states,
-                            "reencounter_observation": reencounter_observation},
+            "functional": {
+                "status": "PASS" if functional_pass else "FAIL",
+                "scenario": args.scenario,
+                "saw_verify_identity": observer.saw_verify,
+                "target_lost_seen": observer.loss_seen,
+                "target_reacquired_seen": observer.reacquired_seen,
+                "visited_states": sorted(visited_states),
+                "final_state": observer.final_state,
+                "evidence_count": len(observer.evidence),
+                "evidence_count_at_authorization": evidence_count_at_authorization,
+                "post_authorization_states": post_authorization_states,
+                "reencounter_observation": reencounter_observation,
+            },
             "performance": {
                 "status": "OBSERVED",
                 "collection_complete": bool(tegrastats),
                 "resource_log": str(root / "tegrastats.log") if tegrastats else None,
                 "tegrastats_summary": parse_tegrastats(root / "tegrastats.log"),
                 "process_samples": process_samples,
+                "flow_timings": flow_timings(observer.states, observer.evidence),
             },
             "states": observer.states,
             "events": observer.events,

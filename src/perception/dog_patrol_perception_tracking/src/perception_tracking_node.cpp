@@ -28,6 +28,7 @@
 #include "dog_patrol_perception_tracking/modules/runtime_monitor.hpp"
 #include "dog_patrol_perception_tracking/modules/target_image_ros_adapter.hpp"
 #include "dog_patrol_perception_tracking/modules/visualizer_recorder.hpp"
+#include "dog_patrol_perception_interfaces/msg/face_overlay.hpp"
 
 namespace {
 
@@ -60,6 +61,7 @@ class TrackingRuntime {
   virtual const char *Name() const = 0;
   virtual bool FailFastOnInitializationError() const = 0;
   virtual dog_patrol_perception_tracking::PrimaryTargetResult CurrentPrimary() const = 0;
+  virtual std::optional<dog_patrol_perception_tracking::MissionSnapshot> CurrentMission() const { return std::nullopt; }
   virtual RuntimeFrameOutput ProcessFrame(
       const std::vector<dog_patrol_perception_tracking::IdentityObservation> &identities,
       const dog_patrol_perception_tracking::SourceFrameMetadata &source_metadata,
@@ -107,6 +109,9 @@ class MissionTrackingRuntime final : public TrackingRuntime,
   }
   dog_patrol_perception_tracking::PrimaryTargetResult CurrentPrimary() const override {
     return adapter_->CurrentPrimary();
+  }
+  std::optional<dog_patrol_perception_tracking::MissionSnapshot> CurrentMission() const override {
+    return adapter_->CurrentMission();
   }
   RuntimeFrameOutput ProcessFrame(
       const std::vector<dog_patrol_perception_tracking::IdentityObservation> &identities,
@@ -175,6 +180,7 @@ class PerceptionTrackingNode : public rclcpp::Node {
     DeclareParameters();
     const auto target_cfg = LoadPrimaryTargetConfig();
     InitializeRuntimeMode(target_cfg);
+    SetupFaceEvidenceSubscription();
     try {
       LoadConfigAndInitialize(target_cfg);
       runtime_operational_ = true;
@@ -211,6 +217,45 @@ class PerceptionTrackingNode : public rclcpp::Node {
   }
 
  private:
+  void SetupFaceEvidenceSubscription() {
+    const std::string topic = this->get_parameter("face.overlay_topic").as_string();
+    auto qos = rclcpp::QoS(rclcpp::KeepLast(1)).best_effort().durability(rclcpp::DurabilityPolicy::Volatile);
+    face_evidence_sub_ = this->create_subscription<dog_patrol_perception_interfaces::msg::FaceOverlay>(
+        topic, qos,
+        [this](const dog_patrol_perception_interfaces::msg::FaceOverlay::SharedPtr msg) {
+          if (visualizer_ == nullptr) {
+            return;
+          }
+          const auto mission = runtime_ != nullptr ? runtime_->CurrentMission() : std::nullopt;
+          if (mission.has_value() &&
+              (msg->observed_state_seq != mission->state_seq ||
+               (mission->target_id > 0 && msg->target_id != static_cast<std::uint32_t>(mission->target_id)))) {
+            visualizer_->ClearFaceOverlay();
+            return;
+          }
+          const bool has_box = msg->bbox_width >= 0 && msg->bbox_height >= 0;
+          if (!has_box) {
+            visualizer_->ClearFaceOverlay();
+            return;
+          }
+          const int64_t source_ns = static_cast<int64_t>(msg->header.stamp.sec) * 1000000000LL +
+                                    static_cast<int64_t>(msg->header.stamp.nanosec);
+          const bool matched =
+              msg->result == dog_patrol_perception_interfaces::msg::FaceOverlay::PASSED;
+          dog_patrol_perception_tracking::VisualizerRecorder::FaceOverlay overlay;
+          overlay.target_id = static_cast<int>(msg->target_id);
+          overlay.source_timestamp_ns = source_ns > 0 ? static_cast<std::uint64_t>(source_ns) : 0U;
+          overlay.source_frame_number = msg->source_frame_number;
+          overlay.source_frame_number_available = msg->source_frame_number_available;
+          overlay.bbox_x = msg->bbox_x;
+          overlay.bbox_y = msg->bbox_y;
+          overlay.bbox_width = msg->bbox_width;
+          overlay.bbox_height = msg->bbox_height;
+          overlay.label = matched ? "FACE MATCHED" : "FACE UNKNOWN";
+          overlay.matched = matched;
+          visualizer_->SetFaceOverlay(std::move(overlay));
+        });
+  }
   void RejectRetiredCameraParameterOverrides() {
     const auto &overrides =
         this->get_node_parameters_interface()->get_parameter_overrides();
@@ -289,6 +334,10 @@ class PerceptionTrackingNode : public rclcpp::Node {
     this->declare_parameter<double>("target_image.crop_padding_ratio", 0.10);
     this->declare_parameter<double>("target_image.max_publish_hz", 10.0);
     this->declare_parameter<int>("target_image.queue_capacity", 2);
+
+    this->declare_parameter<std::string>("face.overlay_topic",
+                                         "/perception/face_overlay");
+    this->declare_parameter<double>("face.overlay_max_age_s", 0.5);
 
     this->declare_parameter<int>("sid.feat_bank_size", identity_defaults.feat_bank_size);
     this->declare_parameter<double>("sid.recover_sim_thresh_strict", identity_defaults.recover_sim_thresh_strict);
@@ -605,13 +654,16 @@ class PerceptionTrackingNode : public rclcpp::Node {
     viz_input.queue_capacity = static_cast<int>(this->get_parameter("visualization.queue_capacity").as_int());
     const auto viz_cfg =
         dog_patrol_perception_tracking::PerceptionConfigMaterializer::MaterializeVisualizerConfig(viz_input, sid_cfg);
-    visualizer_ = std::make_unique<dog_patrol_perception_tracking::VisualizerRecorder>(viz_cfg);
+    auto effective_viz_cfg = viz_cfg;
+    effective_viz_cfg.face_overlay_max_age_seconds =
+        this->get_parameter("face.overlay_max_age_s").as_double();
+    visualizer_ = std::make_unique<dog_patrol_perception_tracking::VisualizerRecorder>(effective_viz_cfg);
     if (!visualizer_->Initialize(frame.size(), &error)) {
       throw std::runtime_error("visualizer_recorder init failed: " + error);
     }
 
     LogEffectiveConfig(camera_cfg, acquired_frame, infer_cfg, filter_cfg,
-                       tracker_.EffectiveConfig(), target_cfg, sid_cfg, viz_cfg);
+                       tracker_.EffectiveConfig(), target_cfg, sid_cfg, effective_viz_cfg);
   }
 
   void LogEffectiveConfig(const dog_patrol_perception_tracking::CameraIngest::Config &camera_cfg,
@@ -831,7 +883,8 @@ class PerceptionTrackingNode : public rclcpp::Node {
       visualizer_->Submit(std::move(acquired_frame.bgr8), std::move(tracks), std::move(primary),
                           std::move(identity_result),
                           std::move(frame_output.primary_decision_reason),
-                          std::move(frame_output.primary_reject_reason));
+                          std::move(frame_output.primary_reject_reason),
+                          source_metadata);
     }
   }
 
@@ -849,6 +902,8 @@ class PerceptionTrackingNode : public rclcpp::Node {
   std::mutex pipeline_mutex_;
   dog_patrol_perception_tracking::IdentityManager identity_manager_;
   std::unique_ptr<dog_patrol_perception_tracking::VisualizerRecorder> visualizer_;
+  rclcpp::Subscription<dog_patrol_perception_interfaces::msg::FaceOverlay>::SharedPtr
+      face_evidence_sub_;
   dog_patrol_perception_tracking::RuntimeMonitor monitor_;
   bool runtime_operational_{false};
 };

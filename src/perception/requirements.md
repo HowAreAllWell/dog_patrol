@@ -12,12 +12,12 @@
 | 模块 | 状态 | 平台与部署输入 | 验收边界 |
 | --- | --- | --- | --- |
 | tracking | `implemented` | Jetson Orin；CUDA/TensorRT、Hikrobot MVS SDK、相机、本机 engine、ROS 参数；仅 `osnet_onnx` 后端需要 ReID ONNX | 完整 Orin build/test；相机可枚举；live 节点加载 engine 并稳定输出 tracking 指标 |
-| face | `scaffolded/not-integrated` | `dog_patrol_perception_face` 已建立可构建骨架；必须从 `TrackedTargetImage` 消费同帧主目标 crop；实现、模型和白名单尚未进入本仓 | 当前只验证 package 和 crop transport；接入遵守库内 `COLLABORATION.md`；不得把测试 provider 当作生产 readiness |
-| voice | `integrating` | `dog_patrol_perception_voice` 的 R818/Vosk 核心、异步 evidence provider、只读 voice preflight/readiness、无人参与和最终现场验收 CLI、Prompt player、安装 helper 和受控配置；设备与 Vosk 模型由部署机提供 | preflight、安装产物、transient-local `voice` capability、#37 自动验收和 #38 真人最小矩阵均已通过并归档；最终口令、错误口令拒绝、FRR/FAR 和安全准入仍待完成 |
-| orchestrator | `integrating` | ROS 2 Humble；已有 readiness 聚合、ROS-independent 授权规则和通用授权事件 adapter | tracking/face/voice 对当前 STARTUP sequence 都 ready 才能发布感知整体 READY；真实 face/voice provider 尚未接入 |
+| face | `implemented` | YOLO/TensorRT detector、sface recognition、latest-only provider、真实 preflight/readiness 和 overlay adapter；engine、白名单与配置由部署机提供 | 真实模型 crop→stage evidence、取消/隔离、readiness 与同 canvas bbox 自动测试已通过；最终用户参与的整流程现场验收待执行 |
+| voice | `implemented` | R818/Vosk 核心、命令驱动的异步 evidence provider、只读 preflight/readiness、Prompt player、安装 helper 和部署配置 | 每条并行授权命令运行一个真实响应窗；既有 #37/#38 硬件/真人验收已通过；仍随最终感知整流程复验 |
+| orchestrator | `implemented` | ROS 2 Humble；readiness 聚合、ROS-independent 分阶段授权规则、授权命令与最终事件 adapter | tracking/face/voice 对当前 STARTUP sequence 都 ready 才发布感知整体 READY；内部流程为初始人脸加两轮人脸/语音并行 |
 
-环境检查中的最终 `PASS` 表示“当前已实现范围的部署前置条件完整”，不会把
-`not-integrated` 模块伪装成 ready，也不等价于 mission 中的感知整体 `READY`。
+环境检查中的最终 `PASS` 表示部署前置条件完整，但不等价于 mission 中当前 STARTUP sequence 的
+感知整体 `READY`，也不替代用户参与的真实流程验收。
 
 ## 平台与 SDK 基线
 
@@ -48,8 +48,9 @@ ID `2bdf:0001`）。已验收模式为 `BayerGB8` (`0x0108000a`)、`1280x1024@30
 - 部署专用 ROS 参数文件和 tracker YAML。参数文件不得携带 RTSP userinfo、凭据、白名单、
   特征向量、录像或本机临时目录。
 
-face 的模型、隐私数据与设备需求要在实现接入时由各自模块补充；接入边界见
-[`dog_patrol_perception_face/COLLABORATION.md`](dog_patrol_perception_face/COLLABORATION.md)。voice 的 Vosk 模型、ADB serial 和
+face 由部署 YAML 提供 detector engine、recognition engine 和 whitelist 目录；provider 与 readiness
+必须使用同一份配置。运行和接入边界见
+[`dog_patrol_perception_face/README.md`](dog_patrol_perception_face/README.md)。voice 的 Vosk 模型、ADB serial 和
 音频设备同样由部署机提供，不进入 Git。voice 的 provider 参数和验收边界见
 [`../../docs/perception/voice/issue34_voice_provider.md`](../../docs/perception/voice/issue34_voice_provider.md)，
 readiness/preflight 入口见 [`../../docs/perception/voice/issue35_voice_readiness.md`](../../docs/perception/voice/issue35_voice_readiness.md)，
@@ -120,7 +121,7 @@ colcon 安装结果、完整 Orin runtime 构建开关、测试结果和上表�
 
 统一检查为 `PASS` 后，从本仓安装产物启动 production standalone tracking；它使用完整 Hik
 camera、TensorRT detector、tracker、semantic identity、primary observation 和异步 crop transport，
-但不要求尚未接入的 face/voice provider、mission supervisor、导航或激光雷达：
+但 standalone 模式不要求 face/voice provider、mission supervisor、导航或激光雷达：
 
 ```bash
 cd /absolute/path/to/dog_patrol
