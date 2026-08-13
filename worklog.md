@@ -1,5 +1,14 @@
 # worklog
 
+## 2026-08-13 13:43 - 形成感知资产包并复测三模块并行性能
+
+- 目标：为导航团队形成可交付的感知部署资产包，更新根 README，并重新测量 tracking、face、voice 同时运行时的资源占用。
+- 完成：新增公开 `deploy/perception_assets/` 模板，记录私有资产目录、生产配置、校验和及部署门禁；根 README 增加感知部署交付入口。在仓库外生成受控实体包 `/home/user/dog_patrol_perception_assets_20260813/`，包含已验证 tracking engine、两个 face engine、原部署白名单、Vosk 模型、tracking/face/voice 配置和 SHA256SUMS。使用真实 supervisor、tracking、face、voice、readiness、authorization，仅 fake navigation，开启唯一 tracking 预览并重新运行 `dual_reject`。
+- 关键结论：实体包 114 MB，全部 SHA256 校验通过，未进入 Git。成功复测报告 `20260813_133853` 为 `functional.status=PASS`，最终进入 `TRACK_INTRUDER`；CPU 每核样本平均 26.353%、峰值 99%，GPU GR3D 平均 37.632%、峰值 96%，RAM 平均 4860.863 MB、峰值 4937 MB，Tj 平均 56.912°C、峰值 58.093°C；tracking preview 29.94 FPS、0 overlay drop/error，tracking inference p50/p95/p99 为 8.651/11.181/11.850 ms；face 487 次推理，平均 9.191 ms。测试中发生一次 TARGET_LOST/REACQUIRED，旧 voice 会话按合同取消，新会话完成初始 face 和两轮 face/voice 拒绝，严格流程仍通过。
+- 涉及文件：`README.md`、`deploy/perception_assets/README.md`、`deploy/perception_assets/SHA256SUMS.example`、`worklog.md`；私有实体资产包及现场报告不进入 Git。
+- 验证：`sha256sum -c SHA256SUMS` 全部通过；`dual_reject` 自动功能断言 PASS；真实相机/R818/face/voice 同时运行；退出后无残留感知、supervisor、fake navigation 或 tegrastats 进程；`git diff --check` 通过。
+- 后续：通过受控渠道把实体资产包交给导航团队，目标机器若不是当前 JetPack/TensorRT 组合需重建并重新验证 TensorRT engine；正式白名单不得上传公开 Git。
+
 ## 2026-08-13 12:30 - 完成真实感知三流程现场验收
 
 - 目标：接手并推进 R818、显示器和 Hik 相机已接入后的真实感知整流程现场验收。

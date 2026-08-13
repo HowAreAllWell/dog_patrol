@@ -42,6 +42,13 @@
   同时记录阶段耗时、CPU/GPU/RAM、温度及 tracking/face 指标。
 - 目标公开远程：`https://github.com/HowAreAllWell/dog_patrol`
 
+### 感知部署交付
+
+交付给导航团队的公开资产包模板位于 [`deploy/perception_assets/`](deploy/perception_assets/README.md)。
+模板包含目录结构、配置复制入口、校验和生成方式和统一环境检查命令；TensorRT engine、Vosk 模型、正式人脸白名单、设备序列号和现场 YAML 必须通过受控渠道单独分发，不进入 Git。
+
+当前感知 Orin 的跟踪、人脸、语音并行验收已完成；导航团队部署时仍需在目标机重新执行完整构建、环境检查和真实流程验收。
+
 ## 目录
 
 ```text
