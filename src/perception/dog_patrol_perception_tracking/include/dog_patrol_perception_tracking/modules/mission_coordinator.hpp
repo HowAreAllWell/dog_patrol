@@ -63,7 +63,7 @@ class MissionCoordinator {
   using TimePoint = Clock::time_point;
 
   struct Config {
-    Duration lost_event_timeout{std::chrono::milliseconds{500}};
+    Duration lost_event_timeout{std::chrono::seconds{1}};
     Duration reacquire_retention{std::chrono::seconds{6}};
   };
 

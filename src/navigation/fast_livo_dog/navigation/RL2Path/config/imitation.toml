@@ -1,0 +1,55 @@
+[paths]
+usd_mesh      = "/fast_data/zhangziyang/workspace/RL2Path/outputs/scene_3/obstacles.obj"
+
+lidar_dataset = "/mnt/nas_7/datasets/NavScene/lidar_dataset_scene3_action_0.5_1.0_ng_goalahead_obs_50_50_2_2.h5"  
+path_dataset  = "/mnt/nas_9/group/zhouboyang/merged_data_circle_0.2_2d_simple_env_0.5_dis_0.5.npz"     
+output        = "/mnt/nas_7/datasets/NavScene/rl2path/exp_1/demonstrations_scene3_action_0.5_1.0_m90_90_ng_goal_0_0_obs_50_50_2_2.h5" 
+
+# action: range(r_min, r_max), ng: no goal, action_theta_range(theta_min, theta_max)
+# goal: rotation_range(theta_min, theta_max)
+# obs: map_size(height, width), real(x, y)
+# df: default
+
+[lidar]
+count              = 32
+name               = "Lidar"
+translation        = [6.0, 0.0, 1.0]
+rotation_frequency = 0.0            # 0 = 一帧扫描 360°
+fov                = [360.0, 0.0]   # (水平°, 垂直°)
+resolution         = [0.5625, 0.4]    # (水平°, 垂直°)
+valid_range        = [0.05, 12.0]
+
+[collect]
+lidar_height  = 1.0
+save_interval = 10_000               # 每 N 帧 flush HDF5
+
+[imitation]
+model = "tcnn_v0"
+
+checkpoint_dir = "./outputs/ckpts/tcnn_v0"
+log_dir = "./logs/imitation_bc/tcnn_v0"
+
+seed = 3047
+device = "cuda:1"
+resume = false
+resume_model_path = "./outputs/ckpts/tcnn_v0/model_7"
+feature_dim = 256
+batch_size = 512
+
+action_theta_range = [-90, 90]
+goal_include_theta = false
+
+[process]
+mode       = "2d"   # "2d" 或 "3d"
+action_dim = 8
+num_envs   = 1
+sample_n   = -1    
+max_distance = 1.0
+
+[costmap]
+x_min = 0.0
+x_max = 2.0
+y_min = -1.0
+y_max = 1.0
+theta_range = [0.0, 0.0]
+

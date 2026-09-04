@@ -14,6 +14,7 @@ from rclpy.qos import (
     QoSProfile,
     ReliabilityPolicy,
 )
+from std_srvs.srv import Trigger
 
 from dog_patrol_manager.state_machine import (
     EventSource,
@@ -78,6 +79,9 @@ class MissionSupervisor(Node):
         self._event_sub = self.create_subscription(
             MissionEvent, self._event_topic, self._on_event, event_qos
         )
+        self._reset_service = self.create_service(
+            Trigger, "/mission/reset", self._on_reset
+        )
 
         self._state_timer = None
         if self._state_publish_rate > 0.0:
@@ -92,6 +96,18 @@ class MissionSupervisor(Node):
             f"event_topic={self._event_topic}, "
             f"state_publish_rate={self._state_publish_rate:.2f}Hz"
         )
+
+    def _on_reset(self, request, response):
+        del request
+        with self._lock:
+            snapshot = self._machine.reset_session()
+            self._publish_state_locked()
+        response.success = True
+        response.message = (
+            f"mission reset to STARTUP, state_seq={snapshot.state_seq}"
+        )
+        self.get_logger().info(response.message)
+        return response
 
     def _on_event(self, msg: MissionEvent) -> None:
         event_data = MissionEventData(

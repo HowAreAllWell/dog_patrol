@@ -1,0 +1,47 @@
+# Tracker-core v1 runtime config (ByteTrack / BoT-SORT-style).
+# GMC is disabled by default; enable tracker.gmc_enabled for moving platform scenarios.
+# Note: ReID is mandatory in current runtime and will be forced on.
+tracker_name: "bot_sort"
+core_mode: "new_core"
+gmc_method: "sparseOptFlow"
+gmc_downscale: 4
+with_reid: true
+track_high_thresh: 0.5
+track_low_thresh: 0.1
+new_track_thresh: 0.7
+match_thresh: 0.8
+track_buffer: 30
+confirm_hits: 1
+# Association gates.
+stage1_iou_min: 0.20
+stage2_iou_min: 0.15
+unconfirmed_iou_min: 0.30
+# Association final cost gates.
+stage1_max_cost: 0.70
+stage2_max_cost: 0.65
+lost_recovery_max_cost: 0.60
+unconfirmed_max_cost: 0.60
+use_low_score_appearance_gate: true
+# Duplicate new-track suppression also considers recently lost tracks.
+duplicate_lost_iou: 0.50
+duplicate_lost_center_dist_norm: 1.0
+motion_gate_thresh: 9.4877
+# Cost composition weights (normalized internally).
+assoc_iou_weight: 0.55
+assoc_motion_weight: 0.25
+assoc_app_weight: 0.20
+# Appearance feature parameters (runtime required).
+appearance_gate: 0.45
+appearance_alpha: 0.90
+appearance_h_bins: 16
+appearance_s_bins: 8
+# Occlusion-fragment protection.
+occlusion_enter_min_frames: 2
+occlusion_base_frames: 24
+occlusion_extend_step: 5
+occlusion_max_frames: 45
+occlusion_release_clear_frames: 4
+occlusion_shrink_ratio: 0.45
+occlusion_suspect_area_ratio: 0.60
+occlusion_neighbor_center_dist_norm: 1.20
+occlusion_overlap_iou_min: 0.02

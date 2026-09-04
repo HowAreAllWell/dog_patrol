@@ -5,6 +5,9 @@
 整个感知域的 Orin 平台、SDK、资产、参数、模块状态和统一环境检查见
 [`requirements.md`](requirements.md)。该入口不替代各 ROS package manifest 或模块内部配置。
 
+感知运行资源统一放在 `dog_patrol_perception_assets_20260813/`，与各感知 ROS package
+同级，不依赖工作空间外的资源目录。运行时可通过 `DOG_PATROL_ASSETS_ROOT` 覆盖默认位置。
+
 `dog_patrol_perception_tracking` 提供相机、检测、tracking、semantic identity、主目标选择、
 mission ROS 2 adapter，以及录制和离线评估工具。普通开发和 CI 显式关闭 Orin runtime，
 只构建可移植核心；CUDA、TensorRT、Hik MVS 和 FFmpeg runtime 由 Orin 部署显式开启。

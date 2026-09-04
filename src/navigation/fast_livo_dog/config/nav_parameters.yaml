@@ -1,0 +1,223 @@
+# ==============================================================================
+# Navigation and 2D Mapping Parameters
+# ==============================================================================
+
+lidar_loop_node:
+  ros__parameters:
+    # 2D Grid Map resolution (meters per cell)
+    pcd2pgm_map_resolution: 0.05
+
+    # Height slice range relative to the base_link floor plane (meters)
+    pcd2pgm_thre_z_min: -0.2
+    pcd2pgm_thre_z_max: 0.4
+
+    # Radius Outlier Removal parameters
+    pcd2pgm_thre_radius: 0.8
+    pcd2pgm_thres_point_count: 10
+
+    # 传感器到车体中心的外参 (lidar -> base_link)
+    T_lidar_base: [
+       0.881054,  0.016898, -0.472712, -0.140800,
+      -0.020738,  0.999781, -0.002914, -0.006440,
+       0.472560,  0.012370,  0.881212, -0.430040,
+       0.000000,  0.000000,  0.000000,  1.000000
+    ]
+
+# ==============================================================================
+# Nav2 Configuration Parameters
+# ==============================================================================
+
+controller_server:
+  ros__parameters:
+    use_sim_time: false
+    controller_frequency: 15.0
+    min_x_velocity_threshold: 0.001
+    min_y_velocity_threshold: 0.0
+    min_theta_velocity_threshold: 0.001
+    failure_tolerance: 0.3
+    progress_checker_plugins:
+      - progress_checker
+    goal_checker_plugins:
+      - general_goal_checker
+    controller_plugins:
+      - FollowPath
+    progress_checker:
+      plugin: nav2_controller::SimpleProgressChecker
+      required_movement_radius: 0.05
+      movement_time_allowance: 45.0
+    general_goal_checker:
+      stateful: false
+      plugin: nav2_controller::SimpleGoalChecker
+      xy_goal_tolerance: 0.5
+      yaw_goal_tolerance: 3.14
+    FollowPath:
+      plugin: dwb_core::DWBLocalPlanner
+      debug_trajectory_details: false
+      min_vel_x: 0.0
+      min_vel_y: 0.0
+      max_vel_x: 0.80
+      max_vel_y: 0.0
+      max_vel_theta: 0.65
+      min_speed_xy: 0.20
+      max_speed_xy: 0.80
+      min_speed_theta: 0.50
+      acc_lim_x: 1.50
+      acc_lim_y: 0.0
+      acc_lim_theta: 4.60
+      decel_lim_x: -3.50
+      decel_lim_y: 0.0
+      decel_lim_theta: -4.60
+      vx_samples: 20
+      vy_samples: 1
+      vtheta_samples: 31
+      sim_time: 2.0
+      linear_granularity: 0.03
+      angular_granularity: 0.025
+      transform_tolerance: 0.3
+      xy_goal_tolerance: 0.5
+      trans_stopped_velocity: 0.15
+      short_circuit_trajectory_evaluation: true
+      stateful: false
+      critics:
+        [
+          "ObstacleFootprint",
+          "BaseObstacle",
+          "PathAlign",
+          "PathDist",
+          "GoalDist",
+          "RotateToGoal",
+        ]
+      ObstacleFootprint.scale: 0.02
+      BaseObstacle.scale: 0.035
+      PathAlign.scale: 13.0
+      PathAlign.forward_point_distance: 0.60
+      PathDist.scale: 24.0
+      GoalDist.scale: 10.0
+      RotateToGoal.scale: 10.0
+      # RotateToGoal.xy_goal_tolerance: 0.5
+      # RotateToGoal.trans_stopped_velocity: 0.08
+      RotateToGoal.slowing_factor: 4.0
+      RotateToGoal.lookahead_time: -1.0
+
+local_costmap:
+  local_costmap:
+    ros__parameters:
+      use_sim_time: false
+      footprint_padding: 0.03
+      global_frame: camera_init_footprint
+      robot_base_frame: base_footprint
+      update_frequency: 10.0
+      publish_frequency: 5.0
+      rolling_window: true
+      width: 6
+      height: 6
+      resolution: 0.05
+      transform_tolerance: 0.3
+      footprint: "[[0.410, 0.253], [0.410, -0.253], [-0.410, -0.253], [-0.410, 0.253]]"
+      robot_radius: 0.35
+      plugins:
+        - obstacle_layer
+        - inflation_layer
+      inflation_layer:
+        plugin: nav2_costmap_2d::InflationLayer
+        cost_scaling_factor: 10.0
+        inflation_radius: 0.8
+      obstacle_layer:
+        plugin: nav2_costmap_2d::ObstacleLayer
+        enabled: true
+        max_obstacle_height: .inf
+        min_obstacle_height: -.inf
+        observation_sources: scan
+        scan:
+          topic: /scan
+          max_obstacle_height: .inf
+          min_obstacle_height: -.inf
+          clearing: true
+          marking: true
+          data_type: LaserScan
+          inf_is_valid: true
+          raytrace_max_range: 12.0
+          raytrace_min_range: 0.0
+          obstacle_max_range: 8.0
+          obstacle_min_range: 0.0
+      always_send_full_costmap: true
+
+global_costmap:
+  global_costmap:
+    ros__parameters:
+      use_sim_time: false
+      footprint_padding: 0.03
+      update_frequency: 2.0
+      publish_frequency: 1.0
+      global_frame: map
+      robot_base_frame: base_footprint
+      footprint: "[[0.410, 0.253], [0.410, -0.253], [-0.410, -0.253], [-0.410, 0.253]]"
+      robot_radius: 0.35
+      resolution: 0.05
+      transform_tolerance: 0.3
+      track_unknown_space: true
+      plugins:
+        - static_layer
+        - obstacle_layer
+        - inflation_layer
+      obstacle_layer:
+        plugin: nav2_costmap_2d::ObstacleLayer
+        enabled: true
+        max_obstacle_height: .inf
+        min_obstacle_height: -.inf
+        observation_sources: scan
+        scan:
+          topic: /scan
+          max_obstacle_height: .inf
+          min_obstacle_height: -.inf
+          clearing: true
+          marking: true
+          data_type: LaserScan
+          inf_is_valid: true
+          raytrace_max_range: 12.0
+          raytrace_min_range: 0.0
+          obstacle_max_range: 8.0
+          obstacle_min_range: 0.0
+      static_layer:
+        plugin: nav2_costmap_2d::StaticLayer
+        map_subscribe_transient_local: true
+        map_topic: /map_2d
+      inflation_layer:
+        plugin: nav2_costmap_2d::InflationLayer
+        cost_scaling_factor: 5.0
+        inflation_radius: 1.0
+      always_send_full_costmap: false # true
+
+map_server:
+  ros__parameters:
+    use_sim_time: false
+    yaml_filename: src/navigation/fast_livo_dog/data/map_2d.yaml
+    topic_name: map
+    frame_id: map
+
+planner_server:
+  ros__parameters:
+    use_sim_time: false
+    expected_planner_frequency: 20.0
+    planner_plugins:
+      - GridBased
+    GridBased:
+      plugin: nav2_navfn_planner/NavfnPlanner
+      tolerance: 0.5
+      use_astar: true
+      allow_unknown: false
+
+velocity_smoother:
+  ros__parameters:
+    use_sim_time: false
+    smoothing_frequency: 15.0
+    scale_velocities: false
+    feedback: OPEN_LOOP
+    odom_topic: "/odom"
+    odom_duration: 0.1
+    deadband_velocity: [0.0, 0.0, 0.0]
+    velocity_timeout: 1.0
+    max_velocity: [0.8, 0.0, 0.65]
+    min_velocity: [0.0, 0.0, -0.65]
+    max_accel: [1.5, 0.0, 4.6]
+    max_decel: [-3.5, 0.0, -4.6]

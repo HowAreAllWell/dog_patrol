@@ -9,6 +9,8 @@
   <buildtool_depend>ament_cmake</buildtool_depend>
 
   <depend>rclcpp</depend>
+  <depend>cv_bridge</depend>
+  <depend>sensor_msgs</depend>
   <depend>dog_patrol_interfaces</depend>
   <depend>dog_patrol_perception_interfaces</depend>
   <depend>libopencv-dev</depend>

@@ -332,6 +332,17 @@ def main() -> int:
     )
     parser.add_argument("--tracking-params", type=Path, required=True)
     parser.add_argument("--tracker-config", type=Path, required=True)
+    parser.add_argument(
+        "--camera-input-mode",
+        choices=("mvs", "ros_image"),
+        default="mvs",
+        help="tracking camera source; ros_image consumes an external sensor_msgs/Image topic",
+    )
+    parser.add_argument(
+        "--image-topic",
+        default="/left_camera/image_raw",
+        help="external ROS image topic when --camera-input-mode=ros_image",
+    )
     parser.add_argument("--voice-model-dir", type=Path)
     parser.add_argument("--voice-config", type=Path)
     parser.add_argument("--voice-helper", type=Path)
@@ -424,6 +435,10 @@ def main() -> int:
             str(args.tracking_params),
             "-p",
             f"tracker.config_path:={args.tracker_config}",
+            "-p",
+            f"camera.input_mode:={args.camera_input_mode}",
+            "-p",
+            f"camera.image_topic:={args.image_topic}",
         ] + common[1:]
         if args.preview:
             tracking += ["-p", "visualization.enable:=true"]

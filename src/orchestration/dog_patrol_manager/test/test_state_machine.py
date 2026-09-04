@@ -426,3 +426,22 @@ def test_duplicate_ready_event_is_idempotent():
     duplicate = machine.handle_event(ready)
     assert not duplicate.accepted
     assert duplicate.duplicate
+
+
+def test_reset_session_invalidates_readiness_and_active_target():
+    machine = MissionStateMachine()
+    start_patrol(machine)
+    confirmed = machine.handle_event(
+        event(machine, EventSource.PERCEPTION, EventType.TARGET_CONFIRMED, 42)
+    )
+    assert confirmed.accepted
+
+    previous_seq = machine.snapshot.state_seq
+    snapshot = machine.reset_session("navigation stopped")
+
+    assert snapshot.state == GlobalState.STARTUP
+    assert snapshot.target_id == 0
+    assert not snapshot.blocked
+    assert not machine.perception_ready
+    assert not machine.navigation_ready
+    assert snapshot.state_seq == previous_seq + 1

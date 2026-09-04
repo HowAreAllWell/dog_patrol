@@ -1,0 +1,56 @@
+dog_patrol_perception_tracking_node:
+  ros__parameters:
+    camera:
+      mvs_model: "MV-CU013-A0UC"
+      mvs_serial: "DB0060477"
+      width: 1280
+      height: 1024
+      fps: 30.0
+      timeout_ms: 1000
+      bayer_interpolation: "balanced"
+      bayer_smoothing: false
+    detector:
+      runtime_path: "/home/orin/workspace/dog_patrol/src/perception/dog_patrol_perception_assets_20260813/tracking/yolo26n_fp16_640.engine"
+      raw_conf_threshold: 0.10
+      input_width: 640
+      input_height: 640
+      person_conf_threshold: 0.10
+      car_conf_threshold: 0.10
+      enable_fake_detection: false
+    tracker:
+      config_path: "/home/orin/workspace/dog_patrol/src/perception/dog_patrol_perception_assets_20260813/tracking/bot_sort.yaml"
+      reid_backend: "light"
+      reid_model_path: ""
+    target:
+      lost_threshold_frames: 180
+      lost_event_timeout_sec: 1.0
+      reacquire_retention_sec: 6.0
+      handled_ignore_absence_sec: 30.0
+    mission:
+      state_topic: "/mission/state"
+      event_topic: "/mission/event"
+      selected_target_bbox_topic: "/perception/selected_target_bbox"
+    perception:
+      camera_optical_frame_id: "camera_link"
+      capability_status_topic: "/perception/capability_status"
+    target_image:
+      topic: "/perception/tracked_target_image"
+      crop_padding_ratio: 0.10
+      max_publish_hz: 10.0
+      queue_capacity: 2
+    sid:
+      reid_enable: true
+      reid_backend: "light"
+      reid_model_path: ""
+    visualization:
+      enable: false
+      queue_capacity: 4
+    recording:
+      enable: false
+      output_root: "data/diagnostics/live_overlays"
+      path: "data/diagnostics/live_overlays/tracking_overlay.mkv"
+      fps: 30.0
+    runtime:
+      mode: "mission"
+      tick_ms: 33
+      inference_timing_metrics: true

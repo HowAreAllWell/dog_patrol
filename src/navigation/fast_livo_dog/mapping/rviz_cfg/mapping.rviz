@@ -1,0 +1,143 @@
+Panels:
+- Class: rviz_common/Displays
+  Help Height: 78
+  Name: Displays
+  Property Tree Widget:
+    Expanded:
+    - /Global Options
+    - /Status
+    - /Path (Front-end Raw)
+    - /Path (Back-end Optimized)
+    - /Global Map (Frontend Accumulated)
+    - /Current Scan (Real-time)
+    - /Camera View
+    Splitter Ratio: 0.5
+  Tree Height: 700
+Preferences:
+  Tools:
+    Expanded: true
+Visualization Manager:
+  Class: ''
+  Displays:
+  - Alpha: 0.3
+    Cell Size: 1
+    Class: rviz_default_plugins/Grid
+    Color: 100; 100; 100
+    Enabled: true
+    Name: Grid
+    Reference Frame: <Fixed Frame>
+    Value: true
+  - Alpha: 1
+    Class: rviz_default_plugins/Path
+    Color: 0; 255; 0
+    Enabled: true
+    Line Style: Billboards
+    Line Width: 0.2
+    Name: Path (Front-end Raw)
+    Topic:
+      Depth: 5
+      Durability Policy: Volatile
+      History Policy: Keep Last
+      Reliability Policy: Reliable
+      Value: /path
+    Value: true
+  - Alpha: 1
+    Class: rviz_default_plugins/Path
+    Color: 0; 170; 255
+    Enabled: true
+    Line Style: Billboards
+    Line Width: 0.2
+    Name: Path (Back-end Optimized)
+    Topic:
+      Depth: 5
+      Durability Policy: Volatile
+      History Policy: Keep Last
+      Reliability Policy: Reliable
+      Value: /aft_pgo_path
+    Value: true
+  - Class: rviz_default_plugins/PointCloud2
+    Alpha: 0.2
+    Color Transformer: RGB8
+    Decay Time: 10000
+    Enabled: true
+    Name: Global Map (Frontend Accumulated)
+    Size (Pixels): 1
+    Style: Points
+    Topic:
+      Durability Policy: Volatile
+      Reliability Policy: Best Effort
+      Value: /cloud_registered
+    Value: true
+  - Class: rviz_default_plugins/PointCloud2
+    Alpha: 1.0
+    Color Transformer: Intensity
+    Decay Time: 0
+    Enabled: true
+    Name: Current Scan (Real-time)
+    Size (Pixels): 3
+    Style: Points
+    Topic:
+      Durability Policy: Volatile
+      Reliability Policy: Best Effort
+      Value: /cloud_registered
+    Value: true
+  - Class: rviz_default_plugins/Image
+    Enabled: true
+    Name: Camera View
+    Topic:
+      Value: /rgb_img
+    Value: true
+  Enabled: true
+  Global Options:
+    Background Color: 30; 30; 30
+    Fixed Frame: camera_init
+    Frame Rate: 30
+  Name: root
+  Tools:
+  - Class: rviz_default_plugins/MoveCamera
+  - Class: rviz_default_plugins/Interact
+    Hide Inactive Objects: true
+  - Class: rviz_default_plugins/Select
+  - Class: rviz_default_plugins/FocusCamera
+  - Class: rviz_default_plugins/Measure
+    Line color: 128; 128; 0
+  - Class: rviz_default_plugins/SetInitialPose
+    Covariance x: 0.25
+    Covariance y: 0.25
+    Covariance yaw: 0.068539
+    Topic:
+      Depth: 5
+      Durability Policy: Volatile
+      Reliability Policy: Reliable
+      Value: /initialpose
+  - Class: rviz_default_plugins/PublishPoint
+    Single click: true
+    Topic:
+      Depth: 5
+      Durability Policy: Volatile
+      History Policy: Keep Last
+      Reliability Policy: Reliable
+      Value: /clicked_point
+  Transformation:
+    Current:
+      Class: rviz_default_plugins/TF
+    Value: true
+  Views:
+    Current:
+      Class: rviz_default_plugins/Orbit
+      Distance: 80
+      Name: Current View
+      Target Frame: <Fixed Frame>
+      Value: Orbit (rviz)
+Window Geometry:
+  Displays:
+    collapsed: false
+  Height: 1200
+  Hide Left Dock: false
+  Hide Right Dock: true
+  Width: 1800
+  Toolbars:
+  - name: Tools
+    visible: true
+    row: 0
+    column: 0

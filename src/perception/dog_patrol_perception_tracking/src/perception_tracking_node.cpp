@@ -10,10 +10,12 @@
 #include <utility>
 #include <vector>
 
+#include <cv_bridge/cv_bridge.h>
 #include <opencv2/core/mat.hpp>
 
 #include <rclcpp/rclcpp.hpp>
 #include <rclcpp/executors/multi_threaded_executor.hpp>
+#include <sensor_msgs/msg/image.hpp>
 
 #include "dog_patrol_perception_tracking/modules/camera_ingest.hpp"
 #include "dog_patrol_perception_tracking/modules/det_filter.hpp"
@@ -39,6 +41,11 @@ enum class RuntimeMode {
   kStandalone,
 };
 
+enum class CameraInputMode {
+  kMvs,
+  kRosImage,
+};
+
 RuntimeMode ParseRuntimeMode(const std::string &value) {
   if (value == "mission") {
     return RuntimeMode::kMission;
@@ -47,6 +54,16 @@ RuntimeMode ParseRuntimeMode(const std::string &value) {
     return RuntimeMode::kStandalone;
   }
   throw std::runtime_error("runtime.mode must be 'mission' or 'standalone'");
+}
+
+CameraInputMode ParseCameraInputMode(const std::string &value) {
+  if (value == "mvs") {
+    return CameraInputMode::kMvs;
+  }
+  if (value == "ros_image") {
+    return CameraInputMode::kRosImage;
+  }
+  throw std::runtime_error("camera.input_mode must be 'mvs' or 'ros_image'");
 }
 
 struct RuntimeFrameOutput {
@@ -277,6 +294,8 @@ class PerceptionTrackingNode : public rclcpp::Node {
 
     this->declare_parameter<std::string>("camera.mvs_model", "MV-CU013-A0UC");
     this->declare_parameter<std::string>("camera.mvs_serial", "");
+    this->declare_parameter<std::string>("camera.input_mode", "mvs");
+    this->declare_parameter<std::string>("camera.image_topic", "/left_camera/image_raw");
     this->declare_parameter<int>("camera.width", 1280);
     this->declare_parameter<int>("camera.height", 1024);
     this->declare_parameter<double>("camera.fps", 30.0);
@@ -317,7 +336,7 @@ class PerceptionTrackingNode : public rclcpp::Node {
     this->declare_parameter<double>("target.min_area_ratio", 0.25);
     this->declare_parameter<double>("target.max_area_ratio", 4.0);
     this->declare_parameter<int>("target.pending_recovery_frames", 3);
-    this->declare_parameter<double>("target.lost_event_timeout_sec", 0.5);
+    this->declare_parameter<double>("target.lost_event_timeout_sec", 1.0);
     this->declare_parameter<double>("target.reacquire_retention_sec", 6.0);
     this->declare_parameter<double>("target.handled_ignore_absence_sec", 30.0);
 
@@ -328,7 +347,7 @@ class PerceptionTrackingNode : public rclcpp::Node {
     this->declare_parameter<std::string>("perception.capability_status_topic",
                                          "/perception/capability_status");
     this->declare_parameter<std::string>("perception.camera_optical_frame_id",
-                                         "hik_camera_optical_frame");
+                                         "camera_link");
     this->declare_parameter<std::string>("target_image.topic",
                                          "/perception/tracked_target_image");
     this->declare_parameter<double>("target_image.crop_padding_ratio", 0.10);
@@ -391,6 +410,10 @@ class PerceptionTrackingNode : public rclcpp::Node {
     }
 
     const RuntimeMode mode = ParseRuntimeMode(this->get_parameter("runtime.mode").as_string());
+    camera_input_mode_ = ParseCameraInputMode(this->get_parameter("camera.input_mode").as_string());
+    if (camera_input_mode_ == CameraInputMode::kRosImage) {
+      SetupRosImageSubscription();
+    }
     dog_patrol_perception_tracking::TargetImageRosAdapter::Config adapter_config;
     adapter_config.topic = this->get_parameter("target_image.topic").as_string();
     const auto queue_capacity = this->get_parameter("target_image.queue_capacity").as_int();
@@ -513,10 +536,12 @@ class PerceptionTrackingNode : public rclcpp::Node {
     camera_cfg.bayer_smoothing =
         this->get_parameter("camera.bayer_smoothing").as_bool();
 
-    if (!camera_.Open(camera_cfg, &error)) {
-      ReportDetectionTrackingRuntimeStatus(
-          {false, false, "camera input initialization failed: " + error});
-      throw std::runtime_error("camera_ingest init failed: " + error);
+    if (camera_input_mode_ == CameraInputMode::kMvs) {
+      if (!camera_.Open(camera_cfg, &error)) {
+        ReportDetectionTrackingRuntimeStatus(
+            {false, false, "camera input initialization failed: " + error});
+        throw std::runtime_error("camera_ingest init failed: " + error);
+      }
     }
 
     dog_patrol_perception_tracking::PreprocessInfer::Config infer_cfg;
@@ -637,13 +662,15 @@ class PerceptionTrackingNode : public rclcpp::Node {
       throw std::runtime_error("identity_manager init failed: " + error);
     }
 
-    dog_patrol_perception_tracking::CameraIngest::AcquiredFrame acquired_frame;
-    if (!camera_.Read(&acquired_frame, &error)) {
-      ReportDetectionTrackingRuntimeStatus(
-          {true, true, "initial detection/tracking source frame failed: " + error});
-      throw std::runtime_error("camera_ingest initial frame failed: " + error);
+    std::optional<dog_patrol_perception_tracking::CameraIngest::AcquiredFrame> initial_frame;
+    if (camera_input_mode_ == CameraInputMode::kMvs) {
+      initial_frame.emplace();
+      if (!camera_.Read(&initial_frame.value(), &error)) {
+        ReportDetectionTrackingRuntimeStatus(
+            {true, true, "initial detection/tracking source frame failed: " + error});
+        throw std::runtime_error("camera_ingest initial frame failed: " + error);
+      }
     }
-    cv::Mat &frame = acquired_frame.bgr8;
 
     dog_patrol_perception_tracking::PerceptionConfigMaterializer::VisualizerInput viz_input;
     viz_input.enable_preview = this->get_parameter("visualization.enable").as_bool();
@@ -657,13 +684,114 @@ class PerceptionTrackingNode : public rclcpp::Node {
     auto effective_viz_cfg = viz_cfg;
     effective_viz_cfg.face_overlay_max_age_seconds =
         this->get_parameter("face.overlay_max_age_s").as_double();
-    visualizer_ = std::make_unique<dog_patrol_perception_tracking::VisualizerRecorder>(effective_viz_cfg);
-    if (!visualizer_->Initialize(frame.size(), &error)) {
-      throw std::runtime_error("visualizer_recorder init failed: " + error);
+    visualizer_config_ = effective_viz_cfg;
+    if (initial_frame.has_value()) {
+      EnsureVisualizer(initial_frame->bgr8.size(), &error);
+      if (visualizer_ == nullptr) {
+        throw std::runtime_error("visualizer_recorder init failed: " + error);
+      }
+      LogEffectiveConfig(camera_cfg, initial_frame.value(), infer_cfg, filter_cfg,
+                         tracker_.EffectiveConfig(), target_cfg, sid_cfg, effective_viz_cfg);
+    } else {
+      RCLCPP_INFO(get_logger(),
+                  "startup_effective_config camera backend=ros_image topic=%s expected_size=%dx%d expected_fps=%.2f frame_id=%s",
+                  this->get_parameter("camera.image_topic").as_string().c_str(),
+                  camera_cfg.width, camera_cfg.height, camera_cfg.fps,
+                  camera_optical_frame_id_.c_str());
+    }
+  }
+
+  void SetupRosImageSubscription() {
+    const auto topic = this->get_parameter("camera.image_topic").as_string();
+    if (topic.empty()) {
+      throw std::runtime_error("camera.image_topic must not be empty in ros_image mode");
+    }
+    ros_image_subscription_ = this->create_subscription<sensor_msgs::msg::Image>(
+        topic, rclcpp::SensorDataQoS(),
+        [this](sensor_msgs::msg::Image::ConstSharedPtr message) {
+          if (message == nullptr) {
+            return;
+          }
+          std::lock_guard<std::mutex> lock(ros_image_mutex_);
+          if (latest_ros_image_ != nullptr) {
+            ++ros_image_dropped_;
+          }
+          latest_ros_image_ = std::move(message);
+          ++ros_image_received_;
+        });
+    RCLCPP_INFO(get_logger(), "camera input mode=ros_image topic=%s qos=sensor_data",
+                topic.c_str());
+  }
+
+  bool TakeRosImageFrame(
+      dog_patrol_perception_tracking::CameraIngest::AcquiredFrame *frame,
+      std::string *error) {
+    if (frame == nullptr) {
+      if (error != nullptr) {
+        *error = "ROS image output frame pointer is null";
+      }
+      return false;
+    }
+    sensor_msgs::msg::Image::ConstSharedPtr message;
+    {
+      std::lock_guard<std::mutex> lock(ros_image_mutex_);
+      message = std::move(latest_ros_image_);
+    }
+    if (message == nullptr) {
+      return false;
     }
 
-    LogEffectiveConfig(camera_cfg, acquired_frame, infer_cfg, filter_cfg,
-                       tracker_.EffectiveConfig(), target_cfg, sid_cfg, effective_viz_cfg);
+    try {
+      const auto converted = cv_bridge::toCvCopy(message, "bgr8");
+      if (converted == nullptr || converted->image.empty()) {
+        if (error != nullptr) {
+          *error = "ROS image conversion returned an empty BGR8 frame";
+        }
+        return false;
+      }
+      frame->bgr8 = converted->image;
+    } catch (const cv_bridge::Exception &exception) {
+      if (error != nullptr) {
+        *error = "ROS image conversion to bgr8 failed: " + std::string(exception.what());
+      }
+      return false;
+    }
+
+    const auto &stamp = message->header.stamp;
+    const std::int64_t stamp_ns = static_cast<std::int64_t>(stamp.sec) * 1000000000LL +
+                                  static_cast<std::int64_t>(stamp.nanosec);
+    frame->source_timestamp_ns = stamp_ns > 0
+                                     ? static_cast<std::uint64_t>(stamp_ns)
+                                     : static_cast<std::uint64_t>(this->now().nanoseconds());
+    frame->width = frame->bgr8.cols;
+    frame->height = frame->bgr8.rows;
+   frame->source_payload_bytes = message->data.size();
+   frame->source_pixel_type_name = message->encoding;
+    frame->source_frame_id = message->header.frame_id;
+   frame->camera_frame_number_available = false;
+    frame->camera_frame_number = 0;
+    frame->sdk_host_timestamp = 0;
+    frame->device_timestamp_ticks = 0;
+    return true;
+  }
+
+  bool EnsureVisualizer(const cv::Size &frame_size, std::string *error) {
+    if (visualizer_ != nullptr) {
+      return true;
+    }
+    if (!visualizer_config_.has_value()) {
+      if (error != nullptr) {
+        *error = "visualizer configuration is unavailable";
+      }
+      return false;
+    }
+    visualizer_ = std::make_unique<dog_patrol_perception_tracking::VisualizerRecorder>(
+        visualizer_config_.value());
+    if (!visualizer_->Initialize(frame_size, error)) {
+      visualizer_.reset();
+      return false;
+    }
+    return true;
   }
 
   void LogEffectiveConfig(const dog_patrol_perception_tracking::CameraIngest::Config &camera_cfg,
@@ -778,8 +906,10 @@ class PerceptionTrackingNode : public rclcpp::Node {
     metadata.camera_frame_number_available = frame.camera_frame_number_available;
     metadata.image_width = frame.width;
     metadata.image_height = frame.height;
-    metadata.optical_frame_id = camera_optical_frame_id_;
-    return metadata;
+    metadata.optical_frame_id = frame.source_frame_id.empty()
+                                      ? camera_optical_frame_id_
+                                      : frame.source_frame_id;
+   return metadata;
   }
 
   void Tick() {
@@ -798,15 +928,37 @@ class PerceptionTrackingNode : public rclcpp::Node {
 
     std::string error;
     dog_patrol_perception_tracking::CameraIngest::AcquiredFrame acquired_frame;
-    if (!camera_.Read(&acquired_frame, &error)) {
-      ReportDetectionTrackingRuntimeStatus(
-          {true, true, "detection/tracking source frame failed: " + error});
-      PublishCapabilityStatus();
-      RCLCPP_WARN_THROTTLE(get_logger(), *this->get_clock(), 2000, "camera_ingest read failed: %s",
-                           error.c_str());
+    bool got_frame = false;
+    if (camera_input_mode_ == CameraInputMode::kMvs) {
+      got_frame = camera_.Read(&acquired_frame, &error);
+    } else {
+      got_frame = TakeRosImageFrame(&acquired_frame, &error);
+      if (!got_frame && !error.empty()) {
+        RCLCPP_WARN_THROTTLE(get_logger(), *this->get_clock(), 2000,
+                             "ROS image input failed: %s", error.c_str());
+      }
+    }
+    if (!got_frame) {
+      if (camera_input_mode_ == CameraInputMode::kMvs) {
+        ReportDetectionTrackingRuntimeStatus(
+            {true, true, "detection/tracking source frame failed: " + error});
+        PublishCapabilityStatus();
+        RCLCPP_WARN_THROTTLE(get_logger(), *this->get_clock(), 2000,
+                             "camera_ingest read failed: %s", error.c_str());
+      }
       return;
     }
     cv::Mat &frame = acquired_frame.bgr8;
+    if (visualizer_ == nullptr) {
+      if (!EnsureVisualizer(frame.size(), &error)) {
+        ReportDetectionTrackingRuntimeStatus(
+            {true, true, "visualizer initialization failed: " + error});
+        PublishCapabilityStatus();
+        RCLCPP_ERROR_THROTTLE(get_logger(), *this->get_clock(), 2000,
+                              "visualizer initialization failed: %s", error.c_str());
+        return;
+      }
+    }
 
     std::vector<dog_patrol_perception_tracking::Detection> detections;
     std::vector<dog_patrol_perception_tracking::Detection> filtered;
@@ -890,6 +1042,7 @@ class PerceptionTrackingNode : public rclcpp::Node {
 
   rclcpp::TimerBase::SharedPtr timer_;
 
+  CameraInputMode camera_input_mode_{CameraInputMode::kMvs};
   dog_patrol_perception_tracking::CameraIngest camera_;
   dog_patrol_perception_tracking::PreprocessInfer infer_;
   dog_patrol_perception_tracking::DetFilter det_filter_;
@@ -900,8 +1053,14 @@ class PerceptionTrackingNode : public rclcpp::Node {
   rclcpp::CallbackGroup::SharedPtr mission_state_callback_group_;
   std::string camera_optical_frame_id_;
   std::mutex pipeline_mutex_;
+  std::mutex ros_image_mutex_;
+  sensor_msgs::msg::Image::ConstSharedPtr latest_ros_image_;
+  rclcpp::Subscription<sensor_msgs::msg::Image>::SharedPtr ros_image_subscription_;
+  std::uint64_t ros_image_received_{0};
+  std::uint64_t ros_image_dropped_{0};
   dog_patrol_perception_tracking::IdentityManager identity_manager_;
   std::unique_ptr<dog_patrol_perception_tracking::VisualizerRecorder> visualizer_;
+  std::optional<dog_patrol_perception_tracking::VisualizerRecorder::Config> visualizer_config_;
   rclcpp::Subscription<dog_patrol_perception_interfaces::msg::FaceOverlay>::SharedPtr
       face_evidence_sub_;
   dog_patrol_perception_tracking::RuntimeMonitor monitor_;

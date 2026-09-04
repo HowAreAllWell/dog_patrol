@@ -1,6 +1,8 @@
 dog_patrol_perception_tracking_node:
   ros__parameters:
     camera:
+      input_mode: "mvs"
+      image_topic: "/left_camera/image_raw"
       mvs_model: "MV-CU013-A0UC"
       mvs_serial: ""
       width: 1280
@@ -43,7 +45,7 @@ dog_patrol_perception_tracking_node:
       min_area_ratio: 0.25
       max_area_ratio: 4.0
       pending_recovery_frames: 3
-      lost_event_timeout_sec: 0.5
+      lost_event_timeout_sec: 1.0
       reacquire_retention_sec: 6.0
       handled_ignore_absence_sec: 30.0
 
@@ -53,7 +55,9 @@ dog_patrol_perception_tracking_node:
       selected_target_bbox_topic: "/perception/selected_target_bbox"
 
     perception:
-      camera_optical_frame_id: "hik_camera_optical_frame"
+      # fast_livo_dog 的 MVS 驱动给 /left_camera/image_raw 使用 camera_link。
+      # 该值是标定坐标系，也是检测框和目标裁剪消息的统一来源坐标系。
+      camera_optical_frame_id: "camera_link"
       capability_status_topic: "/perception/capability_status"
 
     target_image:

@@ -61,6 +61,26 @@ SID 生效配置的镜像；`MotTracker` 的 `config/bot_sort.yaml` 解析仍由
 
 ## Standalone Orin tracking
 
+### External ROS image input
+
+默认 `camera.input_mode` 为 `mvs`，tracking 节点直接打开 Hikrobot MVS。与外部相机驱动
+（例如 `fast_livo_dog` 的双分辨率 MVS 驱动）融合时，将其切换为 `ros_image`：
+
+```bash
+ros2 run dog_patrol_perception_tracking dog_patrol_perception_tracking_node \
+  --ros-args \
+  --params-file /absolute/path/to/orin_tracking.yaml \
+  -p runtime.mode:=mission \
+  -p camera.input_mode:=ros_image \
+  -p camera.image_topic:=/left_camera/image_raw
+```
+
+ROS 输入模式使用 bounded latest-only 队列：回调只保留最新图像，推理较慢时丢弃旧帧，不会积压
+延迟。`Header.stamp` 作为 source timestamp 传入目标框、目标 crop 和 mission frame transaction；
+ROS 图像没有相机帧号，因此 frame number 标记为 unavailable。图像统一通过 `cv_bridge` 转换
+为 BGR8，检测、跟踪、身份、预览和 mission 输出继续复用同一处理链。默认 `mvs` 模式和
+`capture_ffv1` 工具不受影响。
+
 Orin 上可不启动 mission supervisor、导航或激光雷达，直接运行正式 standalone 入口：
 
 ```bash
@@ -118,7 +138,7 @@ src/perception/dog_patrol_perception_tracking/scripts/check_orin_env.sh
 src/perception/dog_patrol_perception_tracking/scripts/bench_hik_mvs_camera.sh
 ```
 
-`MissionCoordinator::Config` 当前提供 `lost_event_timeout=0.5s` 和
+`MissionCoordinator::Config` 当前提供 `lost_event_timeout=1.0s` 和
 `reacquire_retention=6s`，两者必须为正且前者更短。它只使用注入的单调
 source-time，不按固定帧数计时；输出当前 target 的新鲜 bbox 只允许在
 `CONFIRM_TARGET`、`APPROACH_TARGET`、`VERIFY_IDENTITY`、`TRACK_INTRUDER`。

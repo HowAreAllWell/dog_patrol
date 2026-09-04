@@ -1,0 +1,21 @@
+<?xml version="1.0"?>
+<package format="3">
+  <name>dog_patrol_perception_bringup</name>
+  <version>0.1.0</version>
+  <description>Standalone launch composition for the dog patrol perception stack.</description>
+  <maintainer email="77225398+HowAreAllWell@users.noreply.github.com">HowAreAllWell</maintainer>
+  <license>BSD-3-Clause</license>
+
+  <buildtool_depend>ament_python</buildtool_depend>
+
+  <exec_depend>dog_patrol_perception_face</exec_depend>
+  <exec_depend>dog_patrol_perception_orchestrator</exec_depend>
+  <exec_depend>dog_patrol_perception_tracking</exec_depend>
+  <exec_depend>dog_patrol_perception_voice</exec_depend>
+  <exec_depend>launch</exec_depend>
+  <exec_depend>launch_ros</exec_depend>
+
+  <export>
+    <build_type>ament_python</build_type>
+  </export>
+</package>

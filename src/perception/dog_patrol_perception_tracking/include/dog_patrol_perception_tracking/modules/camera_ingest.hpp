@@ -42,8 +42,9 @@ class CameraIngest {
     bool camera_frame_number_available{false};
     std::uint64_t device_timestamp_ticks{0};
     std::uint32_t source_pixel_type{0};
-    std::string source_pixel_type_name;
-    int width{0};
+   std::string source_pixel_type_name;
+    std::string source_frame_id;
+   int width{0};
     int height{0};
     std::size_t source_payload_bytes{0};
     std::uint32_t camera_lost_packets{0};

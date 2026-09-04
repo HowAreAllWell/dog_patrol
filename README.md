@@ -7,7 +7,7 @@
 - `dog_patrol_interfaces`：已实现，保存主状态机、任务事件、目标框和导航状态消息。
 - `dog_patrol_perception_interfaces`：已实现，保存感知内部 capability、授权证据和主目标 crop 合同。
 - `dog_patrol_manager`：已实现，包含 ROS-independent 状态机和 `mission_supervisor` ROS 2 节点。
-- `navigation/`：只保留模块入口说明，导航实现尚未迁入。
+- `navigation/`：已迁入 fast_livo_dog 完整导航链，并提供 2D 导航协调器。
 - `dog_patrol_perception_tracking`：已从视觉准备仓保留必要历史导入；普通环境构建
   portable tracking 核心和 ROS adapter，Orin runtime 由部署端显式开启。
 - 本仓是 tracking 正式开发、构建、测试和部署的唯一权威入口；旧 `vision_demo_ws` 是非生产
@@ -44,10 +44,15 @@
 
 ## 目录
 
+导航已经迁入 src/navigation/fast_livo_dog，完整运行边界和 app.py 的三组生命周期见
+ src/navigation/README.md。感知组合启动入口位于
+ src/perception/dog_patrol_perception_bringup。
+
 ```text
 src/contracts/dog_patrol_interfaces/       # 两团队共同维护的 ROS 2 合同
 src/orchestration/dog_patrol_manager/      # 主状态机和 supervisor
-src/navigation/                            # 导航模块预留位置
+src/orchestration/robot_console/           # 系统级 Qt 总控入口
+src/navigation/                            # fast_livo_dog 导航模块
 src/perception/                            # 感知业务编排入口
 src/perception/dog_patrol_perception_interfaces/ # 感知内部 ROS 2 合同
 src/perception/dog_patrol_perception_face/  # face 算法、provider、readiness 与配置
@@ -62,6 +67,11 @@ docs/workflows/                             # 业务流程参考文档
 ROS 2 package 名称保持 `dog_patrol_` 前缀；上层目录是所有权和代码组织目录，不是额外的 ROS 2 package。
 
 ## 运行和验证
+
+完整系统由 fast_livo_dog 的 app.py 管理三类生命周期：manager 在 app 启动时常驻；
+2D 导航按钮管理 Nav2/move 和导航协调器；感知任务按钮独立管理 tracking、face、voice
+及感知编排。导航或感知关闭时通过 /mission/reset 清除旧任务会话，manager 只在 app
+退出时关闭。
 
 ```bash
 source /opt/ros/humble/setup.bash

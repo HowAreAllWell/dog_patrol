@@ -1,5 +1,313 @@
 # worklog
 
+## 2026-09-03 - 将 MID360 点云发布频率恢复为 10 Hz
+
+- 确认相机由独立硬件同步器通过 `Line0` 以约 10 Hz 触发；Livox 驱动的
+  `publish_freq` 只控制 ROS 点云分包频率，不会改变相机硬件触发频率。
+- 将 APP 使用的 `msg_MID360_launch.py` 从 `20.0 Hz` 恢复为 `10.0 Hz`，使单帧点云
+  密度和相机输入周期回到迁移前配置，也避免 20 Hz 分包导致目标 bbox 内点数减少。
+- 相机触发配置、其他 Livox 示例 launch、导航协调器和目标停车逻辑均未修改；传感器驱动
+  需要重启后生效；未提交、未 push。
+
+## 2026-09-03 - 修复进入 3 米范围后仍沿旧路径继续前进
+
+- 现场日志确认测距和判定本身已经生效：`sensor_distance=3.21 m` 时尚未停车，降到
+  `2.51 m` 时已经是 `stop=True`，但机器人随后仍前进到约 `1.1 m`。因此本次问题不是
+  `approach_distance=3.0 m` 没有生效，而是停止命令在导航链路中的传播延迟。
+- 原链路只由协调器发布空 `/global_path`，再等待 RL 节点清空 `/local_path`、adapter 取消
+  FollowPath。已有的局部路径和异步 action 在这段时间仍可继续产生非零 `/NAV_CMD`。
+- 修复后，协调器发布空 `/global_path` 的同时，通过 ROS 2 action 标准服务
+  `/follow_path/_action/cancel_goal` 直接取消所有当前 FollowPath 目标。真正的零速度仍由
+  `controller_server -> /cmd_vel -> adapter -> /NAV_CMD` 原链路产生，协调器不会成为第二个
+  `/NAV_CMD` 发布者。
+- 停车保持阶段按现有 `stop_republish_period=0.20 s` 重发空路径和取消请求，可处理某个异步
+  FollowPath 目标恰好在第一次取消之后才被接受的竞争情况。正常巡逻、目标移动时的 0.5 s
+  重规划、DWB 参数、RL 和 adapter 代码均未修改。
+- 新增 `controller.action_name=/follow_path` 参数和 `action_msgs` 运行依赖；未提交、未 push。
+
+## 2026-09-03 - 将 APP 使用的 MID360 点云发布频率调整为 20 Hz
+
+- APP 的传感器按钮实际调用 `livox_ros_driver2 msg_MID360_launch.py`，该入口原
+  `publish_freq=10.0`，现调整为 `20.0`，使 `/livox/lidar` 以约 20 Hz 聚合发布点云。
+- 没有修改其他 HAP、mixed 或 RViz 示例 launch，避免影响 APP 不使用的驱动入口。
+- 没有修改 `TopicHzWorker` 的 `window=10`；该数值是 `ros2 topic hz --window` 的统计
+  样本窗口，不是雷达目标频率。
+- `/scan` 的 `scan_time=0.1` 和 pointcloud_to_laserscan 参数本批不改；目标 bbox 融合直接
+  消费 `/livox/lidar`，因此可直接获得 20 Hz 输入。
+- 驱动需停止并重新启动后新频率才会生效；未提交、未 push。
+
+## 2026-09-03 - 修复目标距离缩短与融合缓存崩溃
+
+- 现场日志：同一目标雷达估计距离约 `7.44 m`，转换到地图后机器人到目标的平面距离却只有
+  `3.92 m`；随后协调器因 `UnboundLocalError: estimate referenced before assignment`
+  崩溃。
+- 崩溃根因：同一个 bbox/点云 pair 已经完成估计后，协调器会复用缓存点继续做 TF 转换，
+  但诊断日志仍读取只在首次估计分支内定义的局部变量 `estimate`。现在将 range、ROI 点数和
+  cluster 点数一并缓存，复用路径不再访问未绑定变量。
+- 距离根因：设备参数名 `T_lidar_base` 与实际组合方向不一致。原 `odom_bridge` 将其作为
+  `T_body_base` 右乘到 body 位姿，矩阵的逆也与系统 `base_link -> livox_frame` 的 TF 数值
+  对应；协调器此前直接乘 `livox_frame` 点，导致约 7 m 的目标被错误转换成约 3.7 m 水平
+  距离和约 5.4 m 高度。
+- 修复：不修改 FAST-LIVO 或设备 YAML；协调器读取设备矩阵后取逆，得到真正用于目标点的
+  `livox_frame -> base_link`。代码内备用矩阵同步改为该逆矩阵。
+- 目标行为：新增 `planning_goal_distance=1.0 m`，Nav2 规划终点放到人前约 1 m，避免终点
+  正好落在人占据的 costmap 单元；停车仍由实时雷达目标在 `base_link` 下的水平距离控制，
+  到 `3.0 + 0.1 m` 内立即清空路径。目标移动后仍按 0.5 s 周期或 0.25 m 位移更新方向。
+- 诊断：`target measurement` 增加 `base_planar` 和 `base_z`；`target standoff` 同时打印
+  `sensor_distance` 与 `map_distance`，可直接发现传感器外参或 TF 不一致。
+- 边界：没有修改相机内参、雷达-相机外参、FAST-LIVO、Nav2/DWB 参数或总状态机；未提交、
+  未 push。
+
+## 2026-09-03 - 收紧目标 3 米停车并保持移动目标跟踪
+
+- 现象：目标导航有时在超过 3 m 时就停止，且需要确认总状态切换到跟踪状态后，移动目标
+  才会继续产生新的跟踪方向。
+- 原因：原 `arrival_distance_tolerance=0.25 m` 的停止判据是
+  `planar_distance <= 3.0 + 0.25 m`，因此允许机器人在 3.25 m 处停止；接近状态完成后，
+  `APPROACH_TARGET` 会按流程停车等待认证，持续跟踪由总状态 `TRACK_INTRUDER` 负责。
+- 参数：将 `arrival_distance_tolerance` 调为 `0.10 m`，目标期望距离和跟踪距离仍都是
+  `3.0 m`，到达后仍需保持低速 `0.50 s` 才发布到达事件。
+- 行为：协调器继续使用最新 bbox 融合出的地图目标位置计算 standoff goal。目标距离大于
+  3.10 m 时，目标点移动或达到重规划周期就重新生成“目标前方 3 m”路径；进入
+  `TRACK_INTRUDER` 后，机器人在 3 m 附近停止，目标移动超过更新阈值后会跟随目标方向。
+- 坐标与内参：本批没有修改相机内参、雷达-相机外参、雷达-机体外参或坐标系；停止距离
+  使用地图坐标下机器人与融合目标的水平距离，雷达相机欧氏距离仅用于观测诊断。
+- 验证：同步更新导航协调器默认值和 YAML；更新 standoff 单测；未提交、未 push。
+
+## 2026-09-03 - 修复目标融合稀疏点误报技术故障并增加距离诊断
+
+- 现象：已经收到目标 bbox，但状态显示
+  `NAVIGATION/EXECUTION_ERROR: not enough projected lidar points inside bbox ROI`；另有
+  目标距离看起来超过 3 m 却提前停止的疑问。
+- 距离边界：目标框融合使用 `fusion.min_range=0.40 m`、`fusion.max_range=15.0 m`，距离是
+  Livox 点变换到相机坐标后的欧氏距离，并且点还必须在相机前方、投影到 bbox 内。独立的
+  `pointcloud_to_laserscan` 使用 `range_max=10.0 m`，只影响 `/scan`、local/global costmap
+  和 DWB，不限制 `/livox/lidar` 到目标框的融合。
+- 融合鲁棒性：主 ROI 点数不足时自动使用较宽的 fallback ROI（水平 0.05、顶部 0.05、底部
+  仍裁掉 0.20），保留对地面回波的抑制；多个深度簇同时存在时，要求候选簇至少达到最大
+  有效簇的 50% 支持度，避免少量近处墙面/噪声点抢走人的距离。
+- 状态机行为：`TargetObservationUnavailable` 被视为当前 bbox 的可恢复观测缺口，不再在
+  连续 3 秒内直接升级为 `EXECUTION_ERROR`；仍会发布空路径等待下一帧 bbox/点云。TF、时间
+  同步、无效 bbox 和 planner 故障仍按原技术故障路径处理。
+- 参数一致性：协调器代码默认 `fusion.max_bbox_age` 与 YAML 统一为 `0.50 s`，避免单独
+  启动节点时回退到 0.30 s 导致约 0.31 s 的感知处理延迟被误判为过期。
+- 诊断日志：新增 `target measurement`，打印雷达估计距离、ROI 点数和深度簇点数；新增
+  `target standoff`，打印机器人到目标的实际地图平面距离、目标期望距离和停车判据。前者
+  是测距值，后者才是 3 m 接近/停止逻辑使用的距离，并且当前停车容差仍为 0.25 m。
+- 验证：目标估计器和点云融合 mock 测试共 11 项通过；Python 语法检查通过；
+  `dog_patrol_navigation` 已完成 symlink 编译；未提交、未 push。
+
+## 2026-09-03 - 修复目标路径不发布并补充 RViz 目标显示
+
+- 现象：目标流程已经进入 `APPROACH_TARGET`，但 RViz 没有 `/global_path`，也看不到
+  目标人物位置和 3 m 临时导航目标。
+- 日志结论：感知 bbox 到达协调器时的实际年龄稳定在 `0.309~0.315 s`，超过原来的
+  `fusion.max_bbox_age=0.30 s`，导致后续框全部被拒绝；融合目标在 `0.60 s` 后失效，
+  协调器按安全策略持续发布空路径。
+- 参数：将 `max_bbox_age` 调为 `0.50 s`，只放宽图像采集到 bbox 发布的端到端年龄；
+  相机 bbox 与 Livox 点云的配对误差仍严格使用 `sync_tolerance=0.12 s`，没有放宽
+  传感器同步要求。
+- 可视化：在实际 2D 定位导航使用的 `localization_2d.rviz` 中增加
+  `/navigation/target_point`（目标人物地图位置）和 `/navigation/target_goal`（目标前
+  3 m 的 planner goal）显示；原 `/global_path` 显示保持不变。
+- 边界：没有修改 3 m 停止距离、到达判断、目标重规划周期、Nav2 planner 或状态机。
+
+## 2026-09-03 - 修复 Livox 混合字段点云导致的目标融合故障
+
+- 现象：检测到目标后任务进入 `CONFIRM_TARGET`，导航协调器上报
+  `All fields need to have the same datatype`，总状态显示
+  `NAVIGATION/EXECUTION_ERROR`，因此不会产生目标地图位置或目标路径。
+- 根因：Humble 的 `sensor_msgs_py.read_points_numpy()` 会先检查整条
+  `PointCloud2` 的全部字段，而 `/livox/lidar` 同时包含 `float32` 的 XYZ、`uint8` 的
+  `tag/line` 和 `float64` 的 `timestamp`。即使调用时只指定 XYZ，仍会因其他字段类型
+  不同而触发断言。
+- 修复：改用 `read_points()` 只读取结构化 XYZ 字段，再以 NumPy 向量化方式组合成
+  `N x 3 float32` 数组并显式过滤 NaN/Inf；不再使用不兼容的
+  `read_points_numpy()`，也不引入逐点 Python 循环。
+- 边界：没有修改 bbox、相机内外参、前景深度聚类、地图坐标变换、3 m 停止逻辑、
+  planner 或任务状态机。
+- 验证：使用与实时 Livox 相同的混合字段布局构造 PointCloud2，确认能够提取 XYZ 并
+  删除非有限点；Python 语法检查通过，`dog_patrol_navigation` 已完成 symlink 编译。
+
+## 2026-09-03 - 修正 ROS 图像输入的相机坐标系语义
+
+- 目标：让 tracking 消费 fast_livo_dog 的 `/left_camera/image_raw` 时，检测框携带的来源
+  坐标系与导航侧雷达投影标定严格一致，避免仍使用旧的 `hik_camera_optical_frame`。
+- 完成：ROS Image 输入帧保存 `sensor_msgs/Image.header.frame_id`，生成目标 observation、
+  `/perception/selected_target_bbox` 和目标 crop 时优先沿用该 frame；只有图像 header 为空时
+  才回退到 `perception.camera_optical_frame_id`。
+- 配置：tracking 默认回退 frame、仓库运行资产中的 tracking 配置均统一为
+  `camera_link`；输入图像继续保持 `1280x1024`，检测网络内部 `640x640` 推理不改变 bbox
+  的原图像素坐标语义。
+- 边界：没有修改 fast_livo_dog 相机驱动或感知算法；相机驱动仍负责发布带正确 header 的
+  `/left_camera/image_raw`，tracking 只消费该 topic 并传递来源元数据。
+
+## 2026-09-03 - 增加完整感知任务统一 bringup
+
+- 目标：按照 `startup_commands.md` 中已经验证过的启动参数，将原来需要多个终端分别运行的
+  tracking、人脸、语音、readiness 和 authorization 收口为一个感知启动入口，同时不修改
+  各感知包原有 launch。
+- 新增：独立 `dog_patrol_perception_bringup` 包及 `perception_stack.launch.py`。该 launch
+  启动 mission 模式 tracking、face launch、voice launch、`perception_readiness` 和
+  `perception_authorization`，并统一连接 `/mission/state`、`/mission/event`、能力状态、
+  目标 bbox、目标 crop 和授权 evidence/command topic。
+- Tracking：组合启动固定使用 `camera.input_mode:=ros_image`，默认订阅
+  `/left_camera/image_raw`，默认 frame 为 `camera_link`；支持 `preview` 和 `record` 开关，
+  默认打开监视窗口、关闭录制。
+- 资产：模型、白名单及运行 YAML 默认从仓库内
+  `src/perception/dog_patrol_perception_assets_20260813` 解析；可通过
+  `DOG_PATROL_ASSETS_ROOT` 或 launch 的 `assets_root` 覆盖，不再要求外部资产目录。
+- UI：总控的“启动感知任务”按钮调用该统一 launch，并传入当前仓库资产目录和导航相机
+  原图 topic；“停止感知任务”统一关闭 tracking、face、voice 和两个 orchestrator 节点。
+- 边界：该 bringup 只编排已有感知节点，不启动相机/雷达驱动、导航栈或全局 mission
+  supervisor；这些进程仍由 APP 对应按钮和常驻总控分别管理。
+
+## 2026-09-03 - 明确 APP 的 ROS Domain 与 Fast DDS 生效范围
+
+- 当前行为：`robot_console/app.py` 在创建 ROS 后台和所有 UI 子进程前设置
+  `RMW_IMPLEMENTATION=rmw_fastrtps_cpp`；从当前导航设备配置
+  `config/device_parameters.yaml` 读取 `ros_domain_id`，读取失败时使用 `42`，当前设备配置
+  也是 `42`。
+- Fast DDS：APP 在配置文件存在时使用导航目录下的 `config/fastdds_udp_only.xml`，由 APP
+  拉起的传感器、定位、导航、任务管理和感知进程继承同一通信环境。该 XML 是当前 Orin
+  部署规避 Fast DDS SHM 锁和 Python/C++ 互操作问题的运行配置，不属于任务状态机协议。
+- 使用边界：只保证从 APP 启动的整套进程自动处于正确 Domain；手动执行 `ros2 run`、
+  `ros2 launch` 或调试命令时不在 launch 内强制 Domain/Fast DDS，是否设置相关环境变量由
+  启动该命令的终端负责。
+- 本批决定：不再向各感知 launch 重复注入或强制修改 Domain/Fast DDS，也没有保留额外的
+  reset 子进程环境扩展，避免把部署环境策略散落到业务模块。
+
+## 2026-09-02 - 精简导航模块总览文档
+
+- 更新 `src/navigation/README.md`，改为简洁的导航入口说明，保留当前 fast_livo_dog
+  目录结构、app.py 总入口、导航数据链、关键坐标系和配置文件位置。
+- 删除总览中容易与当前 app 管理方式混淆的冗长手动启动说明，明确
+  `navigation.launch.py` 已包含 Nav2、move 外部控制链和导航任务协调器，不应重复启动
+  `navigation_mission_coordinator`。
+- 增加当前导航集成文档和原 FAST-LIVO-DOG README 的链接；本批只修改文档，没有改动
+  导航、感知或控制代码，也没有提交或 push。
+
+## 2026-09-02 - 增加导航协调器 mock 感知目标测试入口
+
+- 目标：解决单独启动 tracking 时没有 `/perception/selected_target_bbox`，以及无法区分
+  感知门禁、bbox-雷达融合、TF、planner 和总控状态机问题的测试困难。
+- 新增：`tools/navigation_coordinator/mock_target_publisher.py`。该脚本只模拟感知端，
+  按真实 `/mission/state` 的 `state_seq` 发布 `SOURCE_PERCEPTION/TARGET_CONFIRMED`，
+  并在目标相关状态下以当前 ROS 时间持续发布 `TargetBoundingBox`；不伪造雷达、TF、
+  Nav2 action、目标位置、路径或速度。
+- 文档：在 `tools/fake_integration/README.md` 增加四级测试方法：真实协调器的 bbox/目标
+  地图位置测试、真实目标路径和到达停止测试、已有 fake integration 的总控/感知状态交互
+  测试，以及真实 tracking 的 mission 模式测试；同时说明 `run_fake_integration.py` 的
+  fake navigation 不覆盖真实协调器。
+- 运行约束：mock bbox 默认使用 `1280x1024`、`camera_link` 和实时戳；实际测试时 bbox
+  像素区域必须覆盖相机中目标对应的雷达投影。真实 tracking 和 mock bbox 不能同时发布
+  同一个 topic。
+- 边界：本批没有修改导航协调器、感知算法或状态机逻辑，没有提交和 push。
+- 验证：mock 脚本 Python 语法、相关文档尾随空白和 `git diff --check` 检查通过。
+
+## 2026-09-02 - 增加无身份识别的导航跟踪闭环测试说明
+
+- 目标：支持只运行真实人像检测/跟踪，不启动人脸和语音模型，验证目标确认、雷达测距、
+  3 m 接近、持续跟踪以及处置结束后回到巡检状态。
+- 新增：`tools/navigation_coordinator/mock_mission_events.py` 只模拟最终业务事件：在真实
+  导航到达并进入 `VERIFY_IDENTITY` 后发布 `UNAUTHORIZED`，可在真实
+  `TRACK_INTRUDER` 持续指定时间后发布操作员来源的 `HANDLING_COMPLETE`；不发布 bbox，
+  不和真实 tracking 抢占 `/perception/selected_target_bbox`。
+- 测试说明：补充只启用人像检测的完整命令链；通过 `fake_nodes.py --role capabilities` 只
+  补齐 face/voice READY，不运行任何 face/voice 算法；明确 `run_fake_integration.py` 的
+  fake navigation 不验证真实协调器距离和路径。
+- 边界：本批没有修改生产状态机、tracking 或导航协调器逻辑，没有提交和 push。
+- 验证：两个 mock 脚本 Python 语法、文档尾随空白和 `git diff --check` 检查通过。
+
+## 2026-09-02 - 完善导航协调器集成文档并迁入 FAST-LIVO-DOG 原始说明
+
+- 目标：把当前 `dog_patrol` 导航协调器的真实运行逻辑、状态行为、接口契约、坐标系、
+  标定方向、目标融合、standoff 路径、停止条件、参数和故障排查完整记录，避免后续
+  只看零散代码或旧仓 README 造成误启动、重复启动和坐标系误用。
+- 文档：重写 `src/navigation/fast_livo_dog/navigation/dog_patrol_navigation/docs/current_workspace_integration.md`，
+  增加系统边界、四层数据流、节点启动所有权、全局状态到导航内部模式的逐状态说明、
+  READY/阻塞/reset 行为、bbox 与点云融合步骤、`T_camera_lidar`/`T_lidar_base` 方向、
+  3 m 目标计算、planner action 语义、到达判定和所有当前 YAML 参数表。
+- 启动说明：明确当前总入口为 `src/orchestration/robot_console/robot_console/app.py`，
+  导航主入口为 `move/launch/navigation.launch.py`，并记录 Nav2、外部控制链和任务
+  协调器的 8/11/12 秒启动时序及 `strict_ready_checks` 的实际影响。
+- 原始文档迁移：将原 `/home/orin/workspace/fast_livo_dog/src/DeepRobotics_ws/README.md`
+  复制到 `src/navigation/fast_livo_dog/README.md`，保留原 FAST-LIVO-DOG 依赖、建图、
+  定位、导航和第三方库说明；在顶部增加当前 dog_patrol 路径提示。dbow3、livox_ros_driver2
+  和 rpg_vikit 的原 README 已存在于迁入目录，并逐项校验哈希与原文一致。
+- 边界：本批只增加和完善文档，没有修改导航协调器、Nav2、move、感知或控制代码，未提交、
+  未 push，也没有删除原 fast_livo_dog 工作区文件。
+- 验证：确认当前集成文档 576 行、迁入的根 README 878 行；三个子包 README 与原文件
+  SHA-256 完全一致；当前新增文件状态和路径符合预期。
+
+## 2026-09-02 - 对齐 fast_livo_dog 导航接口并修正目标外参方向
+
+- 目标：确认 `dog_patrol_navigation` 使用的建图、定位和导航接口严格匹配 fast_livo_dog 的实际运行链，而不是只匹配配置文件中的名称。
+- 接口核对：确认协调器使用 `/livox/lidar`、`/odom`、`/global_path`、`/compute_path_to_pose` 和 `/NAV_CMD`；对应 frame 为 `map`、`camera_init_footprint`、`base_footprint`、`base_link`、`livox_frame` 和相机原图 `camera_link`。这些与 fast_livo_dog 的 Livox、MVS、odom_bridge、Nav2 planner 和 move/DWB 链一致。
+- 当时的外参判断：该批曾按参数命名将 `T_lidar_base` 视为
+  `livox_frame -> base_link` 并直接使用。2026-09-03 的现场距离日志和原 `odom_bridge`
+  矩阵组合证明这个判断不成立，后续“修复目标距离缩短与融合缓存崩溃”已改为取逆；以
+  后续记录和当前代码为准。
+- 路径职责：协调器只负责目标框与雷达点云融合、目标地图位置、目标 standoff 路径和目标导航事件；`global_path` 的跟踪仍由原 move/pure pursuit/RL/DWB/NAV_CMD 链负责，协调器不接管速度控制。
+- 接口边界：`/perception/selected_target_bbox`、`/navigation/target_status`、`/navigation/target_point`、`/navigation/target_goal` 和 `/mission/*` 是 dog_patrol 任务集成层接口；它们不替换 fast_livo_dog 原有的传感器、定位或控制 topic。
+- 文档：当时记录的 `T_lidar_base` 方向已由后续现场验证纠正，保留此项仅作为变更历史。
+- 验证：确认原 fast_livo_dog 与迁入版本的设备参数一致；协调器源码无不存在的定位置信度接口；Python 语法和 `git diff --check` 通过；`dog_patrol_navigation` 重新编译成功。当前 Python 环境的 pytest 入口被系统 `anyio` 插件版本冲突阻断，未能运行 pytest 单测。
+
+## 2026-09-02 - 移除导航协调器中不存在的定位置信度门禁
+
+- 目标：`open3d_loc` 当前没有稳定发布 `/localization_3d_confidence`，导航协调器不应保留一个默认关闭且实际无效的定位置信度配置。
+- 完成：从 `navigation_mission_coordinator` 删除 `Float32` 置信度订阅、缓存、参数声明、读取逻辑和 readiness 门禁；从 `m20_patrol_navigation.yaml` 删除 `require_localization_confidence`、`localization_confidence_topic` 和 `localization_min_confidence`。
+- 当前行为：导航协调器只使用 `map -> base_footprint` TF、激光点云新鲜度、`ComputePathToPose` 服务和 `/global_path` 消费者检查导航 ready，不再等待不存在的定位置信度话题。
+- 边界：DWB adapter 中同名的兼容参数仍保留，属于控制器自身的另一条配置链，本次没有误删。
+- 验证：导航协调器源码和 YAML 中无定位置信度相关引用；Python 语法、`git diff --check` 和 `dog_patrol_navigation` 编译均通过。
+
+## 2026-09-02 - 将感知运行资源迁入主仓感知模块
+
+- 目标：不再依赖工作空间外的 `/home/orin/dog_patrol_perception_assets_20260813`，让感知模型和运行配置随 `dog_patrol` 的感知模块管理。
+- 完成：将完整资源包迁移到 `src/perception/dog_patrol_perception_assets_20260813/`，保留 `face/`、`tracking/`、`voice/`、`runtime/`、白名单、TensorRT engine 和 Vosk 模型目录；删除外部旧资源目录。
+- 配置：统一更新人脸 detector/recognition/whitelist、YOLO TensorRT engine 和 BotSort 配置路径；同步更新 `SHA256SUMS`，避免资源校验清单与配置内容不一致。
+- 入口：`robot_console/app.py` 和 `main_window.py` 默认从仓库内 `src/perception` 计算资源路径；`dog_patrol_perception_bringup` 支持通过 `DOG_PATROL_ASSETS_ROOT` 或 `assets_root:=...` 覆盖默认位置；感知及导航文档同步更新。
+- 关键结论：资源目录约 114 MB，模型和白名单均已在新位置找到；engine 文件继续遵循仓库现有 `.gitignore` 规则，不会因本次迁移自动进入 Git 提交。
+- 验证：感知资源完整性检查通过；`SHA256SUMS` 校验通过；感知 launch `--show-args` 解析通过；`dog_patrol_perception_bringup` 和 `robot_console` 编译通过；源码中不再引用已删除的外部资源目录。
+- 启动：进入 `/home/orin/workspace/dog_patrol` 后，source ROS 和工作空间即可直接运行 `python3 src/orchestration/robot_console/robot_console/app.py`，无需手动创建外部资源目录。
+
+## 2026-09-02 - 迁入 fast_livo_dog 导航链和运行数据
+
+- 目标：让 `dog_patrol` 内的导航模块可以独立于原 `/home/orin/workspace/fast_livo_dog` 运行，并统一使用主仓的导航坐标系、配置和数据目录。
+- 完成：将 FAST-LIVO 前端、mapping、2D/3D localization、Livox/MVS 驱动、Nav2/move、DWB 控制和导航任务协调器迁入 `src/navigation/fast_livo_dog/`；同时迁入原导航 `data/` 目录，包括 2D/3D 地图、位姿、ScanContext/DBoW3/视觉定位数据及原始扫描图像。
+- 路径：将 frontend、mapping、2D/3D localization、导航 launch、`priest_rl_publisher_nav_cmd.py` 和相关 C++ 默认路径改为 `DOG_PATROL_NAV_ROOT` 或当前仓库的 `src/navigation/fast_livo_dog`；地图、ArUco、ScanContext、视觉词袋和回环保存路径统一指向该目录下的 `data/`。
+- 标定：导航协调器读取 `config/device_parameters.yaml` 中的相机内参、畸变、雷达到相机和雷达到 base 的标定；目标框投影和导航定位不再引用旧工作空间配置。
+- 生命周期：`move/navigation.launch.py` 负责启动导航侧控制链和 `navigation_mission_coordinator`；不再单独重复启动协调器，避免重复节点和重复发布者。
+- 保留项：Livox 回放工具的 `/home/livox/livox_test.lvx` 和仿真 checkpoint 的固定路径属于回放/仿真运行输入，没有误改成地图路径；旧导航工作空间路径在生产源码中已清理。
+- 验证：迁入后的 dbow3、fast_gicp、scancontext、vikit、livox、fast_livo、localization、mapping、dog_patrol_navigation 和 move 均完成编译；迁入的 `data/` 与原 fast_livo_dog 数据逐项一致。
+
+## 2026-09-02 - 接入系统总控 UI 和任务状态机复位
+
+- 目标：把原 fast_livo_dog 的 `robot_console/app.py` 作为 dog_patrol 的系统入口，同时让导航和感知可以分别启停，避免每次关闭模块后遗留旧目标或旧任务状态。
+- 完成：新增 `src/orchestration/robot_console/` 包，保留原 Qt 控制台的传感器、建图、定位、导航和感知按钮；UI 根据当前仓库计算 `DOG_PATROL_NAV_ROOT` 和 `DOG_PATROL_ASSETS_ROOT`，不再依赖原 fast_livo_dog 工作空间路径。
+- 生命周期：app 启动时只启动一个常驻 `mission_supervisor`；2D 导航按钮管理导航/控制链和导航协调器；感知任务按钮管理 tracking、face、voice 和感知编排。导航与感知可以独立开关，但两侧都 READY 后全局状态机才会从 STARTUP 进入 PATROL。
+- 状态复位：`MissionSupervisor` 新增 `/mission/reset`（`std_srvs/srv/Trigger`）；复位时清除当前目标、阻塞原因、感知/导航 ready 标志、已处理事件和任务会话序号，回到 STARTUP。UI 停止导航或感知时调用该服务，manager 进程本身只在 app 退出时关闭。
+- 测试：增加状态机 reset 回归测试，确认复位会清除 active target、blocked 和 readiness，并递增 `state_seq`，避免旧事件重新推动新会话。
+- 关键约束：不要同时手动启动两份 manager、导航 launch 或感知 launch；不要单独再启动 `navigation_mission_coordinator.launch.py`，否则会产生重复节点和重复发布。
+- 验证：`robot_console`、`dog_patrol_manager` 和感知启动包编译通过；Python 语法及 launch 参数解析通过；状态机复位测试已加入现有测试集。
+
+## 2026-09-02 - tracking 接入导航侧 ROS 图像输入
+
+- 目标：感知 tracking 不再强制独占 Hikrobot MVS 相机，而是能够直接消费 fast_livo_dog 发布的导航相机图像，与导航使用同一相机数据源。
+- 完成：tracking 节点新增 `camera.input_mode`（`mvs`/`ros_image`）和 `camera.image_topic` 参数；`ros_image` 模式订阅 `/left_camera/image_raw`，使用 `cv_bridge` 转换为 BGR8，后续检测、跟踪、目标 crop、预览和 mission 输出继续复用原处理链。
+- 实时性：ROS 图像输入采用有界 latest-only 队列，回调只保留最新帧，推理跟不上时丢弃旧帧，避免队列积压造成延迟；图像 `Header.stamp` 作为 source timestamp 传给目标框、crop 和 mission frame transaction。
+- 分辨率与坐标：tracking 输入默认保持 1280x1024；检测网络内部仍使用 640x640，不改变输入图像的 bbox 坐标语义。`/left_camera/image_raw` 的 frame 使用图像 header，默认配置统一为 `camera_link`；不要把 640x512 的内部图像 topic 当作目标框投影输入。
+- 兼容性：默认 `camera.input_mode:=mvs` 不变，原 standalone MVS 模式和 `capture_ffv1` 工具不受影响；集成启动时由 perception bringup 显式覆盖为 `ros_image`，并绑定导航相机 topic。
+- 依赖：tracking 的 CMake 和 package manifest 增加 `cv_bridge`、`sensor_msgs`；README 增加 ROS 图像模式启动示例和丢帧语义说明。
+- 验证：tracking Orin runtime 编译通过；感知组合 launch 可解析；输入模式、图像 topic 和相机 frame 参数均已纳入配置。
+
+## 2026-09-02 - 同步 fake integration 的外部图像联调入口
+
+- 目标：在真实导航相机尚未完全接入总流程时，仍能用 fake navigation 验证感知状态机和授权流程，同时测试 tracking 的 ROS 图像输入。
+- 完成：`tools/fake_integration/run_fake_integration.py` 新增 `--camera-input-mode` 和 `--image-topic`；选择 `ros_image` 时，将 `camera.input_mode` 与 `camera.image_topic` 传给真实 tracking 节点。默认仍为 `mvs`，不会改变原有联调行为。
+- 文档：补充外部相机驱动、`/left_camera/image_raw`、tracking 参数、BotSort、人脸、语音模型和预览开关的完整命令示例，并明确不能同时打开 tracking 内部 MVS 输入。
+- 验证：fake integration Python 入口和 tracking ROS image 配置的语法/参数检查通过；`git diff --check` 通过。本批只修改联调入口和文档，没有修改生产状态机逻辑。
+
 ## 2026-08-13 12:30 - 完成真实感知三流程现场验收
 
 - 目标：接手并推进 R818、显示器和 Hik 相机已接入后的真实感知整流程现场验收。
@@ -422,3 +730,17 @@
 - 涉及文件：`README.md`、`docs/issue4_tracking_baseline_audit.md`、`worklog.md`；源仓远端新增 `deploy/dog_patrol-integration` 分支。
 - 验证：source ROS 2 和 dog_patrol overlay 后，源基线 `colcon build --packages-select vision_demo_host` 通过；`colcon test --packages-select vision_demo_host --return-code-on-test-failure` 为 53/53 CTest 通过，汇总 392 tests、0 errors/failures/skipped。dog_patrol 三个现有 package 的独立 worktree 构建通过，测试汇总 29 tests、0 errors/failures/skipped；历史对象和规则敏感信息扫描结果见审计文档。
 - 后续：后续迁移票在临时 clone 中执行过滤历史导入，并对导入后的新 commit 图二次复扫；真实 TensorRT/Hik 现场验收不属于本票。
+## 2026-09-03 - 按现场日志放宽目标短时丢失与 bbox 新鲜度窗口
+
+- 现场依据：感知链稳定以 10 Hz 处理和预览，但总控日志中同一目标多次在
+  `TARGET_LOST` 后约 `0.095-0.20 s` 即 `TARGET_REACQUIRED`，说明 0.5 秒任务级丢失门限
+  会把短暂的可信框空洞升级成全局阻塞；导航日志同时多次出现 bbox age
+  `0.506-0.508 s`，仅略高于原 `max_bbox_age=0.50 s`。
+- 感知：将生产 YAML、资产运行 YAML 和无参数 C++ 默认值中的
+  `target.lost_event_timeout_sec` 从 `0.5 s` 调整为 `1.0 s`。目标需要连续 1 秒没有可信框
+  才发布 `TARGET_LOST`，减少快速 lost/reacquired 导致的路径取消和重新捕获。
+- 导航：将 `fusion.max_bbox_age` 从 `0.50 s` 调整为 `0.80 s`，将
+  `fusion.target_timeout` 从 `0.60 s` 调整为 `0.90 s`，覆盖当前约 0.31 秒推理发布延迟和
+  偶发调度抖动；超过目标保持时间后仍清空目标路径并停车。
+- 精度边界：`fusion.sync_tolerance` 保持 `0.12 s`，没有允许旧 bbox 与错误时刻的雷达
+  点云配对；`min_cluster_points=3`、ROI、聚类和 3 m 停止参数均未修改。

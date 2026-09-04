@@ -1,0 +1,137 @@
+# Device Profile: Mobile (手持设备/移动平台)
+# 说明: 默认使用 640x512 降采样图像分辨率参数。如需切换至 1280x1024 原图分辨率，请参考 camera 段落行尾注释修改内参。
+/**:
+  ros__parameters:
+    ros_domain_id: 42
+    # 传感器到车体中心的外参 (lidar -> base_link)
+    T_lidar_base: [
+             0.881054,   0.016898,  -0.472712,  -0.140800,
+            -0.020738,   0.999781,  -0.002914,  -0.006440,
+             0.472560,   0.012370,   0.881212,  -0.430040,
+             0.000000,   0.000000,   0.000000,   1.000000
+      ]
+
+    # ==========================================================
+    # 传感器间的 4x4 齐次外参矩阵 (Row-Major, 16 elements)
+    # ==========================================================
+    extrin_calib:
+      # IMU 到 激光雷达 (imu -> lidar)
+      T_imu_lidar: [
+             1.000000,   0.000000,   0.000000,  -0.011000,
+             0.000000,   1.000000,   0.000000,  -0.023290,
+             0.000000,   0.000000,   1.000000,   0.044120,
+             0.000000,   0.000000,   0.000000,   1.000000
+      ]
+
+      # 相机 到 激光雷达 (camera -> lidar)
+      T_camera_lidar: [
+            -0.007189,  -0.999974,   0.000193,   0.013604,
+             0.492765,  -0.003711,  -0.870155,  -0.163446,
+             0.870133,  -0.006161,   0.492779,   0.069782,
+             0.000000,   0.000000,   0.000000,   1.000000
+      ]
+
+    # ==========================================================
+    # 相机内参及畸变参数 (原 camera_mid360.yaml)
+    # ==========================================================
+    camera:
+      model: Pinhole
+      width: 640 # 1280x1024 原图版: 1280
+      height: 512 # 1280x1024 原图版: 1024
+      scale: 1.0 # 1280x1024 原图版: 0.5
+      fx: 657.2378 # 1280x1024 原图版: 1314.4756
+      fy: 657.6904 # 1280x1024 原图版: 1315.3808
+      cx: 318.20195 # 1280x1024 原图版: 636.4039
+      cy: 265.2123 # 1280x1024 原图版: 530.4246
+      d0: -0.0852763962888853
+      d1: 0.23351334427854223
+      d2: 0.0008014916227500371
+      d3: -0.0006572288287485975
+
+    # ==========================================================
+    # ArUco 码检测与闭环约束配置
+    # ==========================================================
+    aruco:
+      aruco_en: true # 开关：仅当 aruco_en: true 且 img_en: true 时开启检测
+      dictionary: "6X6_50" # ArUco 字典类型 (支持 "6X6_50", "4X4_50", "36h11" 等)
+      marker_size: 0.20 # ArUco 物理边长 (单位: 米)
+
+    # ==========================================================
+    # 雷达、IMU及算法核心配置 (原 mid360.yaml)
+    # ==========================================================
+    common:
+      img_topic: "/left_camera/image"
+      lid_topic: "/livox/lidar"
+      imu_topic: "/livox/imu"
+      img_en: 1
+      disable_vision_on_tracking: true
+      lidar_en: 1
+      ros_driver_bug_fix: false
+
+    time_offset:
+      imu_time_offset: 0.0
+      img_time_offset: 0.0
+      exposure_time_init: 0.0
+
+    preprocess:
+      point_filter_num: 1
+      filter_size_surf: 0.2
+      lidar_type: 3
+      scan_line: 6
+      blind: 0.15
+
+    vio:
+      max_iterations: 5
+      outlier_threshold: 1000
+      img_point_cov: 1000
+      patch_size: 8
+      patch_pyrimid_level: 4
+      normal_en: true
+      raycast_en: false
+      inverse_composition_en: false
+      exposure_estimate_en: true
+      inv_expo_cov: 0.1
+
+    imu:
+      imu_en: true
+      imu_int_frame: 30
+      acc_cov: 0.1 # 手持设备：小协方差(0.1)，提高 IMU 权重，极佳降低前端漂移与多楼层倾斜
+      gyr_cov: 0.1 # 手持设备：小协方差(0.1)，提高 IMU 权重
+      b_acc_cov: 0.0001
+      b_gyr_cov: 0.0001
+
+    lio:
+      max_iterations: 5
+      dept_err: 0.02
+      beam_err: 0.05
+      min_eigen_value: 0.005
+      voxel_size: 0.2
+      max_layer: 2
+      max_points_num: 50
+      layer_init_num: [5, 5, 5, 5, 5]
+
+    local_map:
+      map_sliding_en: false
+      half_map_size: 100
+      sliding_thresh: 8.0
+
+    uav:
+      imu_rate_odom: false
+      gravity_align_en: true
+
+    publish:
+      dense_map_en: true
+      pub_effect_point_en: false
+      pub_plane_en: false
+      pub_scan_num: 1
+      blind_rgb_points: 0.0
+
+    evo:
+      seq_name: "Mid360_Mapping"
+      pose_output_en: false
+
+    pcd_save:
+      pcd_save_en: false
+      colmap_output_en: false
+      filter_size_pcd: 0.1
+      interval: -1

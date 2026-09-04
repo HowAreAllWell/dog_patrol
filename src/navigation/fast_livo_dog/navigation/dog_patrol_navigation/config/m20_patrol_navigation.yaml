@@ -1,0 +1,104 @@
+navigation_mission_coordinator:
+  ros__parameters:
+    # Runtime topics from the migrated fast_livo_dog chain.
+    topics:
+      mission_state: /mission/state
+      mission_event: /mission/event
+      target_bbox: /perception/selected_target_bbox
+      target_status: /navigation/target_status
+      lidar: /livox/lidar
+      odom: /odom
+      global_path: /global_path
+      pause_patrol: /waypoint_sequence/pause
+      resume_patrol: /waypoint_sequence/resume
+      nav_cmd: /NAV_CMD
+      target_point: /navigation/target_point
+      target_goal: /navigation/target_goal
+
+    planner:
+      action_name: /compute_path_to_pose
+      id: GridBased
+
+    controller:
+      # Emptying /global_path clears the RL chain; canceling FollowPath in
+      # parallel makes the 3 m target stop reach DWB without pipeline delay.
+      action_name: /follow_path
+
+    frames:
+      global: map
+      base: base_link
+      robot: base_footprint
+      lidar: livox_frame
+      # fast_livo_dog 的 MVS 驱动给原图 bbox 使用 camera_link frame。
+      camera_optical: camera_link
+
+    # Hardware calibration has one source of truth:
+    # fast_livo_dog/config/device_parameters.yaml. The UI updates that file when
+    # stationary/mobile profiles are switched. Only the bbox output size remains
+    # here because perception consumes the 1280x1024 raw image topic.
+    calibration:
+      device_parameters_file: ""
+      image_width: 1280
+      image_height: 1024
+
+    fusion:
+      # The 10 Hz perception pipeline currently publishes a bbox about 0.31 s
+      # after image capture. Keep this separate from camera-lidar pair sync.
+      max_bbox_age: 0.80
+      sync_tolerance: 0.12
+      cloud_buffer_size: 20
+      min_range: 0.40
+      max_range: 15.0
+      roi_horizontal_inset: 0.15
+      roi_top_inset: 0.08
+      roi_bottom_inset: 0.15
+      # Used only when the primary center ROI contains fewer than 3 points.
+      # Keep the bottom cropped to reduce ground returns near a person's feet.
+      fallback_roi_horizontal_inset: 0.05
+      fallback_roi_top_inset: 0.05
+      fallback_roi_bottom_inset: 0.20
+      cluster_gap: 0.40
+      min_cluster_points: 3
+      # Reject a tiny near-depth cluster when a much better-supported cluster
+      # exists in the same person bbox.
+      min_cluster_support_ratio: 0.50
+      point_stride: 1
+      # Pinhole prefilter margin in pixels. Exact distorted projection still
+      # decides membership, so increasing this does not change valid results.
+      projection_margin_pixels: 32.0
+      aspect_ratio_tolerance: 0.02
+      stable_samples: 3
+      stability_window: 5
+      max_sample_jump: 0.60
+      max_stability_spread: 0.50
+      smoothing_alpha: 0.55
+      target_timeout: 0.90
+      failure_timeout: 3.0
+
+    motion:
+      approach_distance: 3.0
+      tracking_distance: 3.0
+      # Plan near the person, then cancel the path using the live lidar range
+      # at 3 m. Do not put the goal on the occupied person cell itself.
+      planning_goal_distance: 1.0
+      # Stop close to the requested 3 m standoff. A wider value makes the
+      # robot stop early and look farther than 3 m from the target.
+      arrival_distance_tolerance: 0.10
+      arrival_linear_speed: 0.05
+      arrival_angular_speed: 0.10
+      arrival_hold_time: 0.50
+      # APPROACH_TARGET also tracks a moving target. Replan periodically even
+      # when each individual bbox update is below target_replan_distance.
+      approach_replan_period: 0.50
+      tracking_replan_period: 0.50
+      target_replan_distance: 0.25
+      stop_republish_period: 0.20
+
+    runtime:
+      tick_rate: 10.0
+      status_rate: 5.0
+      strict_ready_checks: true
+      ready_lidar_timeout: 0.50
+      ready_event_period: 1.0
+      technical_error_timeout: 3.0
+      tf_timeout: 0.05

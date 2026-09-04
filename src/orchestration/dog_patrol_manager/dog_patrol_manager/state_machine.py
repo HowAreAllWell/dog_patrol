@@ -155,6 +155,20 @@ class MissionStateMachine:
     def navigation_ready(self) -> bool:
         return self._navigation_ready
 
+    def reset_session(self, detail: str = "mission session reset") -> MissionSnapshot:
+        """Return to STARTUP without restarting the ROS node."""
+        self._state = GlobalState.STARTUP
+        self._target_id = 0
+        self._blocked = False
+        self._block_cause = BlockCause.NONE
+        self._perception_ready = False
+        self._navigation_ready = False
+        self._detail = str(detail).strip() or "mission session reset"
+        self._processed_events.clear()
+        self._processed_order.clear()
+        self._advance_seq()
+        return self.snapshot
+
     def handle_event(self, raw_event: MissionEventData) -> EventResult:
         source = self._parse_source(raw_event.source)
         event = self._parse_event(raw_event.event)
