@@ -2,7 +2,7 @@
 
 The provider consumes ``TrackedTargetImage`` crops published by tracking and
 publishes ``AuthorizationEvidence``. It follows the same session/generation
-gating as the voice provider: only an unblocked ``VERIFY_IDENTITY`` mission
+gating as the voice provider: only an active ``VERIFY_IDENTITY`` mission
 whose ``target_id`` matches the crop is processed, and results are bound to
 ``state_seq + target_id``. Late or stale worker results are suppressed.
 """
@@ -813,7 +813,6 @@ class FaceEvidenceProviderNode(Node):
 def _session_from_mission(msg: MissionState) -> FaceVerificationSession | None:
     if (
         int(msg.state) != MissionState.VERIFY_IDENTITY
-        or bool(msg.blocked)
         or int(msg.target_id) <= 0
     ):
         return None

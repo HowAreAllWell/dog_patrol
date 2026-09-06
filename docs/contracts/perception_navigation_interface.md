@@ -7,7 +7,7 @@
 - 全局任务状态机；
 - 感知与身份识别模块；
 - 导航与运动控制模块；
-- 上位机或人工处置端。
+- 上位机或调试观察端（不发布当前任务协议事件）。
 
 系统通过一个独立节点管理全局任务状态：
 
@@ -31,8 +31,16 @@ mission_supervisor
 - 独立授权模块返回身份认证结论；
 - 认证成功后恢复巡逻；
 - 认证失败后持续跟踪目标。
+- 目标任务结束或发生可恢复异常后，先进入 `RECOVER_PATROL`，由导航恢复被打断的
+  waypoint 巡检，再回到 `PATROL`；恢复期间不接受新的目标确认。
 
 本文档不规定检测模型、人脸识别、雷达投影、路径规划和底盘控制算法的内部实现。
+
+> **当前实现基线（2026-09-05）**：本协议以当前消息定义和工作区代码为准。公共协议
+> 只包含 `STARTUP`、`PATROL`、`CONFIRM_TARGET`、`APPROACH_TARGET`、
+> `VERIFY_IDENTITY`、`TRACK_INTRUDER`、`RECOVER_PATROL` 以及现有事件枚举；
+> `blocked`、`block_cause`、`TARGET_REACQUIRED`、`HANDLING_COMPLETE` 和操作员完成
+> 事件均已不再使用。导航内部名称只表示执行策略，不是第二套业务状态机。
 
 ## 2. 设计原则
 
@@ -47,8 +55,6 @@ mission_supervisor
 - 检查事件是否合法；
 - 执行状态转换；
 - 保存当前目标 ID；
-- 保存阻塞原因；
-- 标记任务是否因故障阻塞。
 
 ### 2.2 只有状态机可以修改全局状态
 
@@ -56,7 +62,6 @@ mission_supervisor
 
 ```text
 TARGET_CONFIRMED
-TARGET_REACQUIRED
 AUTHORIZED
 UNAUTHORIZED
 ```
@@ -97,23 +102,32 @@ ARRIVED_AND_STOPPED
 - `target_id`：区分不同目标；
 - `header.stamp`：判断连续数据是否过期。
 
-### 2.5 不设置自动 fallback 业务状态
+### 2.5 统一异常恢复策略
 
 目标丢失或模块技术故障时：
 
-- 导航发现 bbox 过期或目标数据不可用时，立即停止继续使用旧目标运动，并发布
-  `TargetNavigationStatus.BLOCKED`；
+- 导航发现 bbox 过期或目标数据不可用时，立即停止继续使用旧目标运动；持续技术故障再发布
+  `EXECUTION_ERROR`；
 - 感知确认当前语义目标跟踪丢失时发布 `TARGET_LOST`；
 - 感知或导航遇到自身技术故障时发布 `EXECUTION_ERROR`；
-- 状态机收到 `TARGET_LOST` 或 `EXECUTION_ERROR` 后保持当前业务状态，设置
-  `blocked=true` 并发布可区分的 `block_cause`；
-- 全局阻塞等待人工处理，或由后续版本增加复位策略。
+- 状态机收到目标任务期间的 `TARGET_LOST` 或 `EXECUTION_ERROR` 后进入
+  `RECOVER_PATROL`，保留 `target_id` 作为恢复相关 ID，并递增 `state_seq`；
+- 导航在 `RECOVER_PATROL` 中停车、清理目标路径，先返回目标任务开始前保存的
+  `map -> base_footprint` 位姿，再恢复 waypoint 并等待新的巡检路径；
+- 导航返回巡检中断位姿并稳定停车后发布 `PATROL_RECOVERY_COMPLETE`，状态机才进入
+  `PATROL` 并清空 `target_id`；即使原巡检没有 waypoint，也不依赖新路径完成恢复；
+- 恢复阶段不再处理新的恢复错误，也不把恢复失败转换成第二层业务状态；
+- `patrol_recovery_timeout` 到期后，supervisor 直接进入 `PATROL`，清空目标并释放
+  当前恢复等待；导航优先恢复到保存的位姿和 waypoint 断点，超时时保留 waypoint 当前索引
+  作为兜底；
+- 没有活动目标时的系统级技术故障只记录诊断，不修改任务状态，导航栈
+  按自身机制继续运行和重试。
 
-首版不自动换目标、不自动恢复巡逻，也不增加搜索或重试状态。
+本方案不自动换目标、不增加搜索状态；短时目标丢失由感知内部跟踪器处理，最终目标丢失
+由 `TARGET_LOST -> RECOVER_PATROL -> PATROL` 收口。
 
-同一语义目标在 `TARGET_LOST` 后重新被感知到时，感知可以发送
-`TARGET_REACQUIRED`。状态机只清除该 `TARGET_LOST` 阻塞，保留当前业务状态和
-`target_id`；`EXECUTION_ERROR` 阻塞不能由此事件清除。
+收到最终 `TARGET_LOST` 后，任务必须走恢复状态。感知在看到 `RECOVER_PATROL` 后
+清理旧目标上下文，直到重新进入 `PATROL` 才允许再次选择目标。
 
 ## 3. 系统组成
 
@@ -128,7 +142,7 @@ ARRIVED_AND_STOPPED
 - 检查事件来源、状态版本和目标 ID；
 - 根据状态转移表执行转换；
 - 对重复事件保持幂等；
-- 发布阻塞状态和诊断说明。
+- 发布当前任务状态和诊断说明。
 
 状态机不负责：
 
@@ -161,7 +175,7 @@ ARRIVED_AND_STOPPED
 职责：
 
 - 在巡逻状态执行 waypoint 巡逻；
-- 在目标确认后暂停巡逻并保持停车；
+- 在目标确认阶段保持原巡逻并后台确认位置；确认成功进入接近后暂停巡逻，由目标路径接管；
 - 根据 bbox、雷达、相机标定和 TF 建立目标地图位置；
 - 目标位置稳定后报告 `TARGET_POSITION_READY`；
 - 在接近状态向目标靠近；
@@ -169,18 +183,8 @@ ARRIVED_AND_STOPPED
 - 到达约 3 米并确认停车后报告 `ARRIVED_AND_STOPPED`；
 - 在认证状态保持停车；
 - 在入侵者状态持续跟踪目标；
-- bbox 过期或目标数据不可用时立即停车并发布 `BLOCKED` 执行状态；
+- bbox 过期或目标数据不可用时立即停车；持续技术故障发布 `EXECUTION_ERROR`；
 - 雷达、TF、规划或控制等导航技术故障持续存在时报告 `EXECUTION_ERROR`。
-
-### 3.4 上位机或人工处置端
-
-上位机只在入侵者处置完成后发布：
-
-```text
-HANDLING_COMPLETE
-```
-
-状态机验证当前确实处于 `TRACK_INTRUDER` 后，才允许返回巡逻。
 
 ## 4. 全局状态机
 
@@ -192,7 +196,8 @@ PATROL
 CONFIRM_TARGET
 APPROACH_TARGET
 VERIFY_IDENTITY
-TRACK_INTRUDER
+    TRACK_INTRUDER
+    RECOVER_PATROL
 ```
 
 状态关系：
@@ -218,9 +223,13 @@ VERIFY_IDENTITY
    |                  |
    | AUTHORIZED       | UNAUTHORIZED
    v                  v
-PATROL          TRACK_INTRUDER
+RECOVER_PATROL   TRACK_INTRUDER
                        |
-                       | HANDLING_COMPLETE
+                       | 目标丢失超时
+                       v
+                 RECOVER_PATROL
+                       |
+                       | PATROL_RECOVERY_COMPLETE
                        v
                      PATROL
 ```
@@ -233,14 +242,15 @@ PATROL          TRACK_INTRUDER
 | `PATROL` | 感知 | `TARGET_CONFIRMED` | `CONFIRM_TARGET` |
 | `CONFIRM_TARGET` | 导航 | `TARGET_POSITION_READY` | `APPROACH_TARGET` |
 | `APPROACH_TARGET` | 导航 | `ARRIVED_AND_STOPPED` | `VERIFY_IDENTITY` |
-| `VERIFY_IDENTITY` | 感知 | `AUTHORIZED` | `PATROL` |
+| `VERIFY_IDENTITY` | 感知 | `AUTHORIZED` | `RECOVER_PATROL` |
 | `VERIFY_IDENTITY` | 感知 | `UNAUTHORIZED` | `TRACK_INTRUDER` |
-| `TRACK_INTRUDER` | 上位机 | `HANDLING_COMPLETE` | `PATROL` |
-| 任一有活动目标的业务状态 | 感知 | `TARGET_LOST` | 保持原状态，设置 `BLOCK_TARGET_LOST` |
-| 任一有活动目标的业务状态 | 感知 | `TARGET_REACQUIRED` | 保持原状态，仅解除 `TARGET_LOST` 阻塞 |
+| `CONFIRM_TARGET`、`APPROACH_TARGET`、`VERIFY_IDENTITY`、`TRACK_INTRUDER` | 感知 | `TARGET_LOST` | `RECOVER_PATROL` |
+| `RECOVER_PATROL` | 导航 | `PATROL_RECOVERY_COMPLETE` | `PATROL` |
+| `RECOVER_PATROL` | 导航 | `EXECUTION_ERROR` | 忽略恢复阶段错误，继续等待恢复完成或超时 |
 
-`TARGET_LOST` 和 `EXECUTION_ERROR` 不切换业务状态，只将当前状态标记为阻塞，并分别
-设置 `BLOCK_TARGET_LOST` 和 `BLOCK_EXECUTION_ERROR`。
+目标任务期间的 `TARGET_LOST` 和可恢复 `EXECUTION_ERROR` 进入 `RECOVER_PATROL`；
+恢复阶段的错误不再触发新的状态分支，恢复超时直接进入 `PATROL`。没有活动目标的
+系统级故障只作为诊断事件处理，不改变当前状态。
 
 ## 5. ROS 2 接口总览
 
@@ -249,7 +259,7 @@ PATROL          TRACK_INTRUDER
 | `/mission/state` | `MissionState` | 状态机 | 感知、导航、上位机 | 当前权威全局状态 |
 | `/mission/event` | `MissionEvent` | 感知、导航、上位机 | 状态机 | 离散业务事件 |
 | `/perception/selected_target_bbox` | `TargetBoundingBox` | 感知 | 导航 | 当前目标 bbox |
-| `/navigation/target_status` | `TargetNavigationStatus` | 导航 | 状态机、感知、上位机 | 距离和导航执行状态 |
+| `/navigation/target_status` | `TargetNavigationStatus` | 导航 | 上位机、RViz、调试工具 | 导航内部状态和当前目标距离，仅用于观测 |
 
 所有自定义消息放在独立接口包：
 
@@ -281,17 +291,12 @@ uint8 CONFIRM_TARGET=2
 uint8 APPROACH_TARGET=3
 uint8 VERIFY_IDENTITY=4
 uint8 TRACK_INTRUDER=5
-
-uint8 BLOCK_NONE=0
-uint8 BLOCK_TARGET_LOST=1
-uint8 BLOCK_EXECUTION_ERROR=2
+uint8 RECOVER_PATROL=6
 
 std_msgs/Header header
 uint32 state_seq
 uint8 state
 uint32 target_id
-bool blocked
-uint8 block_cause
 string detail
 ```
 
@@ -301,17 +306,12 @@ string detail
 - `state_seq`：权威状态版本；
 - `state`：当前全局状态；
 - `target_id`：当前目标，`0` 表示没有活动目标；
-- `blocked`：当前任务是否因错误停止推进；
-- `block_cause`：阻塞原因；未阻塞时为 `BLOCK_NONE`，目标丢失和技术故障分别为
-  `BLOCK_TARGET_LOST`、`BLOCK_EXECUTION_ERROR`；
 - `detail`：供日志和界面显示的说明，程序不能解析该字符串决定业务逻辑。
 
 `state_seq` 在以下任一权威状态发生变化时加一：
 
 - `state` 改变；
 - `target_id` 改变；
-- `blocked` 状态改变。
-- `block_cause` 改变。
 
 周期性重复发布同一个状态时，`state_seq` 不变。
 
@@ -329,8 +329,6 @@ depth: 1
 ```text
 uint8 SOURCE_PERCEPTION=0
 uint8 SOURCE_NAVIGATION=1
-uint8 SOURCE_OPERATOR=2
-
 uint8 READY=0
 uint8 TARGET_CONFIRMED=1
 uint8 TARGET_POSITION_READY=2
@@ -339,8 +337,7 @@ uint8 AUTHORIZED=4
 uint8 UNAUTHORIZED=5
 uint8 TARGET_LOST=6
 uint8 EXECUTION_ERROR=7
-uint8 HANDLING_COMPLETE=8
-uint8 TARGET_REACQUIRED=9
+uint8 PATROL_RECOVERY_COMPLETE=8
 
 std_msgs/Header header
 uint32 observed_state_seq
@@ -359,9 +356,8 @@ string detail
 - `event`：事件类型；
 - `detail`：诊断信息。
 
-`TARGET_LOST` 和 `TARGET_REACQUIRED` 都必须由感知发布。`TARGET_REACQUIRED` 必须携带
-产生该事件时观察到的 `observed_state_seq` 和当前语义 `target_id`，且只在该目标已因
-`TARGET_LOST` 被阻塞时有效。
+`TARGET_LOST` 只能由感知发布。`PATROL_RECOVERY_COMPLETE` 只能由导航发布，并且必须
+携带恢复状态中的 `observed_state_seq` 和同一个 `target_id`。
 
 推荐 QoS：
 
@@ -399,20 +395,19 @@ float32 confidence
 - bbox 区间为 `[x_min, x_max)` 和 `[y_min, y_max)`；
 - bbox 必须位于图像尺寸范围内。
 
-下列未阻塞状态接受与当前权威 `target_id` 相同且未过期的新鲜 bbox：
+下列任务状态接受与当前权威 `target_id` 相同且未过期的新鲜 bbox：
 
 | 全局状态 | 是否接受新鲜 bbox | 用途 |
 |---|---|---|
 | `STARTUP` | 否 | 尚无活动目标 |
 | `PATROL` | 否 | 忽略上一次任务的旧 bbox |
-| `CONFIRM_TARGET` | 是 | 建立目标位置，机器人保持停车 |
+| `CONFIRM_TARGET` | 是 | 后台建立目标位置，巡逻链保持运行但不因目标框直接移动 |
 | `APPROACH_TARGET` | 是 | 更新目标位置并安全接近 |
 | `VERIFY_IDENTITY` | 是 | 向授权模块提供当前目标 bbox；导航保持停车，不因 bbox 更新重新移动 |
 | `TRACK_INTRUDER` | 是 | 更新目标位置并持续跟随 |
 
 `VERIFY_IDENTITY` 中 bbox 只作为授权模块的当前目标输入；导航保持停车，不能因 bbox
-更新重新移动。`blocked=true` 时导航不得继续使用 bbox 驱动运动；收到有效
-`TARGET_REACQUIRED` 且状态机解除 `TARGET_LOST` 阻塞后，才按上表恢复处理。
+更新重新移动。`RECOVER_PATROL` 不接受 bbox。
 
 推荐 QoS：
 
@@ -425,13 +420,15 @@ depth: 5
 
 ### 6.4 TargetNavigationStatus.msg
 
+该消息是导航内部的观测接口，不参与总状态机状态转移，也不包含
+`MissionState` 的业务阻塞字段。
+
 ```text
 uint8 WAITING_TARGET=0
 uint8 APPROACHING=1
 uint8 ARRIVED=2
 uint8 HOLDING=3
 uint8 TRACKING=4
-uint8 BLOCKED=5
 
 std_msgs/Header header
 uint32 target_id
@@ -441,23 +438,9 @@ bool distance_valid
 string detail
 ```
 
-该消息用于：
-
-- 显示目标距离；
-- 显示导航当前阶段；
-- 调试目标接近过程；
-- 让识别模块按需了解机器狗与目标的距离。
-
-该 Topic 不直接触发全局状态变化。真正触发状态变化的是 `/mission/event`。
-
-推荐 QoS：
-
-```text
-reliability: RELIABLE
-durability: VOLATILE
-history: KEEP_LAST
-depth: 5
-```
+导航协调器默认以 10 Hz 发布 `/navigation/target_status`。目标数据暂不可用时使用
+`HOLDING` 并在 `detail` 中说明原因。这个消息只用于导航观测，不直接驱动 `MissionState`；
+需要业务状态转移时仍必须通过 `/mission/event` 发布正式事件。
 
 ## 7. ID 和状态版本
 
@@ -526,14 +509,16 @@ eligible 的判定由感知模块负责。
 - 目标跟踪器可用；
 - 身份认证接口可用。
 
-导航 Ready 至少表示：
+导航 Ready 当前由协调器的运行时依赖检查产生，至少表示：
 
 - 定位结果有效；
 - `map -> base_footprint` TF 可用；
-- 地图已加载；
-- planner 和 controller 已激活；
-- 巡逻 waypoint 已加载；
-- `/NAV_CMD` 控制链路可用。
+- `/compute_path_to_pose` action server 已就绪；
+- 严格检查打开时，`/global_path`、waypoint pause/resume 有下游订阅者，且 `/NAV_CMD`
+  有发布者。
+
+点云、定位和底层控制链的具体初始化仍由 FAST-LIVO-DOG/Nav2 链负责；Ready 检查不
+替代这些节点自身的生命周期管理。
 
 两个模块在进入新的 `STARTUP state_seq` 后分别发送一次 `READY`。
 
@@ -562,12 +547,12 @@ eligible 的判定由感知模块负责。
 5. 将目标位置转换到 `map` 坐标系；
 6. 连续多帧验证位置稳定性。
 
-初始建议判定条件：
+当前实现使用的判定条件：
 
 ```text
-bbox_age <= 0.3 s
+bbox_age <= 0.80 s
 至少连续 3 帧目标位置有效
-相邻目标位置跳变量 <= 0.5 m
+相邻目标位置跳变量 <= 0.60 m
 target_id 与当前状态一致
 ```
 
@@ -580,7 +565,7 @@ target_id 与当前状态一致
 必须同时满足：
 
 ```text
-目标距离满足 3 米要求
+目标距离不大于 `approach_distance + arrival_distance_tolerance`
 目标距离仍然有效
 bbox 和目标位置没有超时
 机器人线速度低于停车阈值
@@ -588,10 +573,10 @@ bbox 和目标位置没有超时
 停车条件持续一段确认时间
 ```
 
-初始建议：
+当前实现默认值：
 
 ```text
-distance_to_target <= 3.0 m
+distance_to_target <= 3.0 m + 0.10 m
 abs(linear_speed) < 0.05 m/s
 abs(angular_speed) < 0.10 rad/s
 稳定持续时间 >= 0.5 s
@@ -608,11 +593,12 @@ abs(angular_speed) < 0.10 rad/s
 
 状态机收到后：
 
-- 进入 `PATROL`；
-- 清空 `target_id`；
-- 清除阻塞状态；
-- 导航恢复巡逻；
-- 感知停止当前目标的专用跟踪和认证。
+- 进入 `RECOVER_PATROL`；
+- 保留 `target_id` 作为恢复过程的关联 ID；
+- 导航清理目标路径并恢复巡检 waypoint；
+- 导航确认新的巡检路径生成后发布 `PATROL_RECOVERY_COMPLETE`；
+- 状态机收到恢复完成后才进入 `PATROL` 并清空 `target_id`；
+- 感知在 `RECOVER_PATROL` 中停止当前目标的专用跟踪和认证。
 
 ### 8.6 UNAUTHORIZED
 
@@ -633,7 +619,10 @@ abs(angular_speed) < 0.10 rad/s
 ### 8.7 TARGET_LOST
 
 该事件只能由感知发布，表示感知已确认当前语义目标的跟踪已丢失，无法继续产生可信
-bbox。具体丢失判定和可恢复时间属于感知内部实现，不进入本协议合同。
+bbox。当前实现使用 `target.lost_event_timeout_sec=10.0` 秒的 source-time 任务级
+窗口；短时漏检由 detector/tracker 内部处理，只有最终超时才发布一次该事件。这个
+计时需要后续任务处理帧推进；如果相机或推理线程完全停止而没有新的 frame transaction，
+感知 coordinator 不会凭空生成 `TARGET_LOST`，输入故障应由 readiness/技术故障监控报告。
 
 触发含义：
 
@@ -641,22 +630,13 @@ bbox。具体丢失判定和可恢复时间属于感知内部实现，不进入�
 - 无法继续产生可信 bbox。
 
 导航不得发布 `TARGET_LOST`。导航无须等待该事件：一旦 bbox 超过最大允许年龄或目标
-数据不可用，就必须立即停止继续使用旧目标运动，并发布
-`TargetNavigationStatus.BLOCKED`。雷达、TF、目标融合、规划或控制等技术故障持续存在时，
-导航发布 `EXECUTION_ERROR`。
+数据不可用，就必须立即停止继续使用旧目标运动。雷达、TF、目标融合、规划或控制等
+技术故障持续存在时，导航发布 `EXECUTION_ERROR`。
 
-状态机保持当前业务状态并设置：
-
-```text
-blocked=true
-block_cause=BLOCK_TARGET_LOST
-detail="target lost: ..."
-```
-
-同一语义目标重新可见且可信 bbox 恢复时，感知以当前 `state_seq` 和相同 `target_id`
-发送 `TARGET_REACQUIRED`。状态机只在当前阻塞原因为 `BLOCK_TARGET_LOST` 时接受它：
-保留业务状态和活动目标，清除阻塞并递增 `state_seq`。错误目标、旧序号、重复或在目标
-丢失前到达的事件都被拒绝。
+状态机收到后进入 `RECOVER_PATROL`，保留同一 `target_id`。导航负责停车、返回巡检
+中断位姿和恢复巡检；恢复完成后由导航发布
+`PATROL_RECOVERY_COMPLETE`，状态机再进入 `PATROL` 并清空目标。感知在恢复状态下清理
+旧目标，短暂丢失由感知内部 tracker 处理，不发布 `TARGET_LOST`。
 
 ### 8.8 EXECUTION_ERROR
 
@@ -668,21 +648,10 @@ detail="target lost: ..."
 - planner 或 controller 不可用；
 - 认证服务调用失败。
 
-状态机不自动改变业务状态，只设置 `blocked=true` 和
-`block_cause=BLOCK_EXECUTION_ERROR`。`TARGET_REACQUIRED` 不能清除这种阻塞。
-
-### 8.9 HANDLING_COMPLETE
-
-该事件只能由上位机或人工处置端发送。
-
-要求：
-
-- 当前状态为 `TRACK_INTRUDER`；
-- `observed_state_seq` 匹配；
-- `target_id` 匹配；
-- 人工处置流程已经完成。
-
-状态机接受后返回 `PATROL` 并清空当前目标。
+如果故障发生在有活动目标的目标任务状态，状态机进入 `RECOVER_PATROL`，导航执行停车、
+清理目标路径和恢复巡检。如果故障发生在恢复阶段，状态机不再开启新的错误处理分支，
+继续等待恢复路径或恢复超时；超时由 supervisor 直接进入 `PATROL`。没有活动目标的
+系统级技术故障只记录和上报诊断，保持当前状态，不要求 reset。
 
 ## 9. 每个状态下的模块行为
 
@@ -729,8 +698,8 @@ detail="target lost: ..."
 
 导航：
 
-- 取消或暂停巡逻目标；
-- 保持机器人停车；
+- 保持当前巡逻链继续运行，但不让机器人因目标框直接移动；
+- 在后台融合 bbox 和雷达；
 - 接收 bbox 并建立目标地图位置；
 - 位置稳定后发送 `TARGET_POSITION_READY`。
 
@@ -747,7 +716,7 @@ detail="target lost: ..."
 
 - 根据更新后的目标位置靠近目标；
 - 规划目标时保留约 3 米距离；
-- 持续发布 `/navigation/target_status`；
+- 持续更新目标点和路径诊断；
 - 到达并停车后发送 `ARRIVED_AND_STOPPED`；
 - 发送事件后继续保持停车。
 
@@ -765,7 +734,7 @@ detail="target lost: ..."
 - 取消目标接近动作；
 - 持续输出停车命令；
 - 不因 bbox 变化重新开始运动；
-- 发布 `HOLDING` 状态。
+- 保持停止并记录诊断。
 
 ### 9.6 TRACK_INTRUDER
 
@@ -780,13 +749,10 @@ detail="target lost: ..."
 - 根据 bbox 和雷达更新目标位置；
 - 持续跟随同一目标；
 - 保持安全跟随距离；
-- bbox 过期或目标数据不可用时立即停车并发布 `BLOCKED` 执行状态；
+- bbox 过期或目标数据不可用时立即停车；
 - 导航自身技术故障持续存在时报告 `EXECUTION_ERROR`，不报告 `TARGET_LOST`。
 
-状态机：
-
-- 保留当前 `target_id`；
-- 等待上位机发送 `HANDLING_COMPLETE`。
+状态机保留当前 `target_id`；目标连续丢失超时后，感知发布 `TARGET_LOST` 进入统一恢复。
 
 ### 9.7 返回 PATROL
 
@@ -807,8 +773,38 @@ detail="target lost: ..."
 状态机：
 
 - 将 `target_id` 设置为 `0`；
-- 将 `blocked` 设置为 `false`；
 - 发布新的 `PATROL state_seq`。
+
+### 9.8 RECOVER_PATROL
+
+这是所有目标任务结束和可恢复异常的统一收口状态。它不是新的业务任务，也不接受新的
+目标确认。
+
+状态机：
+
+- 保留原 `target_id`，用于校验恢复完成事件；
+- 屏蔽 `TARGET_CONFIRMED`、目标位置、认证和跟踪事件；
+- 等待导航发布 `PATROL_RECOVERY_COMPLETE`；
+- 恢复完成后进入 `PATROL`，清空 `target_id`。
+
+导航：
+
+- 取消 FollowPath 和目标 planner 请求；
+- 清空目标路径、目标点和目标距离缓存；
+- 返回进入 `APPROACH_TARGET` 前保存的巡检中断位姿；
+- 到达位置容差并稳定停车后发布 waypoint resume；
+- 不等待 waypoint active 或新的非空巡检路径，直接发布 `PATROL_RECOVERY_COMPLETE`。
+
+如果没有保存的巡检中断位姿，导航不伪造恢复目标，而是清理目标任务并直接发布
+`PATROL_RECOVERY_COMPLETE`，由总控进入新的 `PATROL`。如果恢复动作超过
+`patrol_recovery_timeout=10.0` 秒，supervisor 也会直接收口到 `PATROL`，不会再
+创建第二层恢复状态。
+
+感知：
+
+- 清理旧目标和认证上下文；
+- 不发布旧目标 bbox，也不发布新的 `TARGET_CONFIRMED`；
+- 等待总状态重新进入 `PATROL` 后恢复常驻检测。
 
 ## 10. 完整业务流程
 
@@ -829,7 +825,8 @@ detail="target lost: ..."
 
 状态机进入 `CONFIRM_TARGET`。
 
-感知持续发布 bbox。导航暂停巡逻，通过 bbox 与雷达融合建立目标位置。
+感知持续发布 bbox。导航在后台通过 bbox 与雷达融合建立目标位置；此时巡逻链不因
+确认动作被反复暂停，机器人不执行目标移动。
 
 目标位置稳定后，导航发送 `TARGET_POSITION_READY`。
 
@@ -847,7 +844,9 @@ detail="target lost: ..."
 
 导航保持停车，感知在内部执行完整认证。
 
-授权模块确认成功后，感知接入适配器发送 `AUTHORIZED`，状态机返回 `PATROL`。
+授权模块确认成功后，感知接入适配器发送 `AUTHORIZED`，状态机进入
+`RECOVER_PATROL`；导航恢复巡检路径后发送 `PATROL_RECOVERY_COMPLETE`，状态机再回到
+`PATROL`。
 
 授权模块确认未通过后，感知接入适配器发送 `UNAUTHORIZED`，状态机进入
 `TRACK_INTRUDER`。
@@ -856,7 +855,15 @@ detail="target lost: ..."
 
 感知继续发布同一目标 bbox，导航持续跟随。
 
-处置完成后，上位机发送 `HANDLING_COMPLETE`，状态机清理目标并返回 `PATROL`。
+目标连续丢失超过 10 秒后，感知发送 `TARGET_LOST`，状态机进入 `RECOVER_PATROL`；导航
+返回保存的巡检中断位姿、恢复 waypoint 或在恢复超时后释放等待，随后发送
+`PATROL_RECOVERY_COMPLETE`（或由 supervisor 的恢复 watchdog 收口），状态机清理目标并
+返回 `PATROL`。
+
+这里的恢复不是直接跳过导航：supervisor 的 `patrol_recovery_timeout=10.0 s` 到期时
+才允许 watchdog 直接把 `RECOVER_PATROL` 收口为 `PATROL`。确认目标位置的 watchdog
+参数为 `confirm_target_timeout=5.0 s`，超时也先进入 `RECOVER_PATROL`，不会直接从
+`CONFIRM_TARGET` 跳到 `PATROL`。
 
 ## 11. 时序、去重和过期处理
 
@@ -905,15 +912,16 @@ source + event + observed_state_seq + target_id
 - 不用于继续目标跟随；
 - 不触发 `TARGET_POSITION_READY`；
 - 不触发 `ARRIVED_AND_STOPPED`；
-- 使导航立即停车并发布 `TargetNavigationStatus.BLOCKED`，但不触发 `TARGET_LOST`。
+- 使导航立即停车，但不由导航伪造 `TARGET_LOST`；最终目标丢失事件仍由感知发布。
 
-初始最大允许年龄：
+当前导航配置的最大允许年龄：
 
 ```text
-0.3 s
+0.80 s
 ```
 
-具体数值需要根据相机帧率、检测延迟和网络延迟实测。
+该值覆盖当前 10 Hz 感知链的推理和调度延迟，但仍由导航自己的
+`target_timeout=0.90 s` 控制目标位置和路径是否新鲜；它不允许使用旧框长期运动。
 
 ### 11.5 跨 Topic 顺序
 
@@ -936,9 +944,9 @@ transitions = {
     (PATROL, SOURCE_PERCEPTION, TARGET_CONFIRMED): CONFIRM_TARGET,
     (CONFIRM_TARGET, SOURCE_NAVIGATION, TARGET_POSITION_READY): APPROACH_TARGET,
     (APPROACH_TARGET, SOURCE_NAVIGATION, ARRIVED_AND_STOPPED): VERIFY_IDENTITY,
-    (VERIFY_IDENTITY, SOURCE_PERCEPTION, AUTHORIZED): PATROL,
+    (VERIFY_IDENTITY, SOURCE_PERCEPTION, AUTHORIZED): RECOVER_PATROL,
     (VERIFY_IDENTITY, SOURCE_PERCEPTION, UNAUTHORIZED): TRACK_INTRUDER,
-    (TRACK_INTRUDER, SOURCE_OPERATOR, HANDLING_COMPLETE): PATROL,
+    (RECOVER_PATROL, SOURCE_NAVIGATION, PATROL_RECOVERY_COMPLETE): PATROL,
 }
 ```
 
@@ -952,11 +960,22 @@ navigation_ready
 错误事件使用单独处理逻辑：
 
 ```text
-TARGET_LOST 或 EXECUTION_ERROR
-    -> 保持 state
-    -> blocked=true
-    -> state_seq 加一
-    -> 发布新的 MissionState
+目标任务期间 TARGET_LOST 或 EXECUTION_ERROR
+    -> 进入 RECOVER_PATROL，保留 target_id
+    -> 导航停车、清理目标路径、返回巡检中断位姿、恢复 waypoint
+    -> 返回巡检中断位姿并稳定停车后发布 PATROL_RECOVERY_COMPLETE
+    -> 进入 PATROL 并清空 target_id
+
+恢复阶段再次 EXECUTION_ERROR
+    -> 忽略该恢复错误，继续等待恢复完成
+
+恢复超时
+    -> 直接进入 PATROL
+    -> 清空 target_id，保留 waypoint 当前索引
+
+没有活动目标的系统级 EXECUTION_ERROR
+    -> 保持当前状态
+    -> 记录诊断，继续当前任务
 ```
 
 状态转换必须在同一个回调临界区完成：
@@ -987,7 +1006,8 @@ TARGET_LOST 或 EXECUTION_ERROR
 
 ### 13.3 CONFIRM_TARGET
 
-- 导航暂停巡逻并保持停车；
+- 导航保持 waypoint 链运行但不因目标框直接移动；
+- 机器人保持停车；
 - 感知 bbox 的目标 ID 正确；
 - 导航拒绝过期 bbox 和错误目标；
 - 目标位置稳定后只报告一次 Ready。
@@ -1012,7 +1032,9 @@ TARGET_LOST 或 EXECUTION_ERROR
 - 导航自动进入持续跟踪；
 - 不需要额外“开始跟踪”命令；
 - 目标丢失后导航立即停车；
-- 只有上位机确认处置完成后才能返回巡逻。
+- 目标仍有可信 bbox 时持续跟踪；不等待上位机确认或额外完成事件。
+- 目标连续丢失达到感知任务阈值后，由感知发布 `TARGET_LOST`，总控进入
+  `RECOVER_PATROL`，再由导航恢复巡检。
 
 ### 13.7 返回巡逻
 
@@ -1029,9 +1051,9 @@ TARGET_LOST 或 EXECUTION_ERROR
 | 首帧目标选择规则 | 感知 | 首个含 eligible person 的帧中面积最大的目标立即确认 |
 | 目标检测置信度 | 感知 | 根据模型测试 |
 | bbox 发布频率 | 感知 | 不低于 10 Hz |
-| bbox 最大允许年龄 | 导航 | 0.3 s |
+| bbox 最大允许年龄 | 导航 | 0.80 s |
 | 目标位置稳定帧数 | 导航 | 3 帧 |
-| 目标位置最大跳变 | 导航 | 0.5 m |
+| 目标位置最大跳变 | 导航 | 0.60 m |
 | 接近停止距离 | 导航 | 3.0 m |
 | 停车线速度阈值 | 导航 | 0.05 m/s |
 | 停车角速度阈值 | 导航 | 0.10 rad/s |
@@ -1042,7 +1064,7 @@ TARGET_LOST 或 EXECUTION_ERROR
 
 ## 15. 最终接口结论
 
-首版系统只需要四个跨模块消息接口：
+当前系统使用四个跨模块消息接口：
 
 ```text
 MissionState
@@ -1072,25 +1094,31 @@ TargetNavigationStatus
 
 认证成功
     -> AUTHORIZED
+    -> RECOVER_PATROL
+    -> 导航恢复巡检路径
+    -> PATROL_RECOVERY_COMPLETE
     -> 返回 PATROL
 
 认证失败
     -> UNAUTHORIZED
     -> 进入 TRACK_INTRUDER
 
-处置完成
-    -> HANDLING_COMPLETE
+目标丢失超时
+    -> TARGET_LOST
+    -> RECOVER_PATROL
+    -> PATROL_RECOVERY_COMPLETE
     -> 返回 PATROL
 ```
 
 在该设计中：
 
 - 全局状态只有状态机可以修改；
-- 感知、导航和上位机共用一个事件消息；
-- 高频 bbox 不经过状态机；
+- 感知和导航共用一个事件消息；
+- 高频 bbox 和导航观测状态不经过状态机；
 - 连续距离不直接触发状态变化；
 - `state_seq` 负责过滤旧事件；
 - `target_id` 负责关联同一目标；
 - 不使用 UUID 和重复状态字段；
 - 不暴露身份认证内部步骤；
-- 首版不实现自动 fallback。
+- `RECOVER_PATROL` 是统一异常和任务结束恢复状态；恢复阶段不再处理新的恢复错误，
+  恢复超时直接回到 `PATROL`，避免业务状态在目标任务和巡检之间反复横跳。

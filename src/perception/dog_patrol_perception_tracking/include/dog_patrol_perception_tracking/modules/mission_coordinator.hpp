@@ -20,26 +20,18 @@ enum class MissionPhase : std::uint8_t {
   kApproachTarget = 3,
   kVerifyIdentity = 4,
   kTrackIntruder = 5,
-};
-
-enum class MissionBlockCause : std::uint8_t {
-  kNone = 0,
-  kTargetLost = 1,
-  kExecutionError = 2,
+  kRecoverPatrol = 6,
 };
 
 struct MissionSnapshot {
   std::uint32_t state_seq{0};
   MissionPhase phase{MissionPhase::kStartup};
   int target_id{0};
-  bool blocked{false};
-  MissionBlockCause block_cause{MissionBlockCause::kNone};
 };
 
 enum class PerceptionMissionEvent {
   kTargetConfirmed,
   kTargetLost,
-  kTargetReacquired,
 };
 
 struct MissionEventAction {
@@ -63,8 +55,7 @@ class MissionCoordinator {
   using TimePoint = Clock::time_point;
 
   struct Config {
-    Duration lost_event_timeout{std::chrono::seconds{1}};
-    Duration reacquire_retention{std::chrono::seconds{6}};
+    Duration lost_event_timeout{std::chrono::seconds{10}};
   };
 
   struct FrameInput {
@@ -90,20 +81,11 @@ class MissionCoordinator {
   static bool AcceptsFreshTargetBox(MissionPhase phase);
 
  private:
-  struct LossCycle {
-    int target_id{0};
-    std::uint32_t loss_event_state_seq{0};
-    std::optional<std::uint32_t> reacquire_event_state_seq;
-    bool retention_expired{false};
-    bool automatic_recovery_disallowed{false};
-  };
-
   bool IsCurrentMissionState(const MissionSnapshot &mission);
   bool IsCurrentSourceTime(TimePoint source_time) const;
   bool IsTrustedCurrentObservation(const FrameInput &input,
                                    const IdentityObservation **observation) const;
   bool IsTargetLifecycleActive(const MissionSnapshot &mission) const;
-  bool IsCompatibleLostBlock(const MissionSnapshot &mission, const LossCycle &cycle) const;
   bool CanPublishForSourceTime(TimePoint source_time) const;
   void ResetMissionTarget();
 
@@ -113,7 +95,7 @@ class MissionCoordinator {
   std::optional<TimePoint> last_published_source_time_;
   std::optional<int> tracked_target_id_;
   std::optional<TimePoint> last_fresh_observation_at_;
-  std::optional<LossCycle> loss_cycle_;
+  std::optional<std::uint32_t> loss_event_state_seq_;
 };
 
 }  // namespace dog_patrol_perception_tracking

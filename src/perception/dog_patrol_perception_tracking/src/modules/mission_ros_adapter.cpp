@@ -18,6 +18,14 @@ bool IsTargetPhase(const MissionPhase phase) {
          phase == MissionPhase::kVerifyIdentity || phase == MissionPhase::kTrackIntruder;
 }
 
+bool IsRecoveryPhase(const MissionPhase phase) {
+  return phase == MissionPhase::kRecoverPatrol;
+}
+
+bool HasActiveTarget(const MissionPhase phase) {
+  return IsTargetPhase(phase) || IsRecoveryPhase(phase);
+}
+
 bool IsFinite(const float value) { return std::isfinite(value); }
 
 }  // namespace
@@ -76,20 +84,8 @@ std::optional<MissionPhase> MissionRosAdapter::MissionPhaseFromMessage(const std
       return MissionPhase::kVerifyIdentity;
     case MissionStateMessage::TRACK_INTRUDER:
       return MissionPhase::kTrackIntruder;
-    default:
-      return std::nullopt;
-  }
-}
-
-std::optional<MissionBlockCause> MissionRosAdapter::MissionBlockCauseFromMessage(
-    const std::uint8_t cause) {
-  switch (cause) {
-    case MissionStateMessage::BLOCK_NONE:
-      return MissionBlockCause::kNone;
-    case MissionStateMessage::BLOCK_TARGET_LOST:
-      return MissionBlockCause::kTargetLost;
-    case MissionStateMessage::BLOCK_EXECUTION_ERROR:
-      return MissionBlockCause::kExecutionError;
+    case MissionStateMessage::RECOVER_PATROL:
+      return MissionPhase::kRecoverPatrol;
     default:
       return std::nullopt;
   }
@@ -98,8 +94,7 @@ std::optional<MissionBlockCause> MissionRosAdapter::MissionBlockCauseFromMessage
 std::optional<MissionSnapshot> MissionRosAdapter::MissionFromMessage(
     const MissionStateMessage &message) {
   const auto phase = MissionPhaseFromMessage(message.state);
-  const auto block_cause = MissionBlockCauseFromMessage(message.block_cause);
-  if (!phase.has_value() || !block_cause.has_value() ||
+  if (!phase.has_value() ||
       message.target_id > static_cast<std::uint32_t>(std::numeric_limits<int>::max())) {
     return std::nullopt;
   }
@@ -109,18 +104,10 @@ std::optional<MissionSnapshot> MissionRosAdapter::MissionFromMessage(
       target_id != 0) {
     return std::nullopt;
   }
-  if (IsTargetPhase(phase.value()) && target_id <= 0) {
+  if (HasActiveTarget(phase.value()) && target_id <= 0) {
     return std::nullopt;
   }
-  if (message.blocked != (block_cause.value() != MissionBlockCause::kNone)) {
-    return std::nullopt;
-  }
-  if (message.blocked && (!IsTargetPhase(phase.value()) || target_id <= 0)) {
-    return std::nullopt;
-  }
-
-  return MissionSnapshot{message.state_seq, phase.value(), target_id, message.blocked,
-                         block_cause.value()};
+  return MissionSnapshot{message.state_seq, phase.value(), target_id};
 }
 
 builtin_interfaces::msg::Time MissionRosAdapter::TimeMessage(const std::uint64_t nanoseconds) {
@@ -183,9 +170,8 @@ bool MissionRosAdapter::StoreMissionState(const MissionStateMessage &message) {
   }
   std::lock_guard<std::mutex> lock(mission_mutex_);
   if (latest_mission_.has_value() && latest_mission_->state_seq == mission->state_seq &&
-      (latest_mission_->phase != mission->phase || latest_mission_->target_id != mission->target_id ||
-       latest_mission_->blocked != mission->blocked ||
-       latest_mission_->block_cause != mission->block_cause)) {
+      (latest_mission_->phase != mission->phase ||
+       latest_mission_->target_id != mission->target_id)) {
     return false;
   }
   if (!state_sequence_.AcceptsCurrentOrNewer(mission->state_seq)) {
@@ -235,10 +221,6 @@ dog_patrol_interfaces::msg::MissionEvent MissionRosAdapter::EventMessage(
     case PerceptionMissionEvent::kTargetLost:
       message.event = MissionEventMessage::TARGET_LOST;
       message.detail = "current semantic target has no fresh trusted bbox";
-      break;
-    case PerceptionMissionEvent::kTargetReacquired:
-      message.event = MissionEventMessage::TARGET_REACQUIRED;
-      message.detail = "same semantic target has a fresh trusted bbox";
       break;
   }
   return message;

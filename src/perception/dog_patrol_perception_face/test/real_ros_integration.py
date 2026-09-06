@@ -4,7 +4,7 @@ Launches the real ``perception_face_provider`` with the real TensorRT engines
 and whitelist, publishes a synthetic ``VERIFY_IDENTITY`` mission and
 ``TrackedTargetImage`` crops replayed from a recorded video, then asserts the
 published ``AuthorizationEvidence`` is bound to ``state_seq + target_id`` and
-only emitted while the mission is in an unblocked ``VERIFY_IDENTITY``.
+only emitted while the mission is in an active ``VERIFY_IDENTITY``.
 
 Skips automatically when the model assets or pycuda are unavailable (CI keeps
 green). Run on the Orin with the face_rec venv's pycuda available:
@@ -193,13 +193,11 @@ class RealProviderHarness:
         target_id,
         *,
         state=MissionState.VERIFY_IDENTITY,
-        blocked=False,
     ) -> None:
         msg = MissionState()
         msg.state_seq = state_seq
         msg.state = state
         msg.target_id = target_id
-        msg.blocked = blocked
         self.state_pub.publish(msg)
         for _ in range(5):
             self.executor.spin_once(timeout_sec=0.02)

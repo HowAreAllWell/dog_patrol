@@ -18,8 +18,8 @@ surface 和 shared patrol protocol 的既有证据也保持成立。
 - authoritative target 在 `CONFIRM_TARGET`、`APPROACH_TARGET`、`VERIFY_IDENTITY` 中只发当前帧
   新鲜 bbox，保留 semantic ID、源时间戳、光学 frame 和原图 half-open 坐标；
 - 缺失 0.5 秒后只发一次 `TARGET_LOST`，不复用缓存框；真实 mission supervisor 进入结构化
-  `BLOCK_TARGET_LOST`；
-- 6 秒保留窗内 raw track 改变时，只有同一 semantic target 可发一次 `TARGET_REACQUIRED`，
+- 旧版目标丢失阻塞标记（已退役）；
+- 旧版 6 秒保留窗内 raw track 改变时，同一 semantic target 可发一次“目标重新获取”事件，
   真实 supervisor 保持业务 state/target 并解除 block；显式视觉证据为 semantic 2、raw 2→3；
 - 完成 verification 回到新 `PATROL` 后，已处置 target 仍留在 identity observations，但默认
   30 秒连续离场条件未满足，因此不具 mission eligibility；显式视觉证据在首帧选择 semantic 1；
@@ -71,9 +71,10 @@ bash src/dog_patrol_perception_tracking/test/test_mission_pipeline_integration.s
 4. navigation 进入 APPROACH；目标缺失 499 ms 时无 loss、无 bbox，达到默认 500 ms 时只发一次
    `TARGET_LOST`，supervisor 发布同 target 的 blocked APPROACH。
 5. semantic 42 以 raw 8 返回，证明 raw track 变化不改变业务 target；blocked frame 不提前发 bbox，
-   一次 `TARGET_REACQUIRED` 使 supervisor 解除 `BLOCK_TARGET_LOST`，之后新鲜 bbox 恢复。
+   该行为属于已退役的 blocked/reacquire 协议，不再作为当前系统验收条件。
 6. navigation 进入 VERIFY_IDENTITY；verification frame 继续输出 target 42 的新鲜 bbox。外部
-   authorization owner 发布 `AUTHORIZED` 后 supervisor 返回 PATROL。
+   authorization owner 发布 `AUTHORIZED` 后 supervisor 进入 `RECOVER_PATROL`，导航恢复
+   被打断的巡检 waypoint；收到新巡检路径后再返回 `PATROL`。
 7. 新 PATROL 第一帧仍含 semantic 42 和 99；42 保留在 observations 但被 handled policy 排除，
    primary 立即选择 99 并发一次确认，PATROL 仍不发 bbox。
 
@@ -100,7 +101,7 @@ SHA-256 分别为：
   position ready、lost、reacquired、arrived、authorized 和 target 1 confirmed；
 - `mission_state_evidence.log` 的周期发布消息去重后为
   `8700 STARTUP → 8701 PATROL → 8702 CONFIRM(2) → 8703 APPROACH(2) →`
-  `8704 APPROACH(2, BLOCK_TARGET_LOST) → 8705 APPROACH(2, unblocked) →`
+  `8704 APPROACH(2, 旧版目标丢失阻塞) → 8705 APPROACH(2, 解除阻塞) →`（历史记录，协议已退役）
   `8706 VERIFY(2) → 8707 PATROL → 8708 CONFIRM(1)`；
 - `target_bbox_evidence.log` 共 4 条，全部是 semantic 2 的实际视觉框，分别对应 confirm、approach、
   unblock 后恢复和 verify；PATROL 与 blocked frame 均无 bbox。
@@ -121,7 +122,7 @@ mission-facing duration 全部使用注入的 `steady_clock` time point，不按
 | 配置 | 默认值证据 | 非默认证据 |
 | --- | --- | --- |
 | `target.lost_event_timeout_sec` | integration 在 499/500 ms 边界断言；coordinator default timeout test | coordinator 使用 100 ms loss timeout |
-| `target.reacquire_retention_sec` | integration 在默认 6 秒窗内同 semantic/raw-change 重获；unit tests 覆盖过期后拒绝 | coordinator 使用 2 秒 retention 并覆盖重复 cycle |
+| 旧版目标重新获取保留时间 | 历史 blocked/reacquire 验收参数 | 当前实现已删除 |
 | `target.handled_ignore_absence_sec` | primary test 覆盖连续离场 30 秒边界和可见时重置 | primary test 使用 2 秒连续离场 |
 
 参数声明仍为 `0.5`、`6.0`、`30.0`；coordinator 验证 loss timeout 为正且短于 retention，primary

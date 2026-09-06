@@ -160,13 +160,11 @@ class ProviderHarness:
         target,
         *,
         state=MissionState.VERIFY_IDENTITY,
-        blocked=False,
     ):
         msg = MissionState()
         msg.state_seq = seq
         msg.state = state
         msg.target_id = target
-        msg.blocked = blocked
         self.state_pub.publish(msg)
         for _ in range(5):
             self.executor.spin_once(timeout_sec=0.03)

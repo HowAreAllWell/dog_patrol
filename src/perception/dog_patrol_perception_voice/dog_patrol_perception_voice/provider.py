@@ -506,7 +506,6 @@ class VoiceEvidenceProviderNode(Node):
 def _session_from_mission(msg: MissionState) -> VoiceVerificationSession | None:
     if (
         int(msg.state) != MissionState.VERIFY_IDENTITY
-        or bool(msg.blocked)
         or int(msg.target_id) <= 0
     ):
         return None

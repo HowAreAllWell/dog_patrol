@@ -775,7 +775,6 @@ class _RosAcceptanceHarness:
         target_id: int,
         *,
         state: int | None = None,
-        blocked: bool = False,
     ) -> None:
         if state is None:
             state = MissionState.VERIFY_IDENTITY
@@ -784,7 +783,6 @@ class _RosAcceptanceHarness:
         message.state_seq = state_seq
         message.state = state
         message.target_id = target_id
-        message.blocked = blocked
         self.state_pub.publish(message)
         for _ in range(5):
             self.executor.spin_once(timeout_sec=0.02)

@@ -103,23 +103,20 @@ TEST(PrimaryTargetManagerTest,
       MakeIdentity(22, 202, dog_patrol_perception_tracking::ClassId::kPerson, cv::Rect2f(0, 0, 60, 60));
 
   const dog_patrol_perception_tracking::MissionSnapshot first_patrol{
-      10U, dog_patrol_perception_tracking::MissionPhase::kPatrol, 0, false,
-      dog_patrol_perception_tracking::MissionBlockCause::kNone};
+      10U, dog_patrol_perception_tracking::MissionPhase::kPatrol, 0};
   const auto first = mgr.UpdateForMission(
       {handled, next_eligible}, first_patrol, std::nullopt, start);
   ASSERT_TRUE(first.primary_track.has_value());
   ASSERT_EQ(first.primary_target_id, 11);
 
   const dog_patrol_perception_tracking::MissionSnapshot verification{
-      11U, dog_patrol_perception_tracking::MissionPhase::kVerifyIdentity, 11, false,
-      dog_patrol_perception_tracking::MissionBlockCause::kNone};
+      11U, dog_patrol_perception_tracking::MissionPhase::kVerifyIdentity, 11};
   const auto verified = mgr.UpdateForMission(
       {handled, next_eligible}, verification, first_patrol, start + 1ms);
   ASSERT_EQ(verified.primary_target_id, 11);
 
   const dog_patrol_perception_tracking::MissionSnapshot next_patrol{
-      12U, dog_patrol_perception_tracking::MissionPhase::kPatrol, 0, false,
-      dog_patrol_perception_tracking::MissionBlockCause::kNone};
+      12U, dog_patrol_perception_tracking::MissionPhase::kPatrol, 0};
   const auto selected = mgr.UpdateForMission(
       {handled, next_eligible}, next_patrol, verification, start + 2ms);
 
@@ -268,7 +265,9 @@ TEST(PrimaryTargetManagerTest, DefaultMissingWindowKeepsPrimaryAcrossFourSecondA
   EXPECT_EQ(s1.primary_target_id, 1);
 
   dog_patrol_perception_tracking::PrimaryTargetResult missing_state;
-  for (int i = 0; i < 120; ++i) {
+  // The production input is 10 Hz and the internal default is 100 frames;
+  // keep this scenario within the four-second occlusion window.
+  for (int i = 0; i < 40; ++i) {
     missing_state = mgr.Update(std::vector<dog_patrol_perception_tracking::IdentityObservation>{});
   }
   EXPECT_EQ(missing_state.state, dog_patrol_perception_tracking::PrimaryState::kOccluded);

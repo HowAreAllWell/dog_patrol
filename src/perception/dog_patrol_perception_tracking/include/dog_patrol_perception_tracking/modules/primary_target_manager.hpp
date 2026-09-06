@@ -18,7 +18,7 @@ class PrimaryTargetManager {
   using TimePoint = Clock::time_point;
 
   struct Config {
-    int lost_threshold_frames{180};
+    int lost_threshold_frames{100};
     float min_person_area_px{1000.0F};
     float max_center_jump_norm{2.0F};
     float min_area_ratio{0.25F};

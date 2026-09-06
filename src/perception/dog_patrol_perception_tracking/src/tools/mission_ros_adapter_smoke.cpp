@@ -16,7 +16,6 @@ namespace {
 using dog_patrol_perception_tracking::ClassId;
 using dog_patrol_perception_tracking::IdentityObservation;
 using dog_patrol_perception_tracking::IdentityState;
-using dog_patrol_perception_tracking::MissionBlockCause;
 using dog_patrol_perception_tracking::MissionCoordinator;
 using dog_patrol_perception_tracking::MissionPhase;
 using dog_patrol_perception_tracking::MissionRosAdapter;
@@ -48,15 +47,12 @@ class MissionRosAdapterSmoke final : public rclcpp::Node {
                                    "/issue84/smoke/perception/selected_target_bbox");
     declare_parameter<std::string>("perception.camera_optical_frame_id",
                                    "issue84_smoke_optical_frame");
-    declare_parameter<double>("smoke.reacquire_retention_sec", 30.0);
 
     MissionRosAdapter::Config config;
     config.mission_state_topic = get_parameter("mission.state_topic").as_string();
     config.mission_event_topic = get_parameter("mission.event_topic").as_string();
     config.target_bbox_topic = get_parameter("mission.selected_target_bbox_topic").as_string();
     config.coordinator.lost_event_timeout = std::chrono::milliseconds{500};
-    config.coordinator.reacquire_retention = std::chrono::duration_cast<MissionCoordinator::Duration>(
-        std::chrono::duration<double>(get_parameter("smoke.reacquire_retention_sec").as_double()));
     optical_frame_id_ = get_parameter("perception.camera_optical_frame_id").as_string();
     adapter_ = std::make_unique<MissionRosAdapter>(*this, std::move(config));
     adapter_->ReportDetectionTrackingRuntimeStatus({true, true, {}});
@@ -64,7 +60,7 @@ class MissionRosAdapterSmoke final : public rclcpp::Node {
     RCLCPP_INFO(
         get_logger(),
         "issue #84 headless smoke ready; publish STARTUP(100), PATROL(101), "
-        "CONFIRM_TARGET(102,target=42), then blocked TARGET_LOST CONFIRM_TARGET(103,target=42)");
+        "CONFIRM_TARGET(102,target=42), then RECOVER_PATROL(103,target=42)");
   }
 
  private:
@@ -94,15 +90,14 @@ class MissionRosAdapterSmoke final : public rclcpp::Node {
     }
 
     const SourceFrameMetadata metadata = Metadata();
-    if (mission->phase == MissionPhase::kPatrol && !mission->blocked) {
+    if (mission->phase == MissionPhase::kPatrol) {
       adapter_->ProcessFrame({TrustedObservation()}, source_time_, metadata);
       return;
     }
 
     const bool trusted_target_frame =
         mission->target_id == kSmokeSemanticId &&
-        ((mission->blocked && mission->block_cause == MissionBlockCause::kTargetLost) ||
-         (!mission->blocked && ticks_in_state_ == 0U));
+        (ticks_in_state_ == 0U);
     const std::vector<IdentityObservation> identities =
         trusted_target_frame ? std::vector<IdentityObservation>{TrustedObservation()}
                               : std::vector<IdentityObservation>{};

@@ -336,8 +336,7 @@ class PerceptionTrackingNode : public rclcpp::Node {
     this->declare_parameter<double>("target.min_area_ratio", 0.25);
     this->declare_parameter<double>("target.max_area_ratio", 4.0);
     this->declare_parameter<int>("target.pending_recovery_frames", 3);
-    this->declare_parameter<double>("target.lost_event_timeout_sec", 1.0);
-    this->declare_parameter<double>("target.reacquire_retention_sec", 6.0);
+    this->declare_parameter<double>("target.lost_event_timeout_sec", 10.0);
     this->declare_parameter<double>("target.handled_ignore_absence_sec", 30.0);
 
     this->declare_parameter<std::string>("mission.state_topic", "/mission/state");
@@ -471,14 +470,8 @@ class PerceptionTrackingNode : public rclcpp::Node {
   CreateMissionRosAdapter(
       const dog_patrol_perception_tracking::PrimaryTargetManager::Config &target_cfg) {
     const double lost_timeout_sec = this->get_parameter("target.lost_event_timeout_sec").as_double();
-    const double reacquire_retention_sec =
-        this->get_parameter("target.reacquire_retention_sec").as_double();
-    if (!std::isfinite(lost_timeout_sec) || !std::isfinite(reacquire_retention_sec) ||
-        lost_timeout_sec <= 0.0 || reacquire_retention_sec <= 0.0 ||
-        lost_timeout_sec >= reacquire_retention_sec) {
-      throw std::runtime_error(
-          "target.lost_event_timeout_sec must be positive and shorter than "
-          "target.reacquire_retention_sec");
+    if (!std::isfinite(lost_timeout_sec) || lost_timeout_sec <= 0.0) {
+      throw std::runtime_error("target.lost_event_timeout_sec must be positive");
     }
 
     dog_patrol_perception_tracking::MissionRosAdapter::Config mission_config;
@@ -494,9 +487,6 @@ class PerceptionTrackingNode : public rclcpp::Node {
     mission_config.primary = target_cfg;
     mission_config.coordinator.lost_event_timeout = std::chrono::duration_cast<
         dog_patrol_perception_tracking::MissionCoordinator::Duration>(std::chrono::duration<double>(lost_timeout_sec));
-    mission_config.coordinator.reacquire_retention = std::chrono::duration_cast<
-        dog_patrol_perception_tracking::MissionCoordinator::Duration>(
-        std::chrono::duration<double>(reacquire_retention_sec));
     return std::make_unique<dog_patrol_perception_tracking::MissionRosAdapter>(
         *this, std::move(mission_config));
   }

@@ -47,7 +47,7 @@ class MissionRosAdapter {
   static rclcpp::QoS TargetBoundingBoxQos();
   static rclcpp::QoS CapabilityStatusQos();
 
-  // Rejects unknown enum values and invalid state/block/target combinations.
+  // Rejects unknown enum values and invalid state/target combinations.
   static std::optional<MissionSnapshot> MissionFromMessage(
       const dog_patrol_interfaces::msg::MissionState &message);
 
@@ -81,7 +81,6 @@ class MissionRosAdapter {
 
  private:
   static std::optional<MissionPhase> MissionPhaseFromMessage(std::uint8_t state);
-  static std::optional<MissionBlockCause> MissionBlockCauseFromMessage(std::uint8_t cause);
   static builtin_interfaces::msg::Time TimeMessage(std::uint64_t nanoseconds);
   static dog_patrol_interfaces::msg::MissionEvent EventMessage(
       PerceptionMissionEvent event, int target_id, std::uint32_t observed_state_seq,

@@ -71,7 +71,7 @@ class GlobalPathSequencePublisher(Node):
         self.declare_parameter("goals", "")
         self.declare_parameter("goals_xy", [])
         self.declare_parameter("goal_yaw_unit", "deg")  # deg / rad, only for `goals` third column
-        self.declare_parameter("goal_tolerance", 1.5)
+        self.declare_parameter("goal_tolerance", 1.0)
         self.declare_parameter("replan_period", 2.0)
         self.declare_parameter("loop", False)
         self.declare_parameter("auto_advance", True)
@@ -96,6 +96,7 @@ class GlobalPathSequencePublisher(Node):
         self.declare_parameter("undo_topic", "waypoint_sequence/undo")
         self.declare_parameter("pause_topic", "waypoint_sequence/pause")
         self.declare_parameter("resume_topic", "waypoint_sequence/resume")
+        self.declare_parameter("resume_from_current_topic", "waypoint_sequence/resume_from_current")
         self.declare_parameter("planner_id", "")
         self.declare_parameter("tf_timeout", 0.2)
         self.declare_parameter("edit_radius", 1.5)
@@ -124,6 +125,7 @@ class GlobalPathSequencePublisher(Node):
         self.undo_topic = str(self.get_parameter("undo_topic").value)
         self.pause_topic = str(self.get_parameter("pause_topic").value)
         self.resume_topic = str(self.get_parameter("resume_topic").value)
+        self.resume_from_current_topic = str(self.get_parameter("resume_from_current_topic").value)
         self.planner_id = str(self.get_parameter("planner_id").value)
         self.tf_timeout = float(self.get_parameter("tf_timeout").value)
         self.edit_radius = max(0.05, float(self.get_parameter("edit_radius").value))
@@ -154,6 +156,7 @@ class GlobalPathSequencePublisher(Node):
         self._active_goal_handle = None
         self._active_goal_version = -1
         self._last_path: Optional[Path] = None
+        self._resume_bridge_active = False
         self._interactive_markers_dirty = True
         self._interactive_label_distance_bucket: Optional[int] = None
         self._interactive_label_distance_text: Optional[str] = None
@@ -189,6 +192,12 @@ class GlobalPathSequencePublisher(Node):
         self.undo_sub = self.create_subscription(Empty, self.undo_topic, self._on_undo, 10)
         self.pause_sub = self.create_subscription(Empty, self.pause_topic, self._on_pause, 10)
         self.resume_sub = self.create_subscription(Empty, self.resume_topic, self._on_resume, 10)
+        self.resume_from_current_sub = self.create_subscription(
+            Empty,
+            self.resume_from_current_topic,
+            self._on_resume_from_current,
+            10,
+        )
 
         self.tf_buffer = tf2_ros.Buffer(cache_time=Duration(seconds=10.0))
         self.tf_listener = tf2_ros.TransformListener(self.tf_buffer, self)
@@ -308,15 +317,15 @@ class GlobalPathSequencePublisher(Node):
         self._request_plan_to_current_goal()
         self._publish_status()
 
-    def _advance_if_reached(self):
+    def _advance_if_reached(self) -> bool:
         robot_xy = self._lookup_robot_xy()
         if robot_xy is None:
-            return
+            return False
 
         goal = self.waypoints[self.current_index]
         dist = math.hypot(robot_xy[0] - goal.x, robot_xy[1] - goal.y)
         if dist > self.goal_tolerance:
-            return
+            return False
 
         self.get_logger().debug(
             f"Reached waypoint {self.current_index + 1}/{len(self.waypoints)}: "
@@ -336,7 +345,7 @@ class GlobalPathSequencePublisher(Node):
             self._last_path = None
             self._publish_empty_paths()
             self._publish_waypoints()
-            return
+            return True
 
         if self.loop:
             self.current_index = 0
@@ -347,6 +356,7 @@ class GlobalPathSequencePublisher(Node):
             self._publish_empty_paths()
             self._publish_waypoints()
             self.get_logger().debug("Waypoint sequence completed; looping to waypoint 1.")
+            return True
         else:
             self.sequence_done = True
             self.sequence_version += 1
@@ -356,52 +366,32 @@ class GlobalPathSequencePublisher(Node):
             self._publish_empty_paths()
             self._publish_waypoints()
             self.get_logger().debug("Waypoint sequence completed.")
+            return True
 
     def _request_plan_to_current_goal(self):
+        goal = self.waypoints[self.current_index]
+        goal_msg = ComputePathToPose.Goal()
+        goal_msg.goal = self._to_pose_stamped(goal)
+        goal_msg.use_start = False
+        if self.planner_id:
+            goal_msg.planner_id = self.planner_id
+
         self.request_in_flight = True
         request_version = self.sequence_version
         self.request_version = request_version
         self._publish_current_goal()
-        
-        self._planned_path_segments = []
-        self._plan_next_segment(self.current_index, request_version, None)
-
-    def _plan_next_segment(self, target_index: int, request_version: int, start_pose):
-        if target_index >= len(self.waypoints):
-            self._finalize_and_publish_paths(request_version)
-            return
-
-
-        if target_index > self.current_index and hasattr(self, '_cached_segments') and target_index in self._cached_segments:
-            cached_poses = self._cached_segments[target_index]
-            self._planned_path_segments.append(cached_poses)
-            next_start = cached_poses[-1]
-            self._plan_next_segment(target_index + 1, request_version, next_start)
-            return
-
-        goal = self.waypoints[target_index]
-        goal_msg = ComputePathToPose.Goal()
-        goal_msg.goal = self._to_pose_stamped(goal)
-        if start_pose is not None:
-            goal_msg.use_start = True
-            goal_msg.start = start_pose
-        else:
-            goal_msg.use_start = False
-
-        if self.planner_id:
-            goal_msg.planner_id = self.planner_id
 
         self.get_logger().debug(
-            f"Planning to waypoint {target_index + 1}/{len(self.waypoints)}: "
+            f"Planning single path to waypoint {self.current_index + 1}/{len(self.waypoints)}: "
             f"({goal.x:.3f}, {goal.y:.3f})"
         )
 
         future = self.compute_path_client.send_goal_async(goal_msg)
         future.add_done_callback(
-            lambda done_future, v=request_version, idx=target_index: self._goal_response_callback(done_future, v, idx)
+            lambda done_future, v=request_version: self._goal_response_callback(done_future, v)
         )
 
-    def _goal_response_callback(self, future, request_version: int, target_index: int):
+    def _goal_response_callback(self, future, request_version: int):
         try:
             goal_handle = future.result()
         except Exception as exc:
@@ -423,18 +413,19 @@ class GlobalPathSequencePublisher(Node):
         if goal_handle is None or not goal_handle.accepted:
             if self.request_version == request_version:
                 self.request_in_flight = False
-            self.get_logger().warn(f"ComputePathToPose goal rejected by server for waypoint {target_index + 1}")
-            self._finalize_and_publish_paths(request_version)
+            self.get_logger().warn("ComputePathToPose goal rejected by server")
             return
 
         self._active_goal_handle = goal_handle
         self._active_goal_version = request_version
         result_future = goal_handle.get_result_async()
         result_future.add_done_callback(
-            lambda done_future, v=request_version, idx=target_index: self._get_result_callback(done_future, v, idx)
+            lambda done_future, v=request_version: self._get_result_callback(done_future, v)
         )
 
-    def _get_result_callback(self, future, request_version: int, target_index: int):
+    def _get_result_callback(self, future, request_version: int):
+        if self.request_version == request_version:
+            self.request_in_flight = False
         if self._active_goal_version == request_version:
             self._active_goal_handle = None
             self._active_goal_version = -1
@@ -447,12 +438,10 @@ class GlobalPathSequencePublisher(Node):
             result = future.result().result
         except Exception as exc:
             self.get_logger().error(f"ComputePathToPose result failed: {exc}")
-            self._finalize_and_publish_paths(request_version)
             return
 
         if result is None or result.path is None or len(result.path.poses) == 0:
-            self.get_logger().warn(f"No valid path returned to waypoint {target_index + 1}. Stopping multi-waypoint planning.")
-            self._finalize_and_publish_paths(request_version)
+            self.get_logger().warn("No valid path returned to current waypoint")
             return
 
         # Manually extract and instantiate poses to entirely bypass rclpy's C-level memory reuse
@@ -470,45 +459,24 @@ class GlobalPathSequencePublisher(Node):
             new_p.pose.orientation.w = p.pose.orientation.w
             extracted_poses.append(new_p)
 
-        if target_index > self.current_index:
-            if not hasattr(self, '_cached_segments'):
-                self._cached_segments = {}
-            self._cached_segments[target_index] = extracted_poses
-
-        self._planned_path_segments.append(extracted_poses)
-        next_start = extracted_poses[-1]
-        self._plan_next_segment(target_index + 1, request_version, next_start)
-
-    def _finalize_and_publish_paths(self, request_version: int):
-        if self.request_version == request_version:
-            self.request_in_flight = False
-            
         if request_version != self.sequence_version:
             return
         if not self.waypoints or self.sequence_done or self.paused:
             return
 
-        if not hasattr(self, '_planned_path_segments') or not self._planned_path_segments:
-            self.get_logger().error("No valid path segments found")
-            self._publish_empty_paths()
-            return
-            
-        full_path = Path()
-        if self._planned_path_segments and self._planned_path_segments[0]:
-            full_path.header = self._planned_path_segments[0][0].header
-        full_path.header.frame_id = self.global_frame
-        
-        for i, poses in enumerate(self._planned_path_segments):
-            poses_to_add = poses if i == 0 else poses[1:]
-            full_path.poses.extend(poses_to_add)
-            
-        self._last_path = full_path
-        self.path_pub.publish(full_path)
+        path_msg = Path()
+        path_msg.header = extracted_poses[0].header
+        path_msg.header.frame_id = self.global_frame
+        path_msg.poses = extracted_poses
+
+        self._last_path = path_msg
+        self._resume_bridge_active = False
+        self.path_pub.publish(path_msg)
         if self.pure_pursuit_plan_pub is not None:
-            self.pure_pursuit_plan_pub.publish(full_path)
+            self.pure_pursuit_plan_pub.publish(path_msg)
         self.get_logger().debug(
-            f"Published global path to waypoint {self.current_index + 1}/{len(self.waypoints)} "
-            f"with {len(full_path.poses)} poses"
+            f"Published single-segment global path to waypoint "
+            f"{self.current_index + 1}/{len(self.waypoints)} with {len(path_msg.poses)} poses"
         )
 
     def _cancel_planner_goal_handle(self, goal_handle, reason: str):
@@ -1055,9 +1023,12 @@ class GlobalPathSequencePublisher(Node):
 
     def _on_pause(self, _msg: Empty):
         self.paused = True
+        self._resume_bridge_active = False
         self.sequence_version += 1
         self._invalidate_planning_request("waypoint sequence paused")
-        self._last_path = None
+        # Keep the last valid patrol path internally. The coordinator replaces
+        # the public path while handling a target, then resume can use this
+        # path only as a bridge until a fresh Navfn result arrives.
         self._publish_empty_paths()
         self._publish_waypoints()
         self._publish_status("paused")
@@ -1068,11 +1039,57 @@ class GlobalPathSequencePublisher(Node):
             self.sequence_done = False
             self.sequence_version += 1
             self._invalidate_planning_request("waypoint sequence resumed")
-            self._last_path = None
+            cached_pose_count = self._publish_cached_path()
+            self._resume_bridge_active = cached_pose_count > 0
             self._publish_waypoints()
-            self._publish_status("resumed")
+            self._publish_status(
+                f"resumed; restored {cached_pose_count} cached path poses"
+                if cached_pose_count > 0
+                else "resumed; requesting a fresh path"
+            )
+            # Do not wait for the next periodic tick. request_in_flight guards
+            # the timer from submitting a duplicate request.
+            self._on_timer()
+
+    def _on_resume_from_current(self, _msg: Empty):
+        """Resume patrol without replaying the path cached before interruption."""
+        if not self.waypoints:
+            return
+
+        self.paused = False
+        self.sequence_done = False
+        self.sequence_version += 1
+        self._invalidate_planning_request(
+            "waypoint sequence resumed from current pose after recovery timeout"
+        )
+        self._last_path = None
+        self._resume_bridge_active = False
+        self._publish_empty_paths()
+        self._publish_waypoints()
+        self._publish_status(
+            "recovery timed out; discarded cached path and replanning from current pose"
+        )
+        self._on_timer()
+
+    def _publish_cached_path(self) -> int:
+        if self._last_path is None or not self._last_path.poses:
+            return 0
+
+        path = copy.deepcopy(self._last_path)
+        stamp = self.get_clock().now().to_msg()
+        path.header.stamp = stamp
+        path.header.frame_id = path.header.frame_id or self.global_frame
+        for pose in path.poses:
+            pose.header.stamp = stamp
+            pose.header.frame_id = pose.header.frame_id or path.header.frame_id
+
+        self.path_pub.publish(path)
+        if self.pure_pursuit_plan_pub is not None:
+            self.pure_pursuit_plan_pub.publish(path)
+        return len(path.poses)
 
     def _publish_empty_paths(self):
+        self._resume_bridge_active = False
         msg = Path()
         msg.header.stamp = self.get_clock().now().to_msg()
         msg.header.frame_id = self.global_frame

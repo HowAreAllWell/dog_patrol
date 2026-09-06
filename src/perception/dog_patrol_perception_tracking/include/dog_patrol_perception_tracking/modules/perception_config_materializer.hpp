@@ -36,7 +36,7 @@ class PerceptionConfigMaterializer {
   };
 
   struct IdentityInput {
-    int target_lost_threshold_frames{180};
+    int target_lost_threshold_frames{100};
     int feat_bank_size{30};
     float recover_sim_thresh_strict{0.85F};
     float recover_sim_thresh_relaxed{0.75F};

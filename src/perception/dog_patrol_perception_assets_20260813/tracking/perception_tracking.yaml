@@ -5,6 +5,7 @@ dog_patrol_perception_tracking_node:
       mvs_serial: "DB0060477"
       width: 1280
       height: 1024
+      # MVS nominal rate; ros_image mode consumes the incoming topic rate (10 Hz).
       fps: 30.0
       timeout_ms: 1000
       bayer_interpolation: "balanced"
@@ -22,9 +23,9 @@ dog_patrol_perception_tracking_node:
       reid_backend: "light"
       reid_model_path: ""
     target:
-      lost_threshold_frames: 180
-      lost_event_timeout_sec: 1.0
-      reacquire_retention_sec: 6.0
+      # Internal tracker lifecycle only; final mission loss is time-based below.
+      lost_threshold_frames: 100
+      lost_event_timeout_sec: 10.0
       handled_ignore_absence_sec: 30.0
     mission:
       state_topic: "/mission/state"

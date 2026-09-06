@@ -1,4 +1,5 @@
 import os
+import sys
 import signal
 import subprocess
 import html
@@ -35,7 +36,6 @@ class TopicHzWorker(QThread):
         self.window = window
         self.ros_distro = ros_distro
 
-        self.python_executable = os.environ.get("DOG_PATROL_PYTHON", "python3")
         self.process = None
         self.is_running = True
 
@@ -85,6 +85,9 @@ class RobotMainWindow(QMainWindow):
         super().__init__()
         self.setWindowTitle("🚀 机器狗 高精度 SLAM 控制台 Pro")
         self.resize(1200, 800) 
+
+        # Keep every child process on the interpreter/virtualenv used to start the UI.
+        self.python_executable = os.environ.get("DOG_PATROL_PYTHON", sys.executable)
 
         self.log_engine = LogEngine(self.append_log)
         self.is_localized = False

@@ -79,13 +79,12 @@ class AuthorizationHarness:
             self.executor.spin_once(timeout_sec=0.05)
         return predicate()
 
-    def publish_state(self, seq, target, *, blocked=False):
+    def publish_state(self, seq, target):
         msg = MissionState()
         msg.header.stamp.sec = seq
         msg.state_seq = seq
         msg.state = MissionState.VERIFY_IDENTITY
         msg.target_id = target
-        msg.blocked = blocked
         self.state_pub.publish(msg)
         for _ in range(5):
             self.executor.spin_once(timeout_sec=0.05)
@@ -258,10 +257,10 @@ def test_error_cancels_round_and_maps_to_execution_error(harness):
     )
 
 
-def test_state_replacement_and_blocked_state_cancel_active_work(harness):
+def test_state_replacement_cancels_active_work(harness):
     harness.publish_state(21, 46)
     harness.publish_state(22, 47)
-    harness.publish_state(22, 47, blocked=True)
+    harness.publish_state(22, 47)
 
     assert command_keys(harness.commands) == [
         (21, 46, AuthorizationCommand.INITIAL_FACE),

@@ -44,7 +44,7 @@ provider 保留的当前状态。授权证据是离散、reliable、volatile 事
 - 初始仅人脸；失败后人脸/语音并行第一轮；两者均失败后并行第二轮；任一通过立即授权，任一技术错误
   结束为技术错误，只有第二轮两者均未通过才判未授权；
 - 不依赖 ROS 2、具体人脸算法或语音算法的纯 Python 测试面。
-- `perception_authorization` 节点：发布阶段命令，只在未阻塞的 `VERIFY_IDENTITY` 会话接受匹配 evidence，将最终结果
+- `perception_authorization` 节点：发布阶段命令，只在有效的 `VERIFY_IDENTITY` 会话接受匹配 evidence，将最终结果
   映射为 `AUTHORIZED`、`UNAUTHORIZED` 或 `EXECUTION_ERROR`；`CANCELLED` 不发布任务事件。
 - `ReadinessCoordinator`：将 `detection_tracking`、`face`、`voice` 固定为 required capability；
 - `perception_readiness` 节点：只在三者状态都匹配当前 STARTUP sequence 时发布一次
@@ -55,6 +55,15 @@ tracking 只发布自身 `detection_tracking` 状态，不再聚合或发布整�
 流程决定。与主状态机
 交互只使用 `dog_patrol_interfaces`，感知内部 capability transport 使用
 `dog_patrol_perception_interfaces`。
+
+感知内部状态、目标生命周期、认证阶段、总状态机、导航协调和任务级目标丢失规则统一以
+[`../../docs/contracts/perception_navigation_system_implementation.md`](../../docs/contracts/perception_navigation_system_implementation.md)
+为准。当前实现中，感知在 `PATROL` 选出可信主目标后发送一次
+`TARGET_CONFIRMED`，在目标任务阶段持续发送当前帧 bbox；连续 10 秒没有可信目标框时
+发送一次 `TARGET_LOST`，由总状态机进入 `RECOVER_PATROL`，而不是由感知直接修改全局状态。
+
+原始的感知内部记录 [`../../docs/perception/perception_internal_state_machine.md`](../../docs/perception/perception_internal_state_machine.md)
+仅作为历史详细记录，不再作为当前实现的唯一依据。
 
 ## 构建和测试
 

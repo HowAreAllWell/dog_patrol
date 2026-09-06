@@ -19,6 +19,7 @@ from std_srvs.srv import Trigger
 from dog_patrol_manager.state_machine import (
     EventSource,
     EventType,
+    GlobalState,
     MissionEventData,
     MissionStateMachine,
 )
@@ -37,10 +38,12 @@ class MissionSupervisor(Node):
 
         self.declare_parameter("state_topic", "/mission/state")
         self.declare_parameter("event_topic", "/mission/event")
-        self.declare_parameter("state_publish_rate", 1.0)
+        self.declare_parameter("state_publish_rate", 10.0)
         self.declare_parameter("initial_state_seq", 1)
         self.declare_parameter("processed_event_limit", 256)
         self.declare_parameter("max_detail_length", 256)
+        self.declare_parameter("confirm_target_timeout", 5.0)
+        self.declare_parameter("patrol_recovery_timeout", 10.0)
 
         self._state_topic = str(self.get_parameter("state_topic").value)
         self._event_topic = str(self.get_parameter("event_topic").value)
@@ -51,6 +54,12 @@ class MissionSupervisor(Node):
             32, int(self.get_parameter("max_detail_length").value)
         )
         self._lock = threading.RLock()
+        self._confirm_target_timeout = max(
+            0.1, float(self.get_parameter("confirm_target_timeout").value)
+        )
+        self._patrol_recovery_timeout = max(
+            0.1, float(self.get_parameter("patrol_recovery_timeout").value)
+        )
         self._machine = MissionStateMachine(
             initial_state_seq=int(
                 self.get_parameter("initial_state_seq").value
@@ -88,19 +97,24 @@ class MissionSupervisor(Node):
             self._state_timer = self.create_timer(
                 1.0 / self._state_publish_rate, self._publish_state
             )
+        self._state_entered_at = self.get_clock().now()
+        self._watchdog_timer = self.create_timer(0.1, self._check_state_timeout)
 
         self._publish_state()
         self.get_logger().info(
             "mission supervisor ready: "
             f"state_topic={self._state_topic}, "
             f"event_topic={self._event_topic}, "
-            f"state_publish_rate={self._state_publish_rate:.2f}Hz"
+            f"state_publish_rate={self._state_publish_rate:.2f}Hz, "
+            f"confirm_timeout={self._confirm_target_timeout:.1f}s, "
+            f"recovery_timeout={self._patrol_recovery_timeout:.1f}s"
         )
 
     def _on_reset(self, request, response):
         del request
         with self._lock:
             snapshot = self._machine.reset_session()
+            self._state_entered_at = self.get_clock().now()
             self._publish_state_locked()
         response.success = True
         response.message = (
@@ -120,6 +134,7 @@ class MissionSupervisor(Node):
         with self._lock:
             result = self._machine.handle_event(event_data)
             if result.changed:
+                self._state_entered_at = self.get_clock().now()
                 self._publish_state_locked()
 
         source_name = self._enum_name(EventSource, event_data.source)
@@ -142,6 +157,32 @@ class MissionSupervisor(Node):
         with self._lock:
             self._publish_state_locked()
 
+    def _check_state_timeout(self) -> None:
+        with self._lock:
+            snapshot = self._machine.snapshot
+            age = (self.get_clock().now() - self._state_entered_at).nanoseconds * 1e-9
+            if (
+                snapshot.state == GlobalState.CONFIRM_TARGET
+                and age >= self._confirm_target_timeout
+            ):
+                result = self._machine.begin_patrol_recovery(
+                    f"target position confirmation timed out after {age:.1f}s"
+                )
+            elif (
+                snapshot.state == GlobalState.RECOVER_PATROL
+                and age >= self._patrol_recovery_timeout
+            ):
+                result = self._machine.complete_patrol_recovery(
+                    f"patrol recovery timed out after {age:.1f}s; resumed previous patrol task"
+                )
+            else:
+                return
+
+            if result.changed:
+                self._state_entered_at = self.get_clock().now()
+                self._publish_state_locked()
+                self.get_logger().warning(result.reason)
+
     def _publish_state_locked(self) -> None:
         snapshot = self._machine.snapshot
         msg = MissionState()
@@ -149,8 +190,6 @@ class MissionSupervisor(Node):
         msg.state_seq = int(snapshot.state_seq)
         msg.state = int(snapshot.state)
         msg.target_id = int(snapshot.target_id)
-        msg.blocked = bool(snapshot.blocked)
-        msg.block_cause = int(snapshot.block_cause)
         msg.detail = str(snapshot.detail)[: self._max_detail_length]
         self._state_pub.publish(msg)
 

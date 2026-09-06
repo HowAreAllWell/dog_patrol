@@ -241,7 +241,8 @@ PrimaryTargetResult PrimaryTargetManager::UpdateForMission(
             ? previous_mission
             : last_mission_for_primary_;
     if (preceding_mission.has_value() && preceding_mission->target_id > 0 &&
-        (preceding_mission->phase == MissionPhase::kVerifyIdentity ||
+        (preceding_mission->phase == MissionPhase::kRecoverPatrol ||
+         preceding_mission->phase == MissionPhase::kVerifyIdentity ||
          preceding_mission->phase == MissionPhase::kTrackIntruder)) {
       handled_semantic_id = preceding_mission->target_id;
     }

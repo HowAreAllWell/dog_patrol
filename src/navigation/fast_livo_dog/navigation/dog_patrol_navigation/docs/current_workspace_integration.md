@@ -5,6 +5,10 @@
 导航说明已放在本目录的上层 `README.md` 以及各子包的 README 中；本文只说明它们在
 dog_patrol 中如何被总控、感知和导航协调器组合起来。
 
+> **当前实现基线（2026-09-05）**：导航协调器只消费 `/mission/state`，不拥有第二套
+> 业务状态机。当前消息没有 `blocked`、`block_cause`、`TARGET_REACQUIRED` 或
+> `HANDLING_COMPLETE`；目标丢失和导航技术故障由总控统一收口到 `RECOVER_PATROL`。
+
 ## 1. 系统边界
 
 当前系统分成四层，所有层都必须同时存在，不能把导航协调器误认为完整的导航栈：
@@ -22,8 +26,8 @@ dog_patrol 中如何被总控、感知和导航协调器组合起来。
    - DWB 适配器跟踪局部路径并发布机器狗最终使用的 `/NAV_CMD`。
 3. **导航任务协调层**
    - `navigation_mission_coordinator` 订阅任务状态、感知 bbox、雷达和 odom。
-   - 它把 bbox 和雷达点云融合成地图坐标目标，调用 Nav2 planner 生成“到目标前
-     3 m”的全局路径，并报告到达、失效和阻塞事件。
+   - 它把 bbox 和雷达点云融合成地图坐标目标，调用 Nav2 planner 生成目标接近路径，
+     用实时雷达距离在约 3 m 处停止，并报告到达和执行错误事件。
    - 它不直接发布速度，不替换 DWB、Pure Pursuit 或 RL 局部路径。
 4. **全局任务管理层**
    - `mission_supervisor` 是业务状态唯一所有者，发布 `/mission/state`，接收
@@ -112,7 +116,7 @@ ros2 launch dog_patrol_navigation navigation_mission_coordinator.launch.py \
 
 `dog_patrol_manager/mission_supervisor` 默认配置如下：
 
-- 状态：`/mission/state`；可靠、transient-local、keep-last 1；默认 1 Hz；
+- 状态：`/mission/state`；可靠、transient-local、keep-last 1；默认 10 Hz；
 - 事件：`/mission/event`；可靠、volatile、keep-last 10；
 - 服务：`/mission/reset`，类型 `std_srvs/srv/Trigger`；
 - 初始状态：`STARTUP`，初始 `state_seq=1`。
@@ -126,7 +130,7 @@ ros2 launch dog_patrol_navigation navigation_mission_coordinator.launch.py \
 
 | Topic | 类型 | 发布者 | 约束和作用 |
 |---|---|---|---|
-| `/mission/state` | `dog_patrol_interfaces/msg/MissionState` | mission supervisor | 当前全局状态、`state_seq`、目标 ID、阻塞原因 |
+| `/mission/state` | `dog_patrol_interfaces/msg/MissionState` | mission supervisor | 当前全局状态、`state_seq` 和目标 ID |
 | `/perception/selected_target_bbox` | `dog_patrol_interfaces/msg/TargetBoundingBox` | 感知 tracking | 当前目标框；必须携带目标 ID、图像尺寸和 `camera_link` frame |
 | `/livox/lidar` | `sensor_msgs/msg/PointCloud2` | Livox/FAST-LIVO 驱动 | 雷达点云；默认 frame 必须是 `livox_frame` |
 | `/odom` | `nav_msgs/msg/Odometry` | FAST-LIVO/odom bridge | 当前速度和 odom 数据；用于停止确认 |
@@ -137,12 +141,13 @@ ros2 launch dog_patrol_navigation navigation_mission_coordinator.launch.py \
 | Topic | 类型 | 使用者 | 发送时机 |
 |---|---|---|---|
 | `/mission/event` | `dog_patrol_interfaces/msg/MissionEvent` | mission supervisor | READY、目标位置就绪、到达、执行错误 |
-| `/navigation/target_status` | `dog_patrol_interfaces/msg/TargetNavigationStatus` | UI/总控/感知 | 默认 5 Hz，反馈距离和导航子状态 |
+| `/navigation/target_status` | `dog_patrol_interfaces/msg/TargetNavigationStatus` | UI/总控/感知 | 默认 10 Hz，反馈距离和导航执行子状态 |
 | `/navigation/target_point` | `geometry_msgs/msg/PointStamped` | UI/调试/后续模块 | bbox+点云稳定融合后发布，frame 为 `map` |
-| `/navigation/target_goal` | `geometry_msgs/msg/PoseStamped` | UI/调试 | 每次调用 planner 前发布本次 3 m standoff goal，frame 为 `map` |
-| `/global_path` | `nav_msgs/msg/Path` | move/Nav2 局部链 | planner action 成功后发布；阻塞、等待或停止时发布空路径 |
-| `/waypoint_sequence/pause` | `std_msgs/msg/Empty` | waypoint 节点 | 进入目标确认、接近或跟踪时暂停巡逻 waypoint |
-| `/waypoint_sequence/resume` | `std_msgs/msg/Empty` | waypoint 节点 | 回到 `PATROL` 时恢复巡逻 |
+| `/navigation/target_goal` | `geometry_msgs/msg/PoseStamped` | UI/调试 | 每次调用 planner 前发布本次 planner 目标（当前距目标约 1 m），frame 为 `map` |
+| `/global_path` | `nav_msgs/msg/Path` | move/Nav2 局部链 | planner action 成功后发布；等待或停止时发布空路径 |
+| `/waypoint_sequence/pause` | `std_msgs/msg/Empty` | waypoint 节点 | 进入接近、核验、跟踪或恢复时暂停巡逻 waypoint |
+| `/waypoint_sequence/resume` | `std_msgs/msg/Empty` | waypoint 节点 | 恢复阶段回到中断位姿后，或回到 `PATROL` 时恢复巡逻 |
+| `/waypoint_sequence/resume_from_current` | `std_msgs/msg/Empty` | waypoint 节点 | 恢复超时时丢弃旧缓存路径，从当前机器人位姿重新规划当前巡检 waypoint |
 
 协调器只检查 `/NAV_CMD` 是否存在，不发布 `/NAV_CMD`。真正给机器狗底层的控制命令
 仍然来自 `priest_mppi_adapter_nav_cmd_dwb_smooth_responsive.py`。`/NAV_CMD` 的消息格式
@@ -159,34 +164,35 @@ ros2 launch dog_patrol_navigation navigation_mission_coordinator.launch.py \
 | 2 | `CONFIRM_TARGET` | 已发现候选目标，等待导航得到地图位置 |
 | 3 | `APPROACH_TARGET` | 导航到目标前的 3 m 位置 |
 | 4 | `VERIFY_IDENTITY` | 到达并停止，等待感知识别认证 |
-| 5 | `TRACK_INTRUDER` | 未授权目标，持续跟踪并维持 3 m 距离 |
+| 5 | `TRACK_INTRUDER` | 核验未通过后持续跟踪并维持 3 m 距离 |
+| 6 | `RECOVER_PATROL` | 清理目标任务，返回巡检断点并恢复 waypoint |
 
 `MissionEvent.msg` 的合法发布者：
 
 - 感知发布：`READY`、`TARGET_CONFIRMED`、`AUTHORIZED`、`UNAUTHORIZED`、
-  `TARGET_LOST`、`TARGET_REACQUIRED`、`EXECUTION_ERROR`；
+  `TARGET_LOST`、`EXECUTION_ERROR`；
 - 导航发布：`READY`、`TARGET_POSITION_READY`、`ARRIVED_AND_STOPPED`、
   `EXECUTION_ERROR`；
-- 操作员/总控发布：`HANDLING_COMPLETE`。
-
 每个事件必须填写当前 `observed_state_seq`。状态切换后 supervisor 会递增
 `state_seq`，旧序号事件会被拒绝；重复事件也会被去重。目标相关事件必须填写与
 当前状态一致的非零 `target_id`，READY 的 `target_id` 必须是 0。
 
-## 4. 全局状态和导航内部状态机
+## 4. 全局状态和导航执行策略
 
-导航内部有一个轻量状态机 `NavigationStateMachine`。它不拥有业务状态，只把全局
-`MissionState` 映射成导航动作。对应关系如下：
+导航协调器没有独立的业务状态机。`navigation_policy()` 是无状态映射函数，只把
+总控发布的 `MissionState` 映射成当前一次状态进入动作和周期执行权限；导航模式名
+（例如 `acquiring target`、`approaching target`）只用于日志和观测，不能驱动业务转移。
+对应关系如下：
 
 | 全局状态 | 导航模式 | 是否暂停巡逻 | 是否融合 bbox | 是否生成目标路径 | 进入时动作 |
 |---|---|---:|---:|---:|---|
 | `STARTUP` | `INITIALIZING` | 是 | 否 | 否 | 清空路径，等待就绪 |
 | `PATROL` | `PATROLLING` | 否 | 否 | 否 | 清目标、恢复 waypoint |
-| `CONFIRM_TARGET` | `ACQUIRING_TARGET` | 是 | 是 | 否 | 接收并稳定融合目标位置 |
+| `CONFIRM_TARGET` | `ACQUIRING_TARGET` | 否 | 是 | 否 | 保持巡逻，后台接收并稳定融合目标位置 |
 | `APPROACH_TARGET` | `APPROACHING_TARGET` | 是 | 是 | 是 | 按最新目标位置规划 3 m standoff |
 | `VERIFY_IDENTITY` | `HOLDING_FOR_VERIFICATION` | 是 | 是 | 否 | 保持停止，等待认证 |
 | `TRACK_INTRUDER` | `TRACKING_TARGET` | 是 | 是 | 是 | 按最新目标位置持续跟踪 |
-| 任意状态 `blocked=true` | `SAFE_STOP` | 是 | 否 | 否 | 清空路径，持续发送停止路径 |
+| `RECOVER_PATROL` | `RECOVERING_PATROL` | 是 | 否 | 返回中断位姿 | 清理目标任务，返回巡检断点并恢复 waypoint |
 
 ### 4.1 STARTUP 到 PATROL
 
@@ -216,7 +222,8 @@ ros2 launch dog_patrol_navigation navigation_mission_coordinator.launch.py \
 
 ### 4.3 CONFIRM_TARGET
 
-进入后暂停巡逻，但先不把 bbox 直接当作终点。协调器需要同时找到：
+进入后继续原来的巡逻链，但不把 bbox 直接当作终点，也不因目标确认生成运动路径。
+协调器在后台需要同时找到：
 
 - 未过期的 bbox；
 - 时间接近的雷达点云；
@@ -240,7 +247,7 @@ Nav2 `ComputePathToPose`。目标在接近过程中可以移动，因此不是�
   故障达到 `technical_error_timeout` 后才报告 `EXECUTION_ERROR`。单纯 bbox 超时
   不会由导航自动改写全局任务状态，目标丢失事件应由感知端发布 `TARGET_LOST`。
 
-目标距离不大于 `3.0 + 0.25 = 3.25 m` 时，协调器发布空路径并持续停止。只有距离
+目标实时平面距离不大于 `3.0 + 0.10 = 3.10 m` 时，协调器发布空路径并持续停止。只有距离
 满足、线速度不大于 `0.05 m/s`、角速度不大于 `0.10 rad/s`，并连续保持 `0.50 s`
 后，才发布 `ARRIVED_AND_STOPPED`。这会使 supervisor 转到 `VERIFY_IDENTITY`。
 
@@ -252,8 +259,8 @@ Nav2 `ComputePathToPose`。目标在接近过程中可以移动，因此不是�
 - 不生成移动目标路径；
 - 继续发布空路径，防止控制器继续使用旧路径；
 - 感知内部执行自己的两次认证流程；
-- 感知发布 `AUTHORIZED` 后回到 `PATROL`，发布 `UNAUTHORIZED` 后进入
-  `TRACK_INTRUDER`。
+- 感知发布 `AUTHORIZED` 后总控进入 `RECOVER_PATROL`，导航恢复巡检后再回到 `PATROL`；
+- 发布 `UNAUTHORIZED` 后进入 `TRACK_INTRUDER`。
 
 认证流程的内部细节不由导航协调器解释，导航只关心这两个事件。
 
@@ -262,19 +269,24 @@ Nav2 `ComputePathToPose`。目标在接近过程中可以移动，因此不是�
 该状态和接近阶段的区别是：目标持续运动时，协调器持续更新目标位置并按
 `tracking_distance=3.0 m` 重新计算 standoff goal。它使用
 `tracking_replan_period=0.50 s` 和 `target_replan_distance=0.25 m`。如果目标数据
-过期，导航立即停止并把状态报告为 `BLOCKED`；由于当前全局状态机没有自动 fallback，
-后续恢复必须由规定的 `TARGET_REACQUIRED` 或总控 reset 流程完成。
+暂时过期，导航清空目标路径并保持停止；如果融合、TF 或 planner 技术故障持续超过
+阈值，导航发布 `EXECUTION_ERROR`，由总控进入 `RECOVER_PATROL`。导航不发布
+`TARGET_LOST`，也不等待重新获取事件或人工完成事件。
 
-### 4.7 阻塞和恢复
+### 4.7 RECOVER_PATROL
 
-`MissionState.blocked=true` 或导航内部进入 `SAFE_STOP` 时：
+`RECOVER_PATROL` 是总控的统一任务收口状态，不是导航自己的业务状态。进入该状态后：
 
-- 清空旧 `/global_path`；
-- 每 `0.20 s` 重发空路径，避免控制器继续使用旧路径；
-- 不再融合目标、不再调用 planner；
-- `/navigation/target_status` 为 `BLOCKED`；
-- `TARGET_LOST` 对应 `block_cause=TARGET_LOST`，执行异常对应
-  `block_cause=EXECUTION_ERROR`。
+- 协调器取消目标 planner 和 FollowPath 请求，清空目标路径及目标缓存，并持续发布空路径；
+- 暂停 waypoint 巡逻；
+- 使用进入 `APPROACH_TARGET` 时保存的 `map -> base_footprint` 位姿作为恢复目标；
+- 到达位置容差 `0.25 m` 且速度稳定后发布 `/waypoint_sequence/resume` 和
+  `PATROL_RECOVERY_COMPLETE`；不等待 waypoint 发布新的非空路径；
+- 如果没有可用的中断位姿，协调器不伪造恢复目标，而是清理任务并直接发布
+  `PATROL_RECOVERY_COMPLETE`；如果 `patrol_recovery_timeout=10.0 s` 到期，supervisor
+  也会直接收口到 `PATROL`，不会形成二次错误状态。此时协调器不发送普通 `resume`，而是
+  发送 `/waypoint_sequence/resume_from_current`，waypoint 节点清除暂停前缓存路径，从当前
+  机器人位姿重新规划当前巡检 waypoint，避免机器人沿旧路径回到中断点。
 
 `/mission/reset` 会让 supervisor 回到 `STARTUP`、清空目标并递增 `state_seq`。它不
 重启节点。重新 READY 后才会再次进入巡逻。
@@ -348,9 +360,12 @@ scale = (d - standoff_distance) / d
 goal = robot + scale * (target - robot)
 ```
 
-所以 planner 目标在目标和机器人之间，而不是目标中心。目标朝向使用机器人指向目标
-的 yaw。3D 点云的 z 只用于目标融合和显示；当前目标 standoff planner 目标的 z 固定
-为 0，因为下游是 Nav2 平面路径和机器狗平面控制链。
+所以 planner 目标在目标和机器人之间，而不是目标中心。当前配置的
+`planning_goal_distance=1.0 m` 只决定 planner 请求点距离目标约 1 m；实际是否到达
+目标由最新雷达测得的 `approach_distance=3.0 m` 和 `arrival_distance_tolerance=0.10 m`
+判定，并不是把规划目标放到人身上。目标朝向使用机器人指向目标的 yaw。3D 点云的 z
+只用于目标融合和显示；当前目标 standoff planner 目标的 z 固定为 0，因为下游是 Nav2
+平面路径和机器狗平面控制链。
 
 ### 6.2 planner 请求和路径发布
 
@@ -372,7 +387,7 @@ goal = robot + scale * (target - robot)
 当前到达不是单纯距离判断，必须同时满足：
 
 ```text
-distance <= 3.0 m + 0.25 m tolerance
+distance <= 3.0 m + 0.10 m tolerance
 linear_speed <= 0.05 m/s
 angular_speed <= 0.10 rad/s
 odom 新鲜度 <= 0.50 s
@@ -406,6 +421,7 @@ src/navigation/fast_livo_dog/navigation/dog_patrol_navigation/config/m20_patrol_
 | `topics.global_path` | `/global_path` | 发布目标处置全局路径 |
 | `topics.pause_patrol` | `/waypoint_sequence/pause` | 暂停巡逻 waypoint |
 | `topics.resume_patrol` | `/waypoint_sequence/resume` | 恢复巡逻 waypoint |
+| `topics.resume_patrol_from_current` | `/waypoint_sequence/resume_from_current` | 恢复超时后从当前位姿重新规划巡逻 |
 | `topics.nav_cmd` | `/NAV_CMD` | 只用于 READY 检查，不由协调器发布 |
 | `topics.target_point` | `/navigation/target_point` | 发布地图系目标点 |
 | `topics.target_goal` | `/navigation/target_goal` | 发布本次 planner standoff 目标 |
@@ -421,6 +437,17 @@ src/navigation/fast_livo_dog/navigation/dog_patrol_navigation/config/m20_patrol_
 | `frames.robot` | `base_footprint` | 平面导航 TF 和 readiness 检查 frame |
 | `frames.lidar` | `livox_frame` | 点云 frame 校验和外参输入 frame |
 | `frames.camera_optical` | `camera_link` | bbox frame 校验值 |
+
+### 7.2.1 waypoint 巡检参数
+
+| 参数 | 当前值 | 作用 |
+|---|---:|---|
+| `waypoint_goal_tolerance` | `1.0 m` | 机器人进入当前巡检 waypoint 的距离容差后，切换到下一个 waypoint |
+| `waypoint_replan_period` | `1.0 s` | 普通巡检 waypoint 路径的重新规划周期 |
+
+这里的 `waypoint_goal_tolerance` 只用于普通巡检 waypoint 的切换，不是目标接近阶段的
+`arrival_distance_tolerance=0.25 m`。waypoint 发布器每次只向当前 `current_index` 的
+目标请求并发布一段 `/global_path`，不会把后续 waypoint 的路径拼接到当前路径中。
 
 ### 7.3 calibration
 
@@ -492,7 +519,7 @@ calibration.lidar_to_base:
 |---|---:|---|
 | `approach_distance` | `3.0 m` | 接近目标时的期望停留距离 |
 | `tracking_distance` | `3.0 m` | 跟踪目标时的期望停留距离 |
-| `arrival_distance_tolerance` | `0.25 m` | 到达距离容差 |
+| `arrival_distance_tolerance` | `0.10 m` | 到达距离容差 |
 | `arrival_linear_speed` | `0.05 m/s` | 到达确认的最大线速度 |
 | `arrival_angular_speed` | `0.10 rad/s` | 到达确认的最大角速度 |
 | `arrival_hold_time` | `0.50 s` | 速度和距离条件连续保持时间 |
@@ -506,7 +533,7 @@ calibration.lidar_to_base:
 | 参数 | 当前值 | 作用 |
 |---|---:|---|
 | `tick_rate` | `10.0 Hz` | 主状态和目标处理周期 |
-| `status_rate` | `5.0 Hz` | `/navigation/target_status` 发布频率 |
+| `status_rate` | `10.0 Hz` | `/navigation/target_status` 发布频率 |
 | `strict_ready_checks` | `true` | 是否要求完整下游链路后才 READY |
 | `ready_lidar_timeout` | `0.50 s` | READY 判断雷达新鲜度 |
 | `ready_event_period` | `1.0 s` | STARTUP 等待期间 READY 检查/重发周期 |

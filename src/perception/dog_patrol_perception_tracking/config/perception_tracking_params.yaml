@@ -7,6 +7,8 @@ dog_patrol_perception_tracking_node:
       mvs_serial: ""
       width: 1280
       height: 1024
+      # Nominal Hik MVS acquisition rate. In ros_image mode the actual input
+      # rate is determined by camera.image_topic (currently 10 Hz).
       fps: 30.0
       timeout_ms: 1000
       bayer_interpolation: "balanced"
@@ -39,14 +41,15 @@ dog_patrol_perception_tracking_node:
       reid_input_height: 256
 
     target:
-      lost_threshold_frames: 180
+      # Internal tracker lifecycle only. The task-level TARGET_LOST event uses
+      # lost_event_timeout_sec below and is time-based.
+      lost_threshold_frames: 100
       min_person_area_px: 1000.0
       max_center_jump_norm: 2.0
       min_area_ratio: 0.25
       max_area_ratio: 4.0
       pending_recovery_frames: 3
-      lost_event_timeout_sec: 1.0
-      reacquire_retention_sec: 6.0
+      lost_event_timeout_sec: 10.0
       handled_ignore_absence_sec: 30.0
 
     mission:

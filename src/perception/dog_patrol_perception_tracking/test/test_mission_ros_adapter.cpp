@@ -25,7 +25,6 @@ using dog_patrol_perception_tracking::ClassId;
 using dog_patrol_perception_tracking::FreshTargetBoxAction;
 using dog_patrol_perception_tracking::IdentityObservation;
 using dog_patrol_perception_tracking::IdentityState;
-using dog_patrol_perception_tracking::MissionBlockCause;
 using dog_patrol_perception_tracking::MissionCoordinator;
 using dog_patrol_perception_tracking::MissionPhase;
 using dog_patrol_perception_tracking::MissionRosAdapter;
@@ -37,14 +36,11 @@ using TargetBoundingBoxMessage = dog_patrol_interfaces::msg::TargetBoundingBox;
 using CapabilityStatusMessage = dog_patrol_perception_interfaces::msg::CapabilityStatus;
 
 MissionStateMessage State(const std::uint32_t sequence, const std::uint8_t phase,
-                          const std::uint32_t target_id = 0U, const bool blocked = false,
-                          const std::uint8_t cause = MissionStateMessage::BLOCK_NONE) {
+                          const std::uint32_t target_id = 0U) {
   MissionStateMessage message;
   message.state_seq = sequence;
   message.state = phase;
   message.target_id = target_id;
-  message.blocked = blocked;
-  message.block_cause = cause;
   return message;
 }
 
@@ -115,8 +111,6 @@ TEST_F(MissionRosAdapterTest, MapsOnlyCompatibleMissionStateMessages) {
   message.state_seq = 17U;
   message.state = dog_patrol_interfaces::msg::MissionState::CONFIRM_TARGET;
   message.target_id = 42U;
-  message.blocked = false;
-  message.block_cause = dog_patrol_interfaces::msg::MissionState::BLOCK_NONE;
 
   const auto snapshot = dog_patrol_perception_tracking::MissionRosAdapter::MissionFromMessage(message);
 
@@ -124,7 +118,6 @@ TEST_F(MissionRosAdapterTest, MapsOnlyCompatibleMissionStateMessages) {
   EXPECT_EQ(snapshot->state_seq, 17U);
   EXPECT_EQ(snapshot->target_id, 42);
   EXPECT_EQ(snapshot->phase, dog_patrol_perception_tracking::MissionPhase::kConfirmTarget);
-  EXPECT_EQ(snapshot->block_cause, dog_patrol_perception_tracking::MissionBlockCause::kNone);
 }
 
 TEST_F(MissionRosAdapterTest, RejectsIncompatibleMissionStates) {
@@ -134,11 +127,16 @@ TEST_F(MissionRosAdapterTest, RejectsIncompatibleMissionStates) {
   EXPECT_FALSE(MissionRosAdapter::MissionFromMessage(
       State(1U, MissionStateMessage::CONFIRM_TARGET, 0U))
                    .has_value());
-  EXPECT_FALSE(MissionRosAdapter::MissionFromMessage(
-      State(1U, MissionStateMessage::CONFIRM_TARGET, 42U, false,
-            MissionStateMessage::BLOCK_TARGET_LOST))
-                   .has_value());
   EXPECT_FALSE(MissionRosAdapter::MissionFromMessage(State(1U, 255U)).has_value());
+}
+
+TEST_F(MissionRosAdapterTest, AcceptsRecoveryStateWithTargetCorrelationId) {
+  const auto snapshot = MissionRosAdapter::MissionFromMessage(
+      State(18U, MissionStateMessage::RECOVER_PATROL, 42U));
+
+  ASSERT_TRUE(snapshot.has_value());
+  EXPECT_EQ(snapshot->phase, MissionPhase::kRecoverPatrol);
+  EXPECT_EQ(snapshot->target_id, 42);
 }
 
 TEST_F(MissionRosAdapterTest, DeclaresTheSharedContractQosProfiles) {
@@ -310,8 +308,8 @@ TEST_F(MissionRosAdapterTest, EmitsLossForTheLatestStateSequenceAfterTargetState
 
   ASSERT_TRUE(adapter.StoreMissionState(
       State(103U, MissionStateMessage::APPROACH_TARGET, 42U)));
-  adapter.ProcessFrame({}, source_time + std::chrono::milliseconds{500},
-                       Metadata(1710000000500000000ULL));
+  adapter.ProcessFrame({}, source_time + std::chrono::seconds{10},
+                       Metadata(1710000006000000000ULL));
   ASSERT_TRUE(SpinUntil(executor, [&events] { return events.size() == 1U; }));
   EXPECT_EQ(events.front().event, MissionEventMessage::TARGET_LOST);
   EXPECT_EQ(events.front().observed_state_seq, 103U);
@@ -350,8 +348,8 @@ TEST_F(MissionRosAdapterTest, TreatsAnOffImageIdentityAsMissingForTargetLoss) {
   ASSERT_TRUE(SpinUntil(executor, [&boxes] { return boxes.size() == 1U; }));
 
   const auto off_image_person = TrustedPerson(42, 7, cv::Rect2f{700.0F, 2.0F, 4.0F, 4.0F});
-  adapter.ProcessFrame({off_image_person}, source_time + std::chrono::milliseconds{500},
-                       Metadata(1710000000500000000ULL));
+  adapter.ProcessFrame({off_image_person}, source_time + std::chrono::seconds{10},
+                       Metadata(1710000006000000000ULL));
   ASSERT_TRUE(SpinUntil(executor, [&events] { return events.size() == 1U; }));
   EXPECT_EQ(events.front().event, MissionEventMessage::TARGET_LOST);
   EXPECT_EQ(events.front().target_id, 42U);
@@ -463,7 +461,7 @@ TEST_F(MissionRosAdapterTest, RetriesTargetConfirmationWhenTargetWasVisibleDurin
   (void)event_subscription;
 }
 
-TEST_F(MissionRosAdapterTest, HeadlessRosSmokeForReadyTargetAndLossReacquisition) {
+TEST_F(MissionRosAdapterTest, HeadlessRosSmokeForReadyTargetAndLossRecovery) {
   auto adapter_node = std::make_shared<rclcpp::Node>("mission_ros_adapter_smoke");
   MissionRosAdapter::Config config;
   config.mission_state_topic = "/issue84/smoke/mission/state";
@@ -521,31 +519,28 @@ TEST_F(MissionRosAdapterTest, HeadlessRosSmokeForReadyTargetAndLossReacquisition
   EXPECT_EQ(boxes.back().header.stamp.sec, 1710000000);
   EXPECT_EQ(boxes.back().header.stamp.nanosec, 100000000U);
 
-  adapter.ProcessFrame({}, source_time + std::chrono::milliseconds{500},
+  adapter.ProcessFrame({}, source_time + std::chrono::seconds{10},
                        Metadata(1710000000600000000ULL));
   ASSERT_TRUE(SpinUntil(executor, [&events] { return events.size() == 2U; }));
   EXPECT_EQ(events.back().event, MissionEventMessage::TARGET_LOST);
   EXPECT_EQ(events.back().target_id, 42U);
   EXPECT_EQ(events.back().observed_state_seq, 102U);
 
-  state_publisher->publish(State(103U, MissionStateMessage::CONFIRM_TARGET, 42U, true,
-                                 MissionStateMessage::BLOCK_TARGET_LOST));
+  state_publisher->publish(State(103U, MissionStateMessage::RECOVER_PATROL, 42U));
   ASSERT_TRUE(SpinUntil(executor, [&adapter] {
     const auto mission = adapter.CurrentMission();
     return mission.has_value() && mission->state_seq == 103U;
   }));
   adapter.ProcessFrame({trusted}, source_time + std::chrono::milliseconds{600},
                        Metadata(1710000000700000000ULL));
-  ASSERT_TRUE(SpinUntil(executor, [&events] { return events.size() == 3U; }));
-  EXPECT_EQ(events.back().event, MissionEventMessage::TARGET_REACQUIRED);
-  EXPECT_EQ(events.back().target_id, 42U);
-  EXPECT_EQ(events.back().observed_state_seq, 103U);
+  executor.spin_some();
+  EXPECT_EQ(events.size(), 2U);
   EXPECT_EQ(boxes.size(), 1U);
   ASSERT_TRUE(adapter.PreviousMission().has_value());
   EXPECT_EQ(adapter.PreviousMission()->state_seq, 102U);
 
   EXPECT_FALSE(adapter.StoreMissionState(State(99U, MissionStateMessage::PATROL)));
-  EXPECT_FALSE(adapter.StoreMissionState(State(103U, MissionStateMessage::CONFIRM_TARGET, 42U)));
+  EXPECT_TRUE(adapter.StoreMissionState(State(103U, MissionStateMessage::RECOVER_PATROL, 42U)));
   EXPECT_EQ(adapter.CurrentMission()->state_seq, 103U);
 
   executor.remove_node(probe);

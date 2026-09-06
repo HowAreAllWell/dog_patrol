@@ -36,10 +36,9 @@ from dog_patrol_interfaces.msg import (
     TargetNavigationStatus,
 )
 
-from .navigation_fsm import (
-    NavigationMode,
-    NavigationStateMachine,
+from .navigation_policy import (
     compute_standoff_decision,
+    navigation_policy,
 )
 from .target_estimator import (
     BoundingBox,
@@ -138,7 +137,6 @@ class NavigationMissionCoordinator(Node):
 
         self._mission_state: Optional[MissionState] = None
         self._active_target_id = 0
-        self._nav_fsm = NavigationStateMachine()
         self._clouds: Deque[PointCloud2] = deque()
         self._latest_bbox: Optional[TargetBoundingBox] = None
         self._last_bbox_time: Optional[Time] = None
@@ -170,6 +168,7 @@ class NavigationMissionCoordinator(Node):
         self._last_fusion_error = ""
         self._last_fusion_error_recoverable = False
         self._last_fusion_warning: Optional[Time] = None
+        self._last_tf_fallback_warning: Optional[Time] = None
         self._last_measurement_log: Optional[Time] = None
         self._last_motion_log: Optional[Time] = None
         self._last_bbox_received_time: Optional[Time] = None
@@ -178,8 +177,16 @@ class NavigationMissionCoordinator(Node):
         self._latest_angular_speed = float("inf")
         self._plan_in_flight = False
         self._plan_generation = 0
+        self._active_planner_goal_handle = None
+        self._active_planner_goal_generation = -1
         self._arrival_reported = False
         self._sent_events: Dict[Tuple[int, int], bool] = {}
+        self._patrol_interruption_pose: Optional[PoseStamped] = None
+        self._recovery_return_path_requested = False
+        self._recovery_return_path_ready = False
+        self._recovery_return_arrived = False
+        self._recovery_hold_start: Optional[Time] = None
+        self._patrol_resume_sent_during_recovery = False
 
         state_qos = QoSProfile(
             reliability=ReliabilityPolicy.RELIABLE,
@@ -213,6 +220,9 @@ class NavigationMissionCoordinator(Node):
         )
         self._pause_pub = self.create_publisher(Empty, self.pause_topic, 10)
         self._resume_pub = self.create_publisher(Empty, self.resume_topic, 10)
+        self._resume_from_current_pub = self.create_publisher(
+            Empty, self.resume_from_current_topic, 10
+        )
 
         self._state_sub = self.create_subscription(
             MissionState, self.state_topic, self._on_mission_state, state_qos
@@ -232,7 +242,9 @@ class NavigationMissionCoordinator(Node):
         cancel_service = f"{self.follow_path_action.rstrip('/')}/_action/cancel_goal"
         self._controller_cancel_client = self.create_client(CancelGoal, cancel_service)
         self._tick_timer = self.create_timer(1.0 / self.tick_rate, self._tick)
-        self._status_timer = self.create_timer(1.0 / self.status_rate, self._publish_status)
+        self._status_timer = self.create_timer(
+            1.0 / self.status_rate, self._publish_status
+        )
 
         self.get_logger().info(
             "navigation coordinator ready: "
@@ -251,6 +263,7 @@ class NavigationMissionCoordinator(Node):
             "topics.global_path": "/global_path",
             "topics.pause_patrol": "/waypoint_sequence/pause",
             "topics.resume_patrol": "/waypoint_sequence/resume",
+            "topics.resume_patrol_from_current": "/waypoint_sequence/resume_from_current",
             "topics.nav_cmd": "/NAV_CMD",
             "topics.target_point": "/navigation/target_point",
             "topics.target_goal": "/navigation/target_goal",
@@ -306,12 +319,13 @@ class NavigationMissionCoordinator(Node):
             "motion.arrival_linear_speed": 0.05,
             "motion.arrival_angular_speed": 0.10,
             "motion.arrival_hold_time": 0.50,
+            "motion.recovery_position_tolerance": 0.25,
             "motion.approach_replan_period": 0.50,
             "motion.tracking_replan_period": 0.50,
             "motion.target_replan_distance": 0.25,
             "motion.stop_republish_period": 0.20,
             "runtime.tick_rate": 10.0,
-            "runtime.status_rate": 5.0,
+            "runtime.status_rate": 10.0,
             "runtime.ready_lidar_timeout": 0.50,
             "runtime.ready_event_period": 1.0,
             "runtime.technical_error_timeout": 3.0,
@@ -351,6 +365,9 @@ class NavigationMissionCoordinator(Node):
         self.global_path_topic = value("topics.global_path").value
         self.pause_topic = value("topics.pause_patrol").value
         self.resume_topic = value("topics.resume_patrol").value
+        self.resume_from_current_topic = value(
+            "topics.resume_patrol_from_current"
+        ).value
         self.nav_cmd_topic = value("topics.nav_cmd").value
         self.target_point_topic = value("topics.target_point").value
         self.target_goal_topic = value("topics.target_goal").value
@@ -431,6 +448,9 @@ class NavigationMissionCoordinator(Node):
         self.arrival_linear_speed = float(value("motion.arrival_linear_speed").value)
         self.arrival_angular_speed = float(value("motion.arrival_angular_speed").value)
         self.arrival_hold_time = float(value("motion.arrival_hold_time").value)
+        self.recovery_position_tolerance = float(
+            value("motion.recovery_position_tolerance").value
+        )
         self.approach_replan_period = float(value("motion.approach_replan_period").value)
         self.tracking_replan_period = float(value("motion.tracking_replan_period").value)
         self.target_replan_distance = float(value("motion.target_replan_distance").value)
@@ -516,46 +536,79 @@ class NavigationMissionCoordinator(Node):
             and msg.state_seq == self._mission_state.state_seq
             and msg.state == self._mission_state.state
             and msg.target_id == self._mission_state.target_id
-            and msg.blocked == self._mission_state.blocked
         ):
             self._mission_state = msg
             return
 
         previous_target = self._active_target_id
-        previous_blocked = (
-            self._mission_state is not None and bool(self._mission_state.blocked)
+        previous_mission_state = (
+            self._mission_state.state if self._mission_state is not None else None
         )
+        entering_approach = (
+            int(msg.state) == MissionState.APPROACH_TARGET
+            and previous_mission_state != MissionState.APPROACH_TARGET
+        )
+        entering_recovery = (
+            int(msg.state) == MissionState.RECOVER_PATROL
+            and previous_mission_state != MissionState.RECOVER_PATROL
+        )
+        if entering_approach:
+            self._capture_patrol_interruption_pose()
         self._mission_state = msg
         self._active_target_id = int(msg.target_id)
         self._arrival_reported = False
         self._arrival_hold_start = None
+        if entering_recovery:
+            self._recovery_return_path_requested = False
+            self._recovery_return_path_ready = False
+            self._recovery_return_arrived = False
+            self._recovery_hold_start = None
+            self._patrol_resume_sent_during_recovery = False
         self._technical_fault_start = None
         self._planner_failure_start = None
-        actions = self._nav_fsm.enter(
-            msg.state, msg.blocked, msg.state_seq, msg.target_id
-        )
-        must_invalidate_measurement = bool(msg.blocked) or (
-            previous_blocked and not bool(msg.blocked)
+        policy = navigation_policy(
+            msg.state,
+            previous_mission_state=previous_mission_state,
         )
         if (
-            actions.reset_target
+            policy.reset_target
             or previous_target != self._active_target_id
-            or must_invalidate_measurement
         ):
             self._reset_target()
-        if must_invalidate_measurement and not actions.clear_navigation_path:
-            # Do not leave an old target path active across a loss/error or
-            # resume with stale bbox data after TARGET_REACQUIRED.
-            self._publish_empty_path()
-        if actions.pause_patrol:
+        if policy.pause_patrol:
             self._pause_pub.publish(Empty())
-        if actions.clear_navigation_path:
+        if policy.clear_navigation_path:
             self._publish_empty_path()
-        if actions.resume_patrol:
-            self._resume_pub.publish(Empty())
+        returning_from_recovery = (
+            int(msg.state) == MissionState.PATROL
+            and previous_mission_state == MissionState.RECOVER_PATROL
+        )
+        if policy.resume_patrol:
+            if returning_from_recovery:
+                if not self._patrol_resume_sent_during_recovery:
+                    # The supervisor left recovery by timeout. The robot may
+                    # still be far from the interruption pose, so a cached
+                    # pre-interruption path must not pull it backwards.
+                    self._resume_from_current_pub.publish(Empty())
+                    self.get_logger().warning(
+                        "patrol recovery timed out; discarded interruption path "
+                        "and requested a fresh patrol path from current pose"
+                    )
+            else:
+                self._resume_pub.publish(Empty())
+        if returning_from_recovery:
+            self._patrol_interruption_pose = None
+            self._patrol_resume_sent_during_recovery = False
         self.get_logger().info(
             f"mission seq={msg.state_seq} state={msg.state} target={msg.target_id} "
-            f"blocked={msg.blocked} -> navigation={actions.mode.name}"
+            f"-> navigation={policy.description}"
+        )
+
+    def _current_policy(self):
+        if self._mission_state is None:
+            return navigation_policy(-1)
+        return navigation_policy(
+            self._mission_state.state,
         )
 
     def _on_bbox(self, msg: TargetBoundingBox) -> None:
@@ -673,12 +726,7 @@ class NavigationMissionCoordinator(Node):
             point_base_msg.point.x = float(point_base[0])
             point_base_msg.point.y = float(point_base[1])
             point_base_msg.point.z = float(point_base[2])
-            transform = self._tf_buffer.lookup_transform(
-                self.global_frame,
-                self.base_frame,
-                time_from_msg(self, matched.header.stamp),
-                timeout=Duration(seconds=self.tf_timeout),
-            )
+            transform = self._lookup_fusion_transform(matched.header.stamp)
             point_map = self._transform_point(point_base_msg, transform)
         except (ValueError, RuntimeError, TransformException) as exc:
             self._record_fusion_error(str(exc))
@@ -745,13 +793,55 @@ class NavigationMissionCoordinator(Node):
             )
             self._last_measurement_log = now_time(self)
         if (
-            self._nav_fsm.mode == NavigationMode.ACQUIRING_TARGET
+            self._mission_state is not None
+            and self._mission_state.state == MissionState.CONFIRM_TARGET
             and self._target_filter.stable
         ):
             self._publish_event(
                 MissionEvent.TARGET_POSITION_READY,
                 "time-synchronized lidar-camera target position stable",
             )
+
+    def _lookup_fusion_transform(self, stamp: RosTime):
+        """Get the target transform without failing on a short TF publication lag.
+
+        The lidar point is expressed in the robot frame, so using the latest
+        available map transform is preferable to dropping the measurement when
+        the TF buffer has not reached the sensor timestamp yet. Exact-time
+        lookup remains the normal path; the fallback is limited to future
+        extrapolation errors and still propagates missing/invalid TF errors.
+        """
+        try:
+            return self._tf_buffer.lookup_transform(
+                self.global_frame,
+                self.base_frame,
+                time_from_msg(self, stamp),
+                timeout=Duration(seconds=self.tf_timeout),
+            )
+        except TransformException as exc:
+            if "future" not in str(exc).lower():
+                raise
+
+            latest = self._tf_buffer.lookup_transform(
+                self.global_frame,
+                self.base_frame,
+                Time(seconds=0, clock_type=self.get_clock().clock_type),
+                timeout=Duration(seconds=self.tf_timeout),
+            )
+            now = now_time(self)
+            warning_age = (
+                float("inf")
+                if self._last_tf_fallback_warning is None
+                else (now - self._last_tf_fallback_warning).nanoseconds * 1e-9
+            )
+            if warning_age >= 2.0:
+                lag = seconds_between(stamp, latest.header.stamp)
+                self.get_logger().warning(
+                    "target fusion used latest map -> base TF because the "
+                    f"sensor timestamp is ahead of the TF buffer by {lag:.3f}s"
+                )
+                self._last_tf_fallback_warning = now
+            return latest
 
     def _transform_point(self, point: PointStamped, transform) -> PointStamped:
         rotation = quaternion_to_rotation(transform.transform.rotation)
@@ -771,28 +861,125 @@ class NavigationMissionCoordinator(Node):
         result.point.x, result.point.y, result.point.z = map(float, translated)
         return result
 
+    def _robot_pose(self) -> Optional[PoseStamped]:
+        try:
+            transform = self._tf_buffer.lookup_transform(
+                self.global_frame,
+                self.robot_frame,
+                Time(clock_type=self.get_clock().clock_type),
+                timeout=Duration(seconds=self.tf_timeout),
+            )
+        except TransformException:
+            return None
+        pose = PoseStamped()
+        pose.header.frame_id = self.global_frame
+        pose.header.stamp = now_time(self).to_msg()
+        pose.pose.position.x = float(transform.transform.translation.x)
+        pose.pose.position.y = float(transform.transform.translation.y)
+        pose.pose.position.z = float(transform.transform.translation.z)
+        pose.pose.orientation = transform.transform.rotation
+        return pose
+
+    def _capture_patrol_interruption_pose(self) -> None:
+        """Save the patrol pose before target approach pauses the waypoint task."""
+        pose = self._robot_pose()
+        if pose is None:
+            self._patrol_interruption_pose = None
+            self.get_logger().warning(
+                "cannot save patrol interruption pose: map -> base_footprint TF unavailable"
+            )
+            return
+        self._patrol_interruption_pose = pose
+        self.get_logger().info(
+            f"saved patrol interruption pose: "
+            f"x={pose.pose.position.x:.2f} y={pose.pose.position.y:.2f}"
+        )
+
     def _tick(self) -> None:
         if self._mission_state is None:
             return
         if self._mission_state.state == MissionState.STARTUP:
             self._tick_startup()
             return
-        if self._mission_state.blocked or self._nav_fsm.mode in {
-            NavigationMode.SAFE_STOP,
-            NavigationMode.ACQUIRING_TARGET,
-            NavigationMode.HOLDING_FOR_VERIFICATION,
-        }:
+        policy = self._current_policy()
+        if policy.safe_stop or self._mission_state.state == MissionState.VERIFY_IDENTITY:
             self._republish_stop_path()
-        if self._mission_state.blocked:
+        if self._mission_state.state == MissionState.RECOVER_PATROL:
+            self._tick_recovery()
             return
-        if self._nav_fsm.mode in {
-            NavigationMode.ACQUIRING_TARGET,
-            NavigationMode.APPROACHING_TARGET,
-            NavigationMode.TRACKING_TARGET,
+        if self._mission_state.state in {
+            MissionState.CONFIRM_TARGET,
+            MissionState.APPROACH_TARGET,
+            MissionState.TRACK_INTRUDER,
         }:
-            if self._nav_fsm.mode != NavigationMode.ACQUIRING_TARGET:
+            if self._mission_state.state != MissionState.CONFIRM_TARGET:
                 self._tick_target_motion()
             self._check_fusion_health()
+
+    def _tick_recovery(self) -> None:
+        """Return to the patrol interruption pose before resuming waypoints."""
+        if self._recovery_return_arrived:
+            return
+        pose = self._patrol_interruption_pose
+        if pose is None:
+            self.get_logger().warning(
+                "patrol interruption pose unavailable; resuming waypoint patrol directly"
+            )
+            self._finish_recovery_return()
+            return
+
+        current = self._robot_pose()
+        if current is None:
+            self._republish_stop_path()
+            return
+        position_error = hypot(
+            current.pose.position.x - pose.pose.position.x,
+            current.pose.position.y - pose.pose.position.y,
+        )
+        stopped = (
+            self._latest_linear_speed <= self.arrival_linear_speed
+            and self._latest_angular_speed <= self.arrival_angular_speed
+            and self._last_odom_time is not None
+            and (now_time(self) - self._last_odom_time).nanoseconds * 1.0e-9 <= 0.5
+        )
+        within_tolerance = (
+            position_error <= self.recovery_position_tolerance
+        )
+        if within_tolerance and stopped:
+            now = now_time(self)
+            if self._recovery_hold_start is None:
+                self._recovery_hold_start = now
+            elif (
+                (now - self._recovery_hold_start).nanoseconds * 1.0e-9
+                >= self.arrival_hold_time
+            ):
+                self._finish_recovery_return()
+            return
+
+        self._recovery_hold_start = None
+        if (
+            not self._recovery_return_path_ready
+            and not self._recovery_return_path_requested
+            and not self._plan_in_flight
+        ):
+            self._request_recovery_path(pose)
+
+    def _finish_recovery_return(self) -> None:
+        if self._recovery_return_arrived:
+            return
+        self._publish_empty_path()
+        self._recovery_return_arrived = True
+        self._recovery_return_path_ready = False
+        self._recovery_return_path_requested = False
+        self._resume_pub.publish(Empty())
+        self._patrol_resume_sent_during_recovery = True
+        self._publish_event(
+            MissionEvent.PATROL_RECOVERY_COMPLETE,
+            "patrol interruption pose reached; waypoint resume requested",
+        )
+        self.get_logger().info(
+            "patrol interruption pose reached; resumed waypoint patrol"
+        )
 
     def _tick_startup(self) -> None:
         reason = self._navigation_ready_reason()
@@ -858,7 +1045,8 @@ class NavigationMissionCoordinator(Node):
 
     def _tick_target_motion(self) -> None:
         if (
-            self._nav_fsm.mode == NavigationMode.APPROACHING_TARGET
+            self._mission_state is not None
+            and self._mission_state.state == MissionState.APPROACH_TARGET
             and self._arrival_reported
         ):
             self._republish_stop_path()
@@ -874,7 +1062,7 @@ class NavigationMissionCoordinator(Node):
             return
         desired = (
             self.tracking_distance
-            if self._nav_fsm.mode == NavigationMode.TRACKING_TARGET
+            if self._mission_state.state == MissionState.TRACK_INTRUDER
             else self.approach_distance
         )
         measured_distance = self._fresh_target_sensor_distance()
@@ -891,7 +1079,7 @@ class NavigationMissionCoordinator(Node):
         )
         if motion_log_age >= 1.0:
             self.get_logger().info(
-                f"target standoff mode={self._nav_fsm.mode.name} "
+                f"target standoff state={self._mission_state.state} "
                 f"sensor_distance={decision.distance:.2f}m "
                 f"map_distance={decision.map_distance:.2f}m "
                 f"desired={desired:.2f}m stop={decision.should_stop}"
@@ -899,7 +1087,7 @@ class NavigationMissionCoordinator(Node):
             self._last_motion_log = now_time(self)
         if decision.should_stop:
             self._republish_stop_path()
-            if self._nav_fsm.mode == NavigationMode.APPROACHING_TARGET:
+            if self._mission_state.state == MissionState.APPROACH_TARGET:
                 self._tick_arrival(decision.distance)
             return
         self._arrival_hold_start = None
@@ -908,7 +1096,7 @@ class NavigationMissionCoordinator(Node):
         now = now_time(self)
         period = (
             self.tracking_replan_period
-            if self._nav_fsm.mode == NavigationMode.TRACKING_TARGET
+            if self._mission_state.state == MissionState.TRACK_INTRUDER
             else self.approach_replan_period
         )
         elapsed = (
@@ -946,34 +1134,62 @@ class NavigationMissionCoordinator(Node):
             self._arrival_reported = True
 
     def _request_path(self, goal: np.ndarray, yaw: float, target: np.ndarray) -> None:
+        goal_pose = PoseStamped()
+        goal_pose.header.frame_id = self.global_frame
+        goal_pose.pose.position.x = float(goal[0])
+        goal_pose.pose.position.y = float(goal[1])
+        goal_pose.pose.position.z = 0.0
+        goal_pose.pose.orientation.z = float(np.sin(yaw * 0.5))
+        goal_pose.pose.orientation.w = float(np.cos(yaw * 0.5))
+        self._request_planner_path(goal_pose, target, "target")
+
+    def _request_recovery_path(self, goal_pose: PoseStamped) -> None:
+        target = np.asarray(
+            [goal_pose.pose.position.x, goal_pose.pose.position.y, goal_pose.pose.position.z],
+            dtype=np.float64,
+        )
+        self._recovery_return_path_requested = True
+        self._request_planner_path(goal_pose, target, "recovery")
+
+    def _request_planner_path(
+        self, goal_pose: PoseStamped, planned_target: np.ndarray, plan_kind: str
+    ) -> None:
         if not self._planner_client.server_is_ready():
             self._record_planner_failure("ComputePathToPose action unavailable")
+            if plan_kind == "recovery":
+                self._recovery_return_path_requested = False
             return
         request = ComputePathToPose.Goal()
         request.goal = PoseStamped()
         request.goal.header.frame_id = self.global_frame
         request.goal.header.stamp = now_time(self).to_msg()
-        request.goal.pose.position.x = float(goal[0])
-        request.goal.pose.position.y = float(goal[1])
-        request.goal.pose.position.z = 0.0
-        request.goal.pose.orientation.w = 1.0
-        request.goal.pose.orientation.z = float(np.sin(yaw * 0.5))
-        request.goal.pose.orientation.w = float(np.cos(yaw * 0.5))
+        request.goal.pose.position.x = float(goal_pose.pose.position.x)
+        request.goal.pose.position.y = float(goal_pose.pose.position.y)
+        request.goal.pose.position.z = float(goal_pose.pose.position.z)
+        request.goal.pose.orientation = goal_pose.pose.orientation
         request.use_start = False
         request.planner_id = self.planner_id
-        self._target_goal_pub.publish(request.goal)
+        if plan_kind == "target":
+            self._target_goal_pub.publish(request.goal)
 
         self._plan_in_flight = True
         self._last_plan_request = now_time(self)
-        self._last_planned_target = target.copy()
+        self._last_planned_target = planned_target.copy()
         self._plan_generation += 1
         generation = self._plan_generation
         state_seq = int(self._mission_state.state_seq)
-        planned_target = target.copy()
-        response_future = self._planner_client.send_goal_async(request)
+        planned_target = planned_target.copy()
+        try:
+            response_future = self._planner_client.send_goal_async(request)
+        except Exception as exc:
+            self._plan_in_flight = False
+            if plan_kind == "recovery":
+                self._recovery_return_path_requested = False
+            self._record_planner_failure(f"planner goal send failed: {exc}")
+            return
         response_future.add_done_callback(
             lambda future: self._on_goal_response(
-                future, generation, state_seq, planned_target
+                future, generation, state_seq, planned_target, plan_kind
             )
         )
 
@@ -983,23 +1199,37 @@ class NavigationMissionCoordinator(Node):
         generation: int,
         state_seq: int,
         planned_target: np.ndarray,
+        plan_kind: str,
     ) -> None:
-        if generation != self._plan_generation:
-            return
         try:
             handle = future.result()
         except Exception as exc:
-            self._plan_in_flight = False
-            self._record_planner_failure(f"planner goal send failed: {exc}")
+            if generation == self._plan_generation:
+                self._plan_in_flight = False
+                if plan_kind == "recovery":
+                    self._recovery_return_path_requested = False
+                self._record_planner_failure(f"planner goal send failed: {exc}")
+            return
+
+        if generation != self._plan_generation:
+            if handle is not None and handle.accepted:
+                self._cancel_planner_goal_handle(
+                    handle,
+                    f"stale {plan_kind} planner goal generation {generation}",
+                )
             return
         if handle is None or not handle.accepted:
             self._plan_in_flight = False
+            if plan_kind == "recovery":
+                self._recovery_return_path_requested = False
             self._record_planner_failure("ComputePathToPose goal rejected")
             return
+        self._active_planner_goal_handle = handle
+        self._active_planner_goal_generation = generation
         result_future = handle.get_result_async()
         result_future.add_done_callback(
             lambda result: self._on_plan_result(
-                result, generation, state_seq, planned_target
+                result, generation, state_seq, planned_target, plan_kind
             )
         )
 
@@ -1009,16 +1239,33 @@ class NavigationMissionCoordinator(Node):
         generation: int,
         state_seq: int,
         planned_target: np.ndarray,
+        plan_kind: str,
     ) -> None:
+        if self._active_planner_goal_generation == generation:
+            self._active_planner_goal_handle = None
+            self._active_planner_goal_generation = -1
         if generation != self._plan_generation:
             return
         self._plan_in_flight = False
+        if plan_kind == "recovery":
+            self._recovery_return_path_requested = False
         if (
             self._mission_state is None
             or int(self._mission_state.state_seq) != state_seq
-            or self._mission_state.blocked
-            or self._nav_fsm.mode
-            not in {NavigationMode.APPROACHING_TARGET, NavigationMode.TRACKING_TARGET}
+            or self._mission_state.state not in {
+                MissionState.APPROACH_TARGET,
+                MissionState.TRACK_INTRUDER,
+                MissionState.RECOVER_PATROL,
+            }
+            or (
+                plan_kind == "recovery"
+                and self._mission_state.state != MissionState.RECOVER_PATROL
+            )
+            or (
+                plan_kind == "target"
+                and self._mission_state.state
+                not in {MissionState.APPROACH_TARGET, MissionState.TRACK_INTRUDER}
+            )
         ):
             return
         try:
@@ -1029,16 +1276,19 @@ class NavigationMissionCoordinator(Node):
         except Exception as exc:
             self._record_planner_failure(str(exc))
             return
-        current_target = self._fresh_target()
-        if (
-            current_target is None
-            or np.linalg.norm(current_target[:2] - planned_target[:2])
-            >= self.target_replan_distance
-        ):
-            # Do not publish a path to a target position that became stale
-            # while Nav2 was computing it. The next tick requests a fresh one.
-            self._last_plan_request = None
-            return
+        if plan_kind == "target":
+            current_target = self._fresh_target()
+            if (
+                current_target is None
+                or np.linalg.norm(current_target[:2] - planned_target[:2])
+                >= self.target_replan_distance
+            ):
+                # Do not publish a path to a target position that became stale
+                # while Nav2 was computing it. The next tick requests a fresh one.
+                self._last_plan_request = None
+                return
+        else:
+            self._recovery_return_path_ready = True
         path.header.frame_id = self.global_frame
         path.header.stamp = now_time(self).to_msg()
         self._path_pub.publish(path)
@@ -1046,23 +1296,17 @@ class NavigationMissionCoordinator(Node):
         self._planner_failure_reason = ""
 
     def _robot_position(self) -> Optional[np.ndarray]:
-        try:
-            transform = self._tf_buffer.lookup_transform(
-                self.global_frame,
-                self.robot_frame,
-                Time(clock_type=self.get_clock().clock_type),
-                timeout=Duration(seconds=self.tf_timeout),
-            )
-            return np.asarray(
-                [
-                    transform.transform.translation.x,
-                    transform.transform.translation.y,
-                    transform.transform.translation.z,
-                ],
-                dtype=np.float64,
-            )
-        except TransformException:
+        pose = self._robot_pose()
+        if pose is None:
             return None
+        return np.asarray(
+            [
+                pose.pose.position.x,
+                pose.pose.position.y,
+                pose.pose.position.z,
+            ],
+            dtype=np.float64,
+        )
 
     def _fresh_target(self) -> Optional[np.ndarray]:
         now = now_time(self)
@@ -1165,52 +1409,58 @@ class NavigationMissionCoordinator(Node):
             self._sent_events[key] = True
 
     def _publish_status(self) -> None:
+        """Publish navigation observability without changing mission state."""
         message = TargetNavigationStatus()
         message.header.stamp = now_time(self).to_msg()
         message.header.frame_id = self.global_frame
-        message.target_id = self._active_target_id
+        message.target_id = int(self._active_target_id)
         message.distance_valid = False
+
         target = self._fresh_target()
         robot = self._robot_position()
         if target is not None and robot is not None:
             message.distance_to_target = float(np.linalg.norm(target[:2] - robot[:2]))
             message.distance_valid = True
+
         if self._mission_state is None:
-            message.status = TargetNavigationStatus.BLOCKED
+            message.status = TargetNavigationStatus.WAITING_TARGET
             message.detail = "waiting for mission state"
-        elif self._mission_state.blocked or self._nav_fsm.mode == NavigationMode.SAFE_STOP:
-            message.status = TargetNavigationStatus.BLOCKED
-            message.detail = "mission blocked; navigation path cleared"
-        elif self._nav_fsm.mode == NavigationMode.APPROACHING_TARGET:
-            message.status = (
-                TargetNavigationStatus.ARRIVED
-                if self._arrival_reported else TargetNavigationStatus.APPROACHING
-            )
-            message.detail = (
-                "3 m standoff reached and stopped"
-                if self._arrival_reported else "approaching 3 m standoff"
-            )
-            if target is None and not self._arrival_reported:
-                message.status = TargetNavigationStatus.BLOCKED
-                message.detail = "waiting for fresh fused target"
-        elif self._nav_fsm.mode == NavigationMode.HOLDING_FOR_VERIFICATION:
+        elif self._mission_state.state in {
+            MissionState.STARTUP,
+            MissionState.PATROL,
+        }:
+            message.status = TargetNavigationStatus.WAITING_TARGET
+            message.detail = "patrol is controlled by the waypoint navigation chain"
+        elif self._mission_state.state == MissionState.CONFIRM_TARGET:
+            message.status = TargetNavigationStatus.WAITING_TARGET
+            message.detail = self._last_fusion_error or "waiting for fused target position"
+        elif self._mission_state.state == MissionState.APPROACH_TARGET:
+            if self._arrival_reported:
+                message.status = TargetNavigationStatus.ARRIVED
+                message.detail = "3 m standoff reached and stopped"
+            elif target is None:
+                message.status = TargetNavigationStatus.HOLDING
+                message.detail = "holding while waiting for fresh fused target"
+            else:
+                message.status = TargetNavigationStatus.APPROACHING
+                message.detail = "approaching target standoff"
+        elif self._mission_state.state == MissionState.VERIFY_IDENTITY:
             message.status = TargetNavigationStatus.HOLDING
             message.detail = "holding position for identity verification"
-        elif self._nav_fsm.mode == NavigationMode.TRACKING_TARGET:
-            message.status = (
-                TargetNavigationStatus.TRACKING
-                if target is not None else TargetNavigationStatus.BLOCKED
-            )
-            message.detail = (
-                "tracking target with safe standoff"
-                if target is not None else "tracking stopped: target data stale"
-            )
-        elif self._nav_fsm.mode == NavigationMode.ACQUIRING_TARGET:
-            message.status = TargetNavigationStatus.WAITING_TARGET
-            message.detail = self._last_fusion_error or "waiting for target bbox"
+        elif self._mission_state.state == MissionState.TRACK_INTRUDER:
+            if target is None:
+                message.status = TargetNavigationStatus.HOLDING
+                message.detail = "holding while target data is stale"
+            else:
+                message.status = TargetNavigationStatus.TRACKING
+                message.detail = "tracking target with safe standoff"
+        elif self._mission_state.state == MissionState.RECOVER_PATROL:
+            message.status = TargetNavigationStatus.HOLDING
+            message.detail = "returning to patrol interruption pose"
         else:
             message.status = TargetNavigationStatus.WAITING_TARGET
-            message.detail = self._last_startup_reason or "patrolling or acquiring target"
+            message.detail = "unsupported mission state"
+
         self._status_pub.publish(message)
 
     def _publish_empty_path(self) -> None:
@@ -1221,6 +1471,42 @@ class NavigationMissionCoordinator(Node):
         self._request_controller_cancel()
         self._plan_generation += 1
         self._plan_in_flight = False
+        self._cancel_active_planner_goal("navigation path cleared")
+
+    def _cancel_planner_goal_handle(self, goal_handle, reason: str) -> None:
+        try:
+            future = goal_handle.cancel_goal_async()
+            future.add_done_callback(
+                lambda done_future, cancel_reason=reason: self._on_planner_cancel_response(
+                    done_future,
+                    cancel_reason,
+                )
+            )
+            self.get_logger().debug(f"Cancel target planner goal: {reason}")
+        except Exception as exc:
+            self.get_logger().warning(
+                f"ComputePathToPose cancel failed ({reason}): {exc}"
+            )
+
+    def _cancel_active_planner_goal(self, reason: str) -> None:
+        goal_handle = self._active_planner_goal_handle
+        self._active_planner_goal_handle = None
+        self._active_planner_goal_generation = -1
+        if goal_handle is not None:
+            self._cancel_planner_goal_handle(goal_handle, reason)
+
+    def _on_planner_cancel_response(self, future, reason: str) -> None:
+        try:
+            response = future.result()
+        except Exception as exc:
+            self.get_logger().warning(
+                f"ComputePathToPose cancel response failed ({reason}): {exc}"
+            )
+            return
+        if response is not None and not getattr(response, "goals_canceling", []):
+            self.get_logger().debug(
+                f"ComputePathToPose cancel had no active goal ({reason})"
+            )
 
     def _request_controller_cancel(self) -> None:
         """Cancel all active FollowPath goals without publishing a competing command."""
@@ -1291,6 +1577,7 @@ class NavigationMissionCoordinator(Node):
         self._arrival_reported = False
         self._plan_generation += 1
         self._plan_in_flight = False
+        self._cancel_active_planner_goal("target state reset")
         self._last_fusion_error = ""
         self._last_fusion_error_recoverable = False
         self._last_fusion_warning = None
@@ -1315,14 +1602,13 @@ class NavigationMissionCoordinator(Node):
     def _accepts_fusion(self) -> bool:
         return (
             self._mission_state is not None
-            and not self._mission_state.blocked
             and self._active_target_id > 0
-            and self._nav_fsm.mode
+            and self._mission_state.state
             in {
-                NavigationMode.ACQUIRING_TARGET,
-                NavigationMode.APPROACHING_TARGET,
-                NavigationMode.HOLDING_FOR_VERIFICATION,
-                NavigationMode.TRACKING_TARGET,
+                MissionState.CONFIRM_TARGET,
+                MissionState.APPROACH_TARGET,
+                MissionState.VERIFY_IDENTITY,
+                MissionState.TRACK_INTRUDER,
             }
         )
 

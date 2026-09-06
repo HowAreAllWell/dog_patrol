@@ -11,18 +11,12 @@ class GlobalState(IntEnum):
     APPROACH_TARGET = 3
     VERIFY_IDENTITY = 4
     TRACK_INTRUDER = 5
-
-
-class BlockCause(IntEnum):
-    NONE = 0
-    TARGET_LOST = 1
-    EXECUTION_ERROR = 2
+    RECOVER_PATROL = 6
 
 
 class EventSource(IntEnum):
     PERCEPTION = 0
     NAVIGATION = 1
-    OPERATOR = 2
 
 
 class EventType(IntEnum):
@@ -34,8 +28,7 @@ class EventType(IntEnum):
     UNAUTHORIZED = 5
     TARGET_LOST = 6
     EXECUTION_ERROR = 7
-    HANDLING_COMPLETE = 8
-    TARGET_REACQUIRED = 9
+    PATROL_RECOVERY_COMPLETE = 8
 
 
 @dataclass(frozen=True)
@@ -52,8 +45,6 @@ class MissionSnapshot:
     state_seq: int
     state: GlobalState
     target_id: int
-    blocked: bool
-    block_cause: BlockCause
     detail: str
 
 
@@ -84,8 +75,7 @@ class MissionStateMachine:
         EventType.EXECUTION_ERROR: frozenset(
             {EventSource.PERCEPTION, EventSource.NAVIGATION}
         ),
-        EventType.TARGET_REACQUIRED: frozenset({EventSource.PERCEPTION}),
-        EventType.HANDLING_COMPLETE: frozenset({EventSource.OPERATOR}),
+        EventType.PATROL_RECOVERY_COMPLETE: frozenset({EventSource.NAVIGATION}),
     }
 
     _TRANSITIONS: Dict[TransitionKey, GlobalState] = {
@@ -108,16 +98,16 @@ class MissionStateMachine:
             GlobalState.VERIFY_IDENTITY,
             EventSource.PERCEPTION,
             EventType.AUTHORIZED,
-        ): GlobalState.PATROL,
+        ): GlobalState.RECOVER_PATROL,
         (
             GlobalState.VERIFY_IDENTITY,
             EventSource.PERCEPTION,
             EventType.UNAUTHORIZED,
         ): GlobalState.TRACK_INTRUDER,
         (
-            GlobalState.TRACK_INTRUDER,
-            EventSource.OPERATOR,
-            EventType.HANDLING_COMPLETE,
+            GlobalState.RECOVER_PATROL,
+            EventSource.NAVIGATION,
+            EventType.PATROL_RECOVERY_COMPLETE,
         ): GlobalState.PATROL,
     }
 
@@ -125,8 +115,6 @@ class MissionStateMachine:
         self._state_seq = max(1, int(initial_state_seq))
         self._state = GlobalState.STARTUP
         self._target_id = 0
-        self._blocked = False
-        self._block_cause = BlockCause.NONE
         self._detail = "waiting for perception and navigation ready"
 
         self._perception_ready = False
@@ -142,8 +130,6 @@ class MissionStateMachine:
             state_seq=self._state_seq,
             state=self._state,
             target_id=self._target_id,
-            blocked=self._blocked,
-            block_cause=self._block_cause,
             detail=self._detail,
         )
 
@@ -159,8 +145,6 @@ class MissionStateMachine:
         """Return to STARTUP without restarting the ROS node."""
         self._state = GlobalState.STARTUP
         self._target_id = 0
-        self._blocked = False
-        self._block_cause = BlockCause.NONE
         self._perception_ready = False
         self._navigation_ready = False
         self._detail = str(detail).strip() or "mission session reset"
@@ -203,14 +187,11 @@ class MissionStateMachine:
                 f"current is {self._state_seq}"
             )
 
-        if event == EventType.TARGET_REACQUIRED:
-            return self._handle_target_reacquired(source, raw_event, key)
+        if event == EventType.TARGET_LOST:
+            return self._handle_target_lost(source, raw_event, key)
 
-        if self._blocked:
-            return self._reject("mission is blocked")
-
-        if event in {EventType.TARGET_LOST, EventType.EXECUTION_ERROR}:
-            return self._handle_error_event(source, event, raw_event, key)
+        if event == EventType.EXECUTION_ERROR:
+            return self._handle_execution_error(source, raw_event, key)
 
         if event == EventType.READY:
             return self._handle_ready(source, raw_event, key)
@@ -226,6 +207,15 @@ class MissionStateMachine:
         if event == EventType.TARGET_CONFIRMED:
             if target_id <= 0:
                 return self._reject("TARGET_CONFIRMED requires a non-zero target_id")
+        elif event == EventType.PATROL_RECOVERY_COMPLETE:
+            if (
+                self._state != GlobalState.RECOVER_PATROL
+                or self._target_id <= 0
+                or target_id != self._target_id
+            ):
+                return self._reject(
+                    "PATROL_RECOVERY_COMPLETE requires the active recovery target_id"
+                )
         elif self._target_id <= 0 or target_id != self._target_id:
             return self._reject(
                 f"target_id {target_id} does not match active target "
@@ -240,8 +230,6 @@ class MissionStateMachine:
             self._target_id = 0
 
         self._state = next_state
-        self._blocked = False
-        self._block_cause = BlockCause.NONE
         self._detail = (
             f"{previous_state.name} -> {next_state.name}: "
             f"{source.name}/{event.name}"
@@ -283,8 +271,6 @@ class MissionStateMachine:
 
         self._state = GlobalState.PATROL
         self._target_id = 0
-        self._blocked = False
-        self._block_cause = BlockCause.NONE
         self._detail = "STARTUP -> PATROL: perception and navigation ready"
         self._advance_seq()
         return EventResult(
@@ -295,38 +281,26 @@ class MissionStateMachine:
             snapshot=self.snapshot,
         )
 
-    def _handle_error_event(
-        self,
-        source: EventSource,
-        event: EventType,
-        raw_event: MissionEventData,
-        key: EventKey,
-    ) -> EventResult:
-        target_id = int(raw_event.target_id)
-        if self._target_id == 0:
-            if target_id != 0:
-                return self._reject(
-                    f"event target_id {target_id} is invalid without an active target"
-                )
-        elif target_id != self._target_id:
+    def begin_patrol_recovery(self, detail: str) -> EventResult:
+        """End the active target task and wait for navigation to restore patrol."""
+        if self._state not in {
+            GlobalState.CONFIRM_TARGET,
+            GlobalState.APPROACH_TARGET,
+            GlobalState.VERIFY_IDENTITY,
+            GlobalState.TRACK_INTRUDER,
+        }:
             return self._reject(
-                f"target_id {target_id} does not match active target "
-                f"{self._target_id}"
+                f"patrol recovery is invalid in {self._state.name}"
             )
 
-        if event == EventType.TARGET_LOST and self._target_id == 0:
-            return self._reject("TARGET_LOST requires an active target")
-
-        self._remember_event(key)
-        self._blocked = True
-        self._block_cause = (
-            BlockCause.TARGET_LOST
-            if event == EventType.TARGET_LOST
-            else BlockCause.EXECUTION_ERROR
+        previous_state = self._state
+        previous_target = self._target_id
+        self._state = GlobalState.RECOVER_PATROL
+        reason = str(detail).strip() or "target task ended"
+        self._detail = (
+            f"{previous_state.name} -> RECOVER_PATROL: {reason}; "
+            f"restoring patrol after target {previous_target}"
         )
-        detail = str(raw_event.detail).strip()
-        suffix = f": {detail}" if detail else ""
-        self._detail = f"blocked by {source.name}/{event.name}{suffix}"
         self._advance_seq()
         return EventResult(
             accepted=True,
@@ -336,27 +310,20 @@ class MissionStateMachine:
             snapshot=self.snapshot,
         )
 
-    def _handle_target_reacquired(
-        self,
-        source: EventSource,
-        raw_event: MissionEventData,
-        key: EventKey,
-    ) -> EventResult:
-        if not self._blocked or self._block_cause != BlockCause.TARGET_LOST:
-            return self._reject("TARGET_REACQUIRED requires a TARGET_LOST block")
-
-        target_id = int(raw_event.target_id)
-        if self._target_id <= 0 or target_id != self._target_id:
+    def complete_patrol_recovery(self, detail: str) -> EventResult:
+        """Return to patrol even when the recovery path did not arrive in time."""
+        if self._state != GlobalState.RECOVER_PATROL:
             return self._reject(
-                f"target_id {target_id} does not match active target "
-                f"{self._target_id}"
+                f"patrol recovery completion is invalid in {self._state.name}"
             )
 
-        self._remember_event(key)
-        self._blocked = False
-        self._block_cause = BlockCause.NONE
+        previous_target = self._target_id
+        self._state = GlobalState.PATROL
+        self._target_id = 0
+        reason = str(detail).strip() or "patrol recovery timeout"
         self._detail = (
-            f"TARGET_LOST block cleared by {source.name}/TARGET_REACQUIRED"
+            f"RECOVER_PATROL -> PATROL: {reason}; "
+            f"released target {previous_target}"
         )
         self._advance_seq()
         return EventResult(
@@ -364,6 +331,75 @@ class MissionStateMachine:
             changed=True,
             duplicate=False,
             reason=self._detail,
+            snapshot=self.snapshot,
+        )
+
+    def _validate_event_target(self, raw_event: MissionEventData) -> Optional[str]:
+        target_id = int(raw_event.target_id)
+        if self._target_id == 0:
+            if target_id != 0:
+                return f"event target_id {target_id} is invalid without an active target"
+        elif target_id != self._target_id:
+            return (
+                f"target_id {target_id} does not match active target "
+                f"{self._target_id}"
+            )
+        return None
+
+    def _handle_target_lost(
+        self,
+        source: EventSource,
+        raw_event: MissionEventData,
+        key: EventKey,
+    ) -> EventResult:
+        error = self._validate_event_target(raw_event)
+        if error:
+            return self._reject(error)
+        if self._target_id == 0 or self._state not in {
+            GlobalState.CONFIRM_TARGET,
+            GlobalState.APPROACH_TARGET,
+            GlobalState.VERIFY_IDENTITY,
+            GlobalState.TRACK_INTRUDER,
+        }:
+            return self._reject("TARGET_LOST requires an active target")
+
+        self._remember_event(key)
+        detail = str(raw_event.detail).strip() or "target lost"
+        return self.begin_patrol_recovery(
+            f"{source.name}/TARGET_LOST: {detail}"
+        )
+
+    def _handle_execution_error(
+        self,
+        source: EventSource,
+        raw_event: MissionEventData,
+        key: EventKey,
+    ) -> EventResult:
+        error = self._validate_event_target(raw_event)
+        if error:
+            return self._reject(error)
+
+        self._remember_event(key)
+        detail = str(raw_event.detail).strip() or "unspecified execution error"
+        if self._target_id > 0:
+            if self._state == GlobalState.RECOVER_PATROL:
+                return self._reject(
+                    f"ignoring {source.name}/EXECUTION_ERROR during patrol recovery: {detail}"
+                )
+            return self.begin_patrol_recovery(
+                f"recoverable {source.name}/EXECUTION_ERROR: {detail}"
+            )
+
+        # Outside a target task, EXECUTION_ERROR is diagnostic only. Keep the
+        # current mission authoritative and let the navigation stack continue
+        # its own retry/recovery behavior instead of creating a permanent block.
+        return EventResult(
+            accepted=True,
+            changed=False,
+            duplicate=False,
+            reason=(
+                f"recorded {source.name}/EXECUTION_ERROR without blocking: {detail}"
+            ),
             snapshot=self.snapshot,
         )
 

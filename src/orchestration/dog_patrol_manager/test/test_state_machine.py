@@ -1,5 +1,4 @@
 from dog_patrol_manager.state_machine import (
-    BlockCause,
     EventSource,
     EventType,
     GlobalState,
@@ -84,7 +83,7 @@ def test_startup_requires_both_ready_events():
     assert machine.snapshot.state_seq == first_seq + 1
 
 
-def test_authorized_flow_returns_to_patrol_and_clears_target():
+def test_authorized_flow_restores_patrol_before_clearing_target():
     machine = MissionStateMachine()
     advance_to_verify(machine)
 
@@ -92,12 +91,22 @@ def test_authorized_flow_returns_to_patrol_and_clears_target():
         event(machine, EventSource.PERCEPTION, EventType.AUTHORIZED, 87)
     )
     assert result.changed
+    assert result.snapshot.state == GlobalState.RECOVER_PATROL
+    assert result.snapshot.target_id == 87
+
+    result = machine.handle_event(
+        event(
+            machine,
+            EventSource.NAVIGATION,
+            EventType.PATROL_RECOVERY_COMPLETE,
+            87,
+        )
+    )
     assert result.snapshot.state == GlobalState.PATROL
     assert result.snapshot.target_id == 0
-    assert not result.snapshot.blocked
 
 
-def test_unauthorized_flow_tracks_until_operator_completes():
+def test_unauthorized_flow_recovers_when_target_is_lost():
     machine = MissionStateMachine()
     advance_to_verify(machine)
 
@@ -108,7 +117,18 @@ def test_unauthorized_flow_tracks_until_operator_completes():
     assert result.snapshot.target_id == 87
 
     result = machine.handle_event(
-        event(machine, EventSource.OPERATOR, EventType.HANDLING_COMPLETE, 87)
+        event(machine, EventSource.PERCEPTION, EventType.TARGET_LOST, 87)
+    )
+    assert result.snapshot.state == GlobalState.RECOVER_PATROL
+    assert result.snapshot.target_id == 87
+
+    result = machine.handle_event(
+        event(
+            machine,
+            EventSource.NAVIGATION,
+            EventType.PATROL_RECOVERY_COMPLETE,
+            87,
+        )
     )
     assert result.snapshot.state == GlobalState.PATROL
     assert result.snapshot.target_id == 0
@@ -136,7 +156,7 @@ def test_stale_and_wrong_source_events_are_rejected():
     assert machine.snapshot.state == GlobalState.PATROL
 
 
-def test_target_lost_blocks_without_changing_business_state():
+def test_target_lost_enters_patrol_recovery():
     machine = MissionStateMachine()
     start_patrol(machine)
     machine.handle_event(
@@ -147,7 +167,6 @@ def test_target_lost_blocks_without_changing_business_state():
             42,
         )
     )
-    state_before = machine.snapshot.state
     seq_before = machine.snapshot.state_seq
 
     result = machine.handle_event(
@@ -160,17 +179,20 @@ def test_target_lost_blocks_without_changing_business_state():
         )
     )
     assert result.changed
-    assert result.snapshot.state == state_before
+    assert result.snapshot.state == GlobalState.RECOVER_PATROL
+    assert result.snapshot.target_id == 42
     assert result.snapshot.state_seq == seq_before + 1
-    assert result.snapshot.blocked
 
-    follow_up = MissionEventData(
-        observed_state_seq=result.snapshot.state_seq,
-        target_id=42,
-        source=int(EventSource.NAVIGATION),
-        event=int(EventType.TARGET_POSITION_READY),
+    restored = machine.handle_event(
+        event(
+            machine,
+            EventSource.NAVIGATION,
+            EventType.PATROL_RECOVERY_COMPLETE,
+            42,
+        )
     )
-    assert not machine.handle_event(follow_up).accepted
+    assert restored.snapshot.state == GlobalState.PATROL
+    assert restored.snapshot.target_id == 0
 
 
 def test_navigation_cannot_publish_target_lost():
@@ -201,47 +223,7 @@ def test_navigation_cannot_publish_target_lost():
     assert machine.snapshot == state_before
 
 
-def test_same_target_reacquired_clears_only_target_lost_block():
-    machine = MissionStateMachine()
-    start_patrol(machine)
-    machine.handle_event(
-        event(
-            machine,
-            EventSource.PERCEPTION,
-            EventType.TARGET_CONFIRMED,
-            42,
-        )
-    )
-    state_before_loss = machine.snapshot.state
-
-    loss = machine.handle_event(
-        event(
-            machine,
-            EventSource.PERCEPTION,
-            EventType.TARGET_LOST,
-            42,
-        )
-    )
-    assert loss.snapshot.block_cause == BlockCause.TARGET_LOST
-
-    reacquired = machine.handle_event(
-        event(
-            machine,
-            EventSource.PERCEPTION,
-            EventType.TARGET_REACQUIRED,
-            42,
-        )
-    )
-    assert reacquired.accepted
-    assert reacquired.changed
-    assert reacquired.snapshot.state == state_before_loss
-    assert reacquired.snapshot.target_id == 42
-    assert not reacquired.snapshot.blocked
-    assert reacquired.snapshot.block_cause == BlockCause.NONE
-    assert reacquired.snapshot.state_seq == loss.snapshot.state_seq + 1
-
-
-def test_target_reacquired_rejects_wrong_target_stale_duplicate_and_out_of_order():
+def test_recovery_complete_rejects_wrong_target_stale_and_out_of_order():
     machine = MissionStateMachine()
     start_patrol(machine)
     machine.handle_event(
@@ -256,60 +238,46 @@ def test_target_reacquired_rejects_wrong_target_stale_duplicate_and_out_of_order
     out_of_order = machine.handle_event(
         event(
             machine,
-            EventSource.PERCEPTION,
-            EventType.TARGET_REACQUIRED,
+            EventSource.NAVIGATION,
+            EventType.PATROL_RECOVERY_COMPLETE,
             42,
         )
     )
     assert not out_of_order.accepted
-    assert not out_of_order.changed
 
-    loss = machine.handle_event(
-        event(
-            machine,
-            EventSource.PERCEPTION,
-            EventType.TARGET_LOST,
-            42,
-        )
-    )
-    state_before_rejections = machine.snapshot
-
+    recovery = machine.begin_patrol_recovery("target lost")
     wrong_target = machine.handle_event(
         event(
             machine,
-            EventSource.PERCEPTION,
-            EventType.TARGET_REACQUIRED,
+            EventSource.NAVIGATION,
+            EventType.PATROL_RECOVERY_COMPLETE,
             99,
         )
     )
     assert not wrong_target.accepted
-    assert machine.snapshot == state_before_rejections
 
     stale = MissionEventData(
-        observed_state_seq=loss.snapshot.state_seq - 2,
+        observed_state_seq=recovery.snapshot.state_seq - 1,
         target_id=42,
-        source=int(EventSource.PERCEPTION),
-        event=int(EventType.TARGET_REACQUIRED),
+        source=int(EventSource.NAVIGATION),
+        event=int(EventType.PATROL_RECOVERY_COMPLETE),
     )
     assert not machine.handle_event(stale).accepted
-    assert machine.snapshot == state_before_rejections
 
-    reacquired_event = event(
-        machine,
-        EventSource.PERCEPTION,
-        EventType.TARGET_REACQUIRED,
-        42,
+    restored = machine.handle_event(
+        event(
+            machine,
+            EventSource.NAVIGATION,
+            EventType.PATROL_RECOVERY_COMPLETE,
+            42,
+        )
     )
-    assert machine.handle_event(reacquired_event).accepted
-    state_after_reacquisition = machine.snapshot
-
-    duplicate = machine.handle_event(reacquired_event)
-    assert not duplicate.accepted
-    assert duplicate.duplicate
-    assert machine.snapshot == state_after_reacquisition
+    assert restored.accepted
+    assert restored.snapshot.state == GlobalState.PATROL
+    assert restored.snapshot.target_id == 0
 
 
-def test_target_reacquired_cannot_clear_execution_error_block():
+def test_target_task_execution_error_enters_patrol_recovery():
     machine = MissionStateMachine()
     start_patrol(machine)
     machine.handle_event(
@@ -320,7 +288,7 @@ def test_target_reacquired_cannot_clear_execution_error_block():
             42,
         )
     )
-    error = machine.handle_event(
+    result = machine.handle_event(
         event(
             machine,
             EventSource.NAVIGATION,
@@ -329,21 +297,12 @@ def test_target_reacquired_cannot_clear_execution_error_block():
             "planner unavailable",
         )
     )
-    assert error.snapshot.block_cause == BlockCause.EXECUTION_ERROR
-
-    reacquired = machine.handle_event(
-        event(
-            machine,
-            EventSource.PERCEPTION,
-            EventType.TARGET_REACQUIRED,
-            42,
-        )
-    )
-    assert not reacquired.accepted
-    assert machine.snapshot == error.snapshot
+    assert result.accepted
+    assert result.snapshot.state == GlobalState.RECOVER_PATROL
+    assert result.snapshot.target_id == 42
 
 
-def test_blocked_mission_rejects_a_new_error_event():
+def test_recovery_execution_error_is_ignored_until_recovery_timeout():
     machine = MissionStateMachine()
     start_patrol(machine)
     machine.handle_event(
@@ -354,68 +313,68 @@ def test_blocked_mission_rejects_a_new_error_event():
             42,
         )
     )
-    loss = machine.handle_event(
-        event(
-            machine,
-            EventSource.PERCEPTION,
-            EventType.TARGET_LOST,
-            42,
-        )
-    )
+    machine.begin_patrol_recovery("target lost")
 
-    error = machine.handle_event(
+    result = machine.handle_event(
         event(
             machine,
             EventSource.NAVIGATION,
             EventType.EXECUTION_ERROR,
             42,
+            "restored patrol path unavailable",
         )
     )
-    assert not error.accepted
-    assert machine.snapshot == loss.snapshot
+    assert not result.accepted
+    assert result.snapshot.state == GlobalState.RECOVER_PATROL
 
 
-def test_target_lost_and_reacquired_cycles_preserve_active_mission():
+def test_system_execution_error_without_target_is_diagnostic_only():
+    machine = MissionStateMachine()
+    start_patrol(machine)
+    before = machine.snapshot
+    result = machine.handle_event(
+        event(
+            machine,
+            EventSource.NAVIGATION,
+            EventType.EXECUTION_ERROR,
+            0,
+            "localization unavailable",
+        )
+    )
+    assert result.accepted
+    assert not result.changed
+    assert result.snapshot.state == GlobalState.PATROL
+    assert result.snapshot.target_id == 0
+    assert result.snapshot.state_seq == before.state_seq
+    assert result.snapshot.detail == before.detail
+    assert "without blocking" in result.reason
+
+
+def test_confirm_timeout_uses_patrol_recovery_path():
     machine = MissionStateMachine()
     start_patrol(machine)
     machine.handle_event(
-        event(
-            machine,
-            EventSource.PERCEPTION,
-            EventType.TARGET_CONFIRMED,
-            42,
-        )
+        event(machine, EventSource.PERCEPTION, EventType.TARGET_CONFIRMED, 42)
     )
-    state_before_cycles = machine.snapshot.state
-    seq_before_cycles = machine.snapshot.state_seq
 
-    for cycle in range(2):
-        loss = machine.handle_event(
-            event(
-                machine,
-                EventSource.PERCEPTION,
-                EventType.TARGET_LOST,
-                42,
-                f"cycle {cycle}",
-            )
-        )
-        assert loss.accepted
-        assert loss.snapshot.block_cause == BlockCause.TARGET_LOST
+    result = machine.begin_patrol_recovery("target position confirmation timed out")
+    assert result.accepted
+    assert result.snapshot.state == GlobalState.RECOVER_PATROL
+    assert result.snapshot.target_id == 42
 
-        reacquired = machine.handle_event(
-            event(
-                machine,
-                EventSource.PERCEPTION,
-                EventType.TARGET_REACQUIRED,
-                42,
-            )
-        )
-        assert reacquired.accepted
-        assert reacquired.snapshot.state == state_before_cycles
-        assert reacquired.snapshot.target_id == 42
-        assert not reacquired.snapshot.blocked
 
-    assert machine.snapshot.state_seq == seq_before_cycles + 4
+def test_recovery_timeout_returns_to_patrol_without_blocking():
+    machine = MissionStateMachine()
+    start_patrol(machine)
+    machine.handle_event(
+        event(machine, EventSource.PERCEPTION, EventType.TARGET_CONFIRMED, 42)
+    )
+    machine.begin_patrol_recovery("target position confirmation timed out")
+
+    result = machine.complete_patrol_recovery("navigation did not restore patrol")
+    assert result.accepted
+    assert result.snapshot.state == GlobalState.PATROL
+    assert result.snapshot.target_id == 0
 
 
 def test_duplicate_ready_event_is_idempotent():
@@ -441,7 +400,6 @@ def test_reset_session_invalidates_readiness_and_active_target():
 
     assert snapshot.state == GlobalState.STARTUP
     assert snapshot.target_id == 0
-    assert not snapshot.blocked
     assert not machine.perception_ready
     assert not machine.navigation_ready
     assert snapshot.state_seq == previous_seq + 1

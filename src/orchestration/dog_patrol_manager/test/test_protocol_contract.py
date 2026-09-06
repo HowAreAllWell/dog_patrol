@@ -8,7 +8,7 @@ PROTOCOL_PATH = REPO_ROOT / "docs" / "contracts" / "perception_navigation_interf
 
 def _fresh_bbox_rows():
     target_bbox_section = PROTOCOL_PATH.read_text(encoding="utf-8").split(
-        "### 6.4 TargetNavigationStatus.msg", 1
+        "## 7. ID 和状态版本", 1
     )[0]
     return {
         state: (accepted, purpose)

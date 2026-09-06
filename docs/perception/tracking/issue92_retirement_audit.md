@@ -7,7 +7,7 @@
 视觉 runtime 的唯一下游 patrol 集成是 `dog_patrol_interfaces`：
 
 - `/mission/state` 输入；
-- `/mission/event` 上 `SOURCE_PERCEPTION` 的 READY、TARGET_CONFIRMED、TARGET_LOST、TARGET_REACQUIRED；
+- `/mission/event` 上 `SOURCE_PERCEPTION` 的 READY、TARGET_CONFIRMED、TARGET_LOST；
 - `/perception/selected_target_bbox` 上当前帧可信 `TargetBoundingBox`。
 
 `MissionRosAdapter` 是该 ROS transport 的唯一边界。没有 UDP compatibility mode、bearing output

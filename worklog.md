@@ -1,5 +1,263 @@
 # worklog
 
+## 2026-09-06 - waypoint 全局路径改为只发布当前目标单段路径
+
+- 修改 `global_path_seq_publisher` 的 waypoint 规划逻辑：每次只向 Nav2
+  `ComputePathToPose` 请求当前 `current_index` 对应目标点的路径。
+- planner 返回后直接发布“机器人当前位置到当前 waypoint”的单段 `/global_path`，不再递归
+  请求后续 waypoint，也不再把多个 waypoint 之间的路径拼接成一条控制路径。
+- Pure Pursuit/RL 现在只能在当前目标段内寻找 subgoal，不会因为前瞻距离超过当前目标剩余
+  距离而提前进入下一个 waypoint，尤其避免相邻目标方向相反时 subgoal 跳到反向路径。
+- 当前 waypoint 到达后，原有 `current_index` 推进逻辑清空旧路径；下一次重规划再为新的
+  当前 waypoint 请求单独路径。所有 waypoint 的可视化数据和 waypoint 状态发布保持不变。
+- 保留 planner 请求版本校验、旧 action 取消、暂停/恢复缓存和
+  `resume_from_current` 逻辑；本次只改变控制路径的生成范围。
+
+## 2026-09-06 - 确认 waypoint 多段路径与 subgoal 前瞻冲突，移除独立 0.1 秒到达检查
+
+- 纯 waypoint 导航测试已经复现：单个目标点使用 `goal_tolerance=0.5 m` 时没有问题；多个
+  waypoint 组成直线往返、尤其相邻目标方向接近 180 度时，会出现当前目标尚未完成但路径
+  和 subgoal 已经转向后续目标，随后局部路径回头、当前目标到达状态不更新等现象。
+- 根因判断是：`global_path_seq_publisher` 将当前 waypoint 到后续 waypoint 的多个 Nav2
+  路径段拼接后发布到控制链消费的 `/global_path`，而 Pure Pursuit/RL 根据整条路径和约
+  `1.8 m` 前瞻距离寻找 subgoal。当前 waypoint 到机器人距离不足前瞻距离时，subgoal 会
+  越过当前 waypoint 进入下一段，甚至进入反向路径；但 waypoint 管理器仍只按当前
+  `current_index` 的 `0.5 m` 距离判断到达，因此两套路径进度不一致。
+- `goal_tolerance=1.5 m` 不是正确修复，只是因为到达范围更大，通常能让 waypoint 索引在
+  控制器明显转入下一段前提前推进，从而掩盖进度冲突。改成 `0.5 m` 后问题被暴露出来。
+- 根本修复方向已经确定：控制器消费的 `/global_path` 只发布机器人到当前 waypoint 的
+  单段路径；后续 waypoint 只作为 waypoint/标记数据保留，不能继续拼接进当前控制路径。
+- 因为后续路径段不应提前暴露给 subgoal，独立的 `goal_check_period=0.1 s` 到达检查不再
+  是必要逻辑。它只是额外增加一套 waypoint 进度定时器，不能解决多段路径导致的根因。
+- 本次删除 `goal_check_period` 参数、独立到达检查定时器和对应 launch 传递；到达检查恢复
+  到原有 `replan_period` 定时器内。单段 `/global_path` 的实现作为下一步独立修改和测试。
+
+## 2026-09-06 - 待验证：普通 waypoint 导航的路径进度与 subgoal 可能不同步
+
+- 当前需要在不启动感知目标任务的情况下，单独测试普通 RViz waypoint 导航，确认机器狗到达
+  第一个目标后是否会偶发回头、局部路径是否会重新指向已经经过的目标，以及 RViz 中第一
+  个 waypoint 是否正确变为已完成状态。
+- 当前怀疑原因不是单独的 `waypoint_goal_tolerance=0.5`，而是两套进度逻辑可能不一致：
+  `global_path_seq_publisher` 会从当前 waypoint 开始，将当前点到后续 waypoint 的多个
+  Nav2 路径段拼接后发布到共享 `/global_path`；Pure Pursuit/RL 链会在整条路径上寻找当前
+  位置附近的路径段并生成前瞻 `subgoal`；waypoint 发布器则只依据机器人到
+  `current_index` 目标点的距离判断是否到达。
+- 可能出现的现象是：控制链已经根据整条路径提前进入“当前点到下一个点”的路径段，但
+  `current_index` 仍未推进；下一次重规划仍以旧 waypoint 为目标，导致 `/global_path`、
+  `/local_path` 或 `subgoal` 短暂向后，机器人回头，且旧 waypoint 的完成颜色没有更新。
+- 当前先不把该假设当作最终结论，也不继续修改代码。测试时应同时记录：
+  `waypoint_sequence/status`、`global_path` 首尾坐标和长度、`subgoal`、`local_path`、
+  机器人 TF 位姿以及 RViz waypoint 颜色变化。
+- 已有的 0.1 s 到达检查和普通 `PATROL` 路径所有权修改只解决低频漏检与协调器抢占共享路径
+  的问题，是否还需要将控制用 `/global_path` 限制为当前 waypoint 段，需根据本次纯导航实车
+  测试结果决定。
+
+## 2026-09-06 - 修复普通 waypoint 导航经过目标点后回头
+
+- 修复普通 RViz waypoint 导航只在全局重规划定时器中检查到达的问题。原逻辑的检查周期通常
+  为 1 秒，而路径会一次性覆盖当前点到后续点；机器狗可能在两次检查之间经过第一个点，
+  但 `current_index` 仍停留在第一个点，下一次规划就会重新规划回刚才的点。
+- `global_path_seq_publisher` 新增独立的 `goal_check_period`，默认 0.1 秒；到达检查不再
+  依赖 `replan_period`，检测到当前点后立即推进索引、刷新 waypoint 颜色并为下一个点请求
+  新路径。
+- 普通 `PATROL` 状态下，导航协调器不再清空共享 `/global_path` 或取消普通 waypoint 控制器。
+  `/global_path` 在巡检期间由 waypoint 节点独占维护，目标跟踪协调器只在真正进入目标处置
+  状态后接管路径。
+- launch 已同步传递 `waypoint_goal_check_period`，默认值为 0.1 秒；保留原有 waypoint
+  `goal_tolerance=0.5` 配置。
+- 增加 waypoint 到达推进和 `PATROL` 路径所有权回归测试，验证不会因低频检查或任务协调器
+  的普通巡检状态切换而回到上一个目标点。
+
+## 2026-09-05 - 恢复巡检超时后从当前位置重新规划
+
+- 修复恢复巡检超时后可能沿暂停前缓存路径回到旧中断点的问题。根因是总控超时进入
+  `PATROL` 后，原有 `/waypoint_sequence/resume` 会让 waypoint 节点立即重发暂停前的
+  `_last_path`，这条路径的起点可能已经不适合机器狗当前位置。
+- 导航协调器新增 `/waypoint_sequence/resume_from_current`。正常在中断点恢复完成时仍使用
+  原有 `/waypoint_sequence/resume`；只有 `RECOVER_PATROL` 超时强制返回 `PATROL` 时，才
+  发布新的当前位置恢复命令。
+- waypoint 节点收到当前位置恢复命令后清除 `_last_path` 和 resume bridge，发布空路径取消
+  下游旧路径，并保留当前巡检 waypoint 索引，从机器狗当前位姿立即重新请求路径。
+- 总控状态机、目标 `target_id` 清理逻辑和正常中断点恢复逻辑未修改；超时后的行为是继续
+  当前巡检任务，但不再返回原来的中断点。
+- 更新导航 launch 传递和协调器配置，新增恢复话题参数；增加 waypoint 当前位置恢复单元
+  测试。`move` 和 `dog_patrol_navigation` 编译通过，相关 pytest 通过（3 passed）。
+
+## 2026-09-05 - 删除 BLOCKED 观测状态并统一协议枚举
+
+- 保留 `TargetNavigationStatus.msg` 作为导航内部观测接口；导航协调器默认以 10 Hz 发布
+  `/navigation/target_status`，用于查看等待目标、接近、到达、保持、跟踪和恢复等内部状态。
+  删除 `BLOCKED=5`，目标数据暂不可用时使用 `HOLDING` 并在 `detail` 中说明原因；该消息
+  不参与总状态机转移。
+- 总控 `/mission/state` 的 `state_publish_rate` 默认保持 10 Hz。你看到的
+  `DeclareLaunchArgument(... default_value="1.0")` 是旧的 1 Hz 配置，本工作区当前 launch 和
+  节点默认值都已是 10.0。
+- 感知任务级 `TARGET_LOST` 的 `target.lost_event_timeout_sec` 统一为 10.0 秒。当前 ROS 图像
+  输入约 10 Hz，但 `camera.fps=30.0` 仍保留为 Hik MVS 直接采集模式的标称采集率；使用
+  `ros_image` 时实际频率由 `/left_camera/image_raw` 决定。
+- 删除旧事件 8、9 后，将 `PATROL_RECOVERY_COMPLETE` 调整为 8，使当前事件枚举连续为 0--8。
+- `target.lost_threshold_frames` 从 180 调整为 100。按当前 10 Hz ROS 图像输入约为 10 秒；
+  它仍是跟踪器内部帧级生命周期，任务级最终丢失事件仍以独立的
+  `target.lost_event_timeout_sec=10.0` 为准。
+- 同步更新任务级丢失测试用例为 10 秒，并将四秒遮挡测试调整为 40 帧，避免测试继续依赖旧的
+  6 秒超时和 180 帧默认值。
+
+## 2026-09-05 - 恢复导航观测状态并统一频率与目标丢失时限
+
+- 恢复 `TargetNavigationStatus.msg` 作为导航内部观测接口，导航协调器以默认 10 Hz 发布
+  `/navigation/target_status`，用于显示等待目标、接近、到达、保持、跟踪、恢复和暂时不可执行
+  等状态，以及当前可用的目标距离。该接口不参与总状态机转移，不恢复 `MissionState` 的
+  `blocked` 字段或旧 blocked/reacquire 协议。
+- 总控 `mission_supervisor` 的 `state_publish_rate` 默认从 1 Hz 调整为 10 Hz，launch 默认值
+  同步为 10 Hz；状态变化仍立即发布，周期发布用于给感知、导航和 UI 提供稳定的当前快照。
+- 感知任务级目标丢失确认时限统一为 `target.lost_event_timeout_sec=10.0`，同步更新默认参数、
+  运行资源参数和 `MissionCoordinator` 默认值。感知内部目标图像发布上限保持 10 Hz；不把任务级
+  10 秒时限错误换算成固定丢失帧数。
+- `MissionEvent` 的 `PATROL_RECOVERY_COMPLETE=10` 数值保持不变，用于兼容已有恢复事件线缆编号；
+  中间的旧事件编号不会重新启用。
+
+## 2026-09-05 - 清理目标重新获取和 blocked 兼容协议
+
+- 删除跨模块消息中的旧兼容字段和事件：`MissionState` 不再包含 `blocked`、
+  `block_cause`、`BLOCK_TARGET_LOST`、`BLOCK_EXECUTION_ERROR`；`MissionEvent` 不再包含
+  `SOURCE_OPERATOR`、`HANDLING_COMPLETE`、`TARGET_REACQUIRED`。
+- 删除未被运行代码订阅的 `TargetNavigationStatus.msg`，同步移除接口包生成清单、导航
+  协调器发布器、`/navigation/target_status` 参数和相关测试/文档引用。目标距离和执行
+  结果继续通过日志、`/navigation/target_point`、`/navigation/target_goal`、路径和
+  `MissionEvent` 传递。
+- 感知 `MissionCoordinator` 删除 `reacquire_retention_sec`、`LossCycle` 以及旧 blocked/
+  reacquire 分支。目标连续丢失达到 `target.lost_event_timeout_sec`（默认 6 s）后只发布
+  一次 `TARGET_LOST`；同一个 `state_seq` 内即使目标重新出现也不再发布旧任务 bbox，
+  必须等待总控进入新的任务状态后才能重新建立目标任务。
+- 总控、导航协调器、认证 provider、fake 联调工具和当前合同文档统一改为
+  `TARGET_LOST/EXECUTION_ERROR -> RECOVER_PATROL -> PATROL` 的恢复路径；核验失败仍以
+  `UNAUTHORIZED` 进入持续跟踪，不再等待人工完成事件。
+- 验证：受影响的接口、总控、导航和 tracking 包 `colcon build` 通过；生成安装空间不再
+  包含 `TargetNavigationStatus`。本机 ROS gtest 受沙箱 DDS socket/只读日志目录限制，
+  pytest 受系统 anyio 插件与 pytest 版本不兼容影响，未作为代码失败处理。
+
+## 2026-09-05 - 消除恢复巡检后的局部路径空窗
+
+- 现场日志确认总控切回 `PATROL` 后，DWB 最终能够重新收到局部路径，但恢复交接期间会先
+  出现空窗：waypoint 节点暂停时删除了最后一条有效巡检路径，恢复时又要等下一次周期定时器
+  和 Navfn 异步规划完成，RL 在此期间只能持续发布空 `/local_path`。
+- waypoint 节点现在暂停时仍对外发布空路径并停车，但在内部保留最后一条有效巡检路径；收到
+  `/waypoint_sequence/resume` 后先更新时间戳并立即重发该缓存路径，再马上请求一次新的
+  `ComputePathToPose`。缓存只负责短时接替，新的 Navfn 路径返回后会正常覆盖。
+- 如果恢复后的第一次 Navfn 请求失败，节点保留缓存路径并按原周期继续重试，不再用该次失败
+  的空结果覆盖缓存；没有有效缓存时仍按原安全行为发布空路径。
+- 如果暂停前没有有效缓存路径，恢复不会使用无效数据，而是直接触发新规划。原有周期重试继续
+  生效，因此 Navfn 某一轮返回空路径时，后续周期仍会重试。
+- 将 waypoint 到达容差从 `1.5 m` 收紧为 `0.5 m`，避免距离最后一个巡检点仍较远时提前把
+  序列判定完成并清空 `/global_path`、`/local_path`。
+- 未修改 RL/PRIEST 推理、DWB 参数、目标跟踪路径、恢复位置判定或总状态机逻辑。
+## 2026-09-04 - 固定外部导航链使用同一 Python 虚拟环境
+
+- 现场表现为 `/local_path` 没有输出，历史日志同时出现 RL 节点 `torch` 导入失败和旧参数
+  读取警告。检查发现主 `navigation.launch.py` 没有把控制台设置的 `DOG_PATROL_PYTHON`
+  传递给 `priest_external_nav.launch.py`，外部 RL 进程可能回落到系统 `python3`。
+- 主导航 launch 现在将 `python_executable` 和 `rl_python_executable` 显式传入外部导航
+  launch；两者默认读取 `DOG_PATROL_PYTHON`，未设置时才使用 PATH 中的 `python3`。这样
+  RL、pure pursuit、DWB adapter 和 NAV_CMD bridge 使用同一运行环境。
+- 未修改 RL 推理逻辑、局部路径算法、TF 坐标系或控制参数。重新启动导航后，RL 节点必须先
+  正常打印 ready；只有它正常运行且收到非空 `/global_path`、有效 `/scan` 后才会发布
+  `/local_path`。
+
+## 2026-09-04 - 目标融合增加 TF 时间滞后兜底
+
+- 现场导航失败原因为 `map -> base_link` 的 TF 缓存落后于雷达点云时间戳，精确查询触发
+  `Lookup would require extrapolation into the future`，连续 3 秒后被导航协调器上报为
+  `NAVIGATION/EXECUTION_ERROR`，总控因此进入 `RECOVER_PATROL`。
+- 目标融合现在仍优先按雷达时间戳精确查询 TF；仅当异常明确属于 future extrapolation
+  时，改用 TF 缓存最新的 `map -> base_link` 变换继续计算目标地图位置。缺少 TF、旧时间
+  外推或其他变换异常仍按原逻辑累计技术故障，不会被吞掉。
+- 兜底日志每 2 秒限频，记录传感器时间领先 TF 缓存的秒数，便于继续排查 LIO/TF 发布
+  延迟。未修改 `base_link`、`base_footprint`、`map` 坐标约定、雷达相机标定、3 m 停靠
+  逻辑或恢复状态机。
+- `adapter_path_timeout` 不属于当前 RL 节点声明的参数；当前启动链通过 `path_timeout`
+  传给 DWB adapter。现场 WARN 来自旧的参数读取代码或旧运行环境，不能通过给 RL 节点
+  增加一个无效兼容参数来解决。
+- 验证：`python3 -m py_compile` 通过；`colcon test --packages-select
+  dog_patrol_navigation` 为 23/23 通过。
+
+## 2026-09-04 - 修复控制台子进程解释器未初始化
+
+- 修复 `RobotMainWindow` 未定义 `python_executable`，导致任务管理器、相机和雷达等所有
+  通过 `setup_process_env()` 启动的子进程在点击按钮时抛出 `AttributeError` 的问题。
+- 主窗口现在优先读取 `DOG_PATROL_PYTHON`；未设置时使用启动 `app.py` 的
+  `sys.executable`，保证子进程继承当前 `m20_nav` 虚拟环境。
+- 删除 `TopicHzWorker` 中未使用且错误归属的同名字段；不改变传感器、任务管理器或导航
+  的启动命令和业务逻辑。
+
+## 2026-09-04 - 修复恢复巡检时重复 resume 导致局部路径延迟
+
+- 现场表现为总控已经从 `RECOVER_PATROL` 切换到 `PATROL`，`/global_path` 已恢复，但
+  `/local_path` 仍暂时为空。
+- 原因是导航协调器在恢复点到达时发送一次 `/waypoint_sequence/resume`，总控切到 `PATROL`
+  后又发送一次；waypoint 节点第二次 resume 会取消刚开始的异步 `ComputePathToPose` 请求，
+  造成局部路径重新生成延迟。
+- 导航协调器现在记录本次恢复是否已发送 resume。正常恢复完成后，`PATROL` 状态处理不再
+  重复发送；恢复超时路径仍会在切回 `PATROL` 时发送一次 resume。
+- 未修改 waypoint、RL 局部规划器、DWB 或路径参数，只收敛恢复交接时的消息顺序。
+
+## 2026-09-04 - 恢复完成不依赖巡检路径
+
+- `RECOVER_PATROL` 到达保存的巡检中断位置并稳定停车后，立即发布
+  `PATROL_RECOVERY_COMPLETE`，不再等待 waypoint `active` 状态或新的非空 `/global_path`。
+- 因此原巡检没有 waypoint 或当前没有巡检目标点时，也可以正常回到 `PATROL`；resume
+  命令仍会发送给 waypoint 节点，但它不再是总状态机恢复完成的前置条件。
+- 恢复到达判定只使用位置容差 `0.25 m` 和原有速度保持条件，不再检查朝向误差。
+
+## 2026-09-04 - RECOVER_PATROL 返回巡检中断位姿
+
+- 进入目标接近阶段时，导航协调器保存当前 `map -> base_footprint` 的位置和朝向，作为
+  本次目标任务打断巡检时的恢复断点；waypoint 当前索引仍由原 waypoint 节点保留。
+- `RECOVER_PATROL` 不再立即恢复 waypoint。导航先清空目标路径、保持 waypoint 暂停，使用
+  现有 `ComputePathToPose` 规划器生成返回中断位姿的路径，并继续通过现有
+  `/global_path` -> DWB/RL 控制链执行。
+- 只有位置误差不超过 `0.25 m`，且线速度/角速度连续保持在原到达阈值内后，才清空返回
+  路径并发布 `/waypoint_sequence/resume`，随后立即发布 `PATROL_RECOVERY_COMPLETE`。
+- 增加参数 `motion.recovery_position_tolerance`，不再判断恢复时的朝向。如果进入接近阶段
+  时暂时无法获取机器人 TF，恢复时
+  记录警告并直接恢复 waypoint，避免把系统永久卡在恢复状态；恢复总超时仍由 supervisor
+  直接回到 `PATROL`。
+
+## 2026-09-04 - 导航协调器改为总控状态直接驱动
+
+- 删除导航侧 `NavigationStateMachine` 和持久化导航模式，改为无状态
+  `navigation_policy()`；总控 `/mission/state` 成为导航行为的唯一状态来源。
+- 保持已调试的目标融合、雷达测距、3 m 停靠、0.5 秒动态目标重规划、Nav2 路径发布和
+  DWB 控制链不变；只重构状态进入动作和运行条件。
+- `CONFIRM_TARGET` 继续原 waypoint 巡检并后台定位目标；`APPROACH_TARGET` 才暂停巡检、
+  清除巡检路径并切换到目标路径；`VERIFY_IDENTITY` 保持停车；`TRACK_INTRUDER` 持续跟踪。
+- `RECOVER_PATROL` 清理目标上下文、恢复原 waypoint 并等待新巡检路径；新路径到达后上报
+  `PATROL_RECOVERY_COMPLETE`，恢复超时仍由 supervisor 直接返回 `PATROL`。
+
+## 2026-09-04 - 取消无目标执行错误对总任务的永久阻塞
+
+- `EXECUTION_ERROR` 发生在活动目标任务中时仍进入 `RECOVER_PATROL`，恢复原 waypoint
+  巡检；恢复阶段重复错误仍不创建新的错误分支。
+- `target_id=0` 时的感知或导航技术错误改为诊断事件：总状态、`state_seq` 和巡检断点均
+  保持不变，`blocked` 保持 `false`，不再要求调用 `/mission/reset` 才能继续。
+- 导航缺少有效 TF、目标或路径时仍可在执行层清空无效路径，避免复用旧控制命令；这只是
+  局部安全动作，不再把全局任务锁死。
+- 同步更新总控状态机测试与感知导航接口文档；未提交、未 push。
+
+## 2026-09-03 - 按现场日志放宽目标短时丢失与 bbox 新鲜度窗口
+
+- 现场依据：感知链稳定以 10 Hz 处理和预览，但总控日志中同一目标多次在
+  `TARGET_LOST` 后约 `0.095-0.20 s` 即 `TARGET_REACQUIRED`，说明 0.5 秒任务级丢失门限
+  会把短暂的可信框空洞升级成全局阻塞；导航日志同时多次出现 bbox age
+  `0.506-0.508 s`，仅略高于原 `max_bbox_age=0.50 s`。
+- 感知：将生产 YAML、资产运行 YAML 和无参数 C++ 默认值中的
+  `target.lost_event_timeout_sec` 从 `0.5 s` 调整为 `1.0 s`。目标需要连续 1 秒没有可信框
+  才发布 `TARGET_LOST`，减少快速 lost/reacquired 导致的路径取消和重新捕获。
+- 导航：将 `fusion.max_bbox_age` 从 `0.50 s` 调整为 `0.80 s`，将
+  `fusion.target_timeout` 从 `0.60 s` 调整为 `0.90 s`，覆盖当前约 0.31 秒推理发布延迟和
+  偶发调度抖动；超过目标保持时间后仍清空目标路径并停车。
+- 精度边界：`fusion.sync_tolerance` 保持 `0.12 s`，没有允许旧 bbox 与错误时刻的雷达
+  点云配对；`min_cluster_points=3`、ROI、聚类和 3 m 停止参数均未修改。
+
 ## 2026-09-03 - 将 MID360 点云发布频率恢复为 10 Hz
 
 - 确认相机由独立硬件同步器通过 `Line0` 以约 10 Hz 触发；Livox 驱动的
@@ -730,17 +988,3 @@
 - 涉及文件：`README.md`、`docs/issue4_tracking_baseline_audit.md`、`worklog.md`；源仓远端新增 `deploy/dog_patrol-integration` 分支。
 - 验证：source ROS 2 和 dog_patrol overlay 后，源基线 `colcon build --packages-select vision_demo_host` 通过；`colcon test --packages-select vision_demo_host --return-code-on-test-failure` 为 53/53 CTest 通过，汇总 392 tests、0 errors/failures/skipped。dog_patrol 三个现有 package 的独立 worktree 构建通过，测试汇总 29 tests、0 errors/failures/skipped；历史对象和规则敏感信息扫描结果见审计文档。
 - 后续：后续迁移票在临时 clone 中执行过滤历史导入，并对导入后的新 commit 图二次复扫；真实 TensorRT/Hik 现场验收不属于本票。
-## 2026-09-03 - 按现场日志放宽目标短时丢失与 bbox 新鲜度窗口
-
-- 现场依据：感知链稳定以 10 Hz 处理和预览，但总控日志中同一目标多次在
-  `TARGET_LOST` 后约 `0.095-0.20 s` 即 `TARGET_REACQUIRED`，说明 0.5 秒任务级丢失门限
-  会把短暂的可信框空洞升级成全局阻塞；导航日志同时多次出现 bbox age
-  `0.506-0.508 s`，仅略高于原 `max_bbox_age=0.50 s`。
-- 感知：将生产 YAML、资产运行 YAML 和无参数 C++ 默认值中的
-  `target.lost_event_timeout_sec` 从 `0.5 s` 调整为 `1.0 s`。目标需要连续 1 秒没有可信框
-  才发布 `TARGET_LOST`，减少快速 lost/reacquired 导致的路径取消和重新捕获。
-- 导航：将 `fusion.max_bbox_age` 从 `0.50 s` 调整为 `0.80 s`，将
-  `fusion.target_timeout` 从 `0.60 s` 调整为 `0.90 s`，覆盖当前约 0.31 秒推理发布延迟和
-  偶发调度抖动；超过目标保持时间后仍清空目标路径并停车。
-- 精度边界：`fusion.sync_tolerance` 保持 `0.12 s`，没有允许旧 bbox 与错误时刻的雷达
-  点云配对；`min_cluster_points=3`、ROI、聚类和 3 m 停止参数均未修改。

@@ -10,12 +10,6 @@ MissionCoordinator::MissionCoordinator(Config config) : config_(config) {
   if (config_.lost_event_timeout <= Duration::zero()) {
     throw std::invalid_argument("lost_event_timeout must be positive");
   }
-  if (config_.reacquire_retention <= Duration::zero()) {
-    throw std::invalid_argument("reacquire_retention must be positive");
-  }
-  if (config_.lost_event_timeout >= config_.reacquire_retention) {
-    throw std::invalid_argument("lost_event_timeout must be shorter than reacquire_retention");
-  }
 }
 
 bool MissionCoordinator::AcceptsFreshTargetBox(const MissionPhase phase) {
@@ -27,6 +21,7 @@ bool MissionCoordinator::AcceptsFreshTargetBox(const MissionPhase phase) {
       return true;
     case MissionPhase::kStartup:
     case MissionPhase::kPatrol:
+    case MissionPhase::kRecoverPatrol:
       return false;
   }
   return false;
@@ -75,11 +70,6 @@ bool MissionCoordinator::IsTargetLifecycleActive(const MissionSnapshot &mission)
   return mission.target_id > 0 && AcceptsFreshTargetBox(mission.phase);
 }
 
-bool MissionCoordinator::IsCompatibleLostBlock(const MissionSnapshot &mission, const LossCycle &cycle) const {
-  return mission.blocked && mission.block_cause == MissionBlockCause::kTargetLost &&
-         mission.target_id == cycle.target_id && mission.state_seq != cycle.loss_event_state_seq;
-}
-
 bool MissionCoordinator::CanPublishForSourceTime(const TimePoint source_time) const {
   return !last_published_source_time_.has_value() || source_time > last_published_source_time_.value();
 }
@@ -87,7 +77,7 @@ bool MissionCoordinator::CanPublishForSourceTime(const TimePoint source_time) co
 void MissionCoordinator::ResetMissionTarget() {
   tracked_target_id_.reset();
   last_fresh_observation_at_.reset();
-  loss_cycle_.reset();
+  loss_event_state_seq_.reset();
 }
 
 MissionCoordinator::Output MissionCoordinator::Update(const FrameInput &input) {
@@ -98,65 +88,38 @@ MissionCoordinator::Output MissionCoordinator::Update(const FrameInput &input) {
   latest_source_time_ = input.source_time;
 
   if (input.mission.phase == MissionPhase::kPatrol || input.mission.phase == MissionPhase::kStartup ||
+      input.mission.phase == MissionPhase::kRecoverPatrol ||
       input.mission.target_id <= 0) {
     ResetMissionTarget();
     return output;
   }
 
-  if (loss_cycle_.has_value() && loss_cycle_->target_id != input.mission.target_id) {
-    return output;
+  // A final loss closes this target lifecycle. Do not let a late reappearance
+  // publish a new bbox before the supervisor has advanced the mission state.
+  if (loss_event_state_seq_.has_value() &&
+      loss_event_state_seq_.value() != input.mission.state_seq) {
+    ResetMissionTarget();
   }
 
-  if (tracked_target_id_.has_value() && tracked_target_id_.value() != input.mission.target_id &&
-      !loss_cycle_.has_value()) {
+  if (tracked_target_id_.has_value() && tracked_target_id_.value() != input.mission.target_id) {
     ResetMissionTarget();
   }
 
   const IdentityObservation *trusted_observation = nullptr;
   const bool has_trusted_observation = IsTrustedCurrentObservation(input, &trusted_observation);
 
-  if (loss_cycle_.has_value()) {
-    LossCycle &cycle = loss_cycle_.value();
-    if (input.mission.blocked && input.mission.block_cause != MissionBlockCause::kTargetLost) {
-      cycle.automatic_recovery_disallowed = true;
-    }
-    if (last_fresh_observation_at_.has_value() && input.source_time >= last_fresh_observation_at_.value() &&
-        input.source_time - last_fresh_observation_at_.value() >= config_.reacquire_retention) {
-      cycle.retention_expired = true;
-    }
-
-    if (!has_trusted_observation || cycle.retention_expired || cycle.automatic_recovery_disallowed) {
-      return output;
-    }
-
-    if (!cycle.reacquire_event_state_seq.has_value()) {
-      if (IsCompatibleLostBlock(input.mission, cycle)) {
-        output.events.push_back(
-            {PerceptionMissionEvent::kTargetReacquired, cycle.target_id, input.mission.state_seq});
-        cycle.reacquire_event_state_seq = input.mission.state_seq;
-      }
-      return output;
-    }
-
-    if (input.mission.blocked || input.mission.block_cause != MissionBlockCause::kNone ||
-        input.mission.state_seq == cycle.reacquire_event_state_seq.value()) {
-      return output;
-    }
-
-    loss_cycle_.reset();
+  if (has_trusted_observation && loss_event_state_seq_.has_value() &&
+      loss_event_state_seq_.value() == input.mission.state_seq) {
+    return output;
   }
 
-  if (input.mission.blocked || input.mission.block_cause != MissionBlockCause::kNone ||
-      !has_trusted_observation) {
+  if (!has_trusted_observation) {
     if (!has_trusted_observation && tracked_target_id_.has_value() &&
         tracked_target_id_.value() == input.mission.target_id && last_fresh_observation_at_.has_value() &&
         input.source_time >= last_fresh_observation_at_.value() &&
         input.source_time - last_fresh_observation_at_.value() >= config_.lost_event_timeout &&
-        !input.mission.blocked && input.mission.block_cause == MissionBlockCause::kNone) {
-      LossCycle cycle;
-      cycle.target_id = input.mission.target_id;
-      cycle.loss_event_state_seq = input.mission.state_seq;
-      loss_cycle_ = cycle;
+        loss_event_state_seq_ != input.mission.state_seq) {
+      loss_event_state_seq_ = input.mission.state_seq;
       output.events.push_back(
           {PerceptionMissionEvent::kTargetLost, input.mission.target_id, input.mission.state_seq});
     }

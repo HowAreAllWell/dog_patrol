@@ -10,7 +10,6 @@ namespace {
 using dog_patrol_perception_tracking::ClassId;
 using dog_patrol_perception_tracking::IdentityObservation;
 using dog_patrol_perception_tracking::IdentityState;
-using dog_patrol_perception_tracking::MissionBlockCause;
 using dog_patrol_perception_tracking::MissionCoordinator;
 using dog_patrol_perception_tracking::MissionFrameTransaction;
 using dog_patrol_perception_tracking::MissionPhase;
@@ -120,7 +119,7 @@ TEST(MissionFrameTransactionTest, TreatsUnrepresentableTargetBoxAsMissing) {
   const std::vector<IdentityObservation> off_image{
       TrustedPerson(42, 7, cv::Rect2f{700.0F, 2.0F, 4.0F, 4.0F})};
   const auto lost = transaction.Update(
-      {confirm, std::nullopt, off_image, source_time + std::chrono::milliseconds{500}, Metadata()});
+      {confirm, std::nullopt, off_image, source_time + std::chrono::seconds{10}, Metadata()});
 
   EXPECT_FALSE(lost.target_box.has_value());
   ASSERT_EQ(lost.events.size(), 1U);

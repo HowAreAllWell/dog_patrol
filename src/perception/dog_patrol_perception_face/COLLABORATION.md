@@ -35,11 +35,11 @@ tracking 的主目标选择、实时推理、现有预览、录制和 mission �
 
 ## 3. Mission 会话与授权结果
 
-- provider 必须同时跟随 `/mission/state` 和 `/perception/authorization_command`。MissionState 只维护
-  当前未 blocked 的 `VERIFY_IDENTITY` 会话；只有匹配当前 `state_seq + target_id` 的命令才启动算法窗口。
+- provider 必须同时跟随 `/mission/state` 和 `/perception/authorization_command`。只有当前处于
+  `VERIFY_IDENTITY` 且匹配 `state_seq + target_id` 的命令才启动算法窗口。
 - `INITIAL_FACE` 只运行人脸；`DUAL_FIRST` 和 `DUAL_SECOND` 各运行一个人脸窗口；`CANCEL` 停止当前
   窗口。结果必须绑定到当前 `state_seq + target_id + stage`。
-- 状态离开 `VERIFY_IDENTITY`、`state_seq` 或 `target_id` 改变、任务 blocked、目标图像过期或节点
+- 状态离开 `VERIFY_IDENTITY`、`state_seq` 或 `target_id` 改变、目标图像过期或节点
   shutdown 时，必须取消当前任务并清空队列。旧 worker 即使随后返回也不得发布迟到结果。
 - 结果通过现有 `/perception/authorization_evidence` 发布
   `dog_patrol_perception_interfaces/msg/AuthorizationEvidence`，`provider` 固定为 `face`；不得由人脸

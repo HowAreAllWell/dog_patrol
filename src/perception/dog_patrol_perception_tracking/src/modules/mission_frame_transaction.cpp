@@ -70,8 +70,7 @@ MissionFrameTransaction::Output MissionFrameTransaction::Update(const FrameInput
   }
 
   const MissionSnapshot &mission = input.mission.value();
-  if (mission.phase == MissionPhase::kPatrol && !mission.blocked &&
-      mission.block_cause == MissionBlockCause::kNone && mission.target_id == 0 &&
+  if (mission.phase == MissionPhase::kPatrol && mission.target_id == 0 &&
       input.metadata.source_timestamp_ns != 0U &&
       IsTrustedPrimary(output.primary, output.primary.primary_target_id) &&
       (confirmation_attempt_patrol_state_seq_ != mission.state_seq ||

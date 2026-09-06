@@ -38,6 +38,7 @@ def generate_launch_description():
     waypoint_delete_topic = LaunchConfiguration("waypoint_delete_topic")
     waypoint_replace_topic = LaunchConfiguration("waypoint_replace_topic")
     waypoint_status_topic = LaunchConfiguration("waypoint_status_topic")
+    waypoint_resume_from_current_topic = LaunchConfiguration("waypoint_resume_from_current_topic")
     waypoints_topic = LaunchConfiguration("waypoints_topic")
     waypoints_pose_topic = LaunchConfiguration("waypoints_pose_topic")
     waypoint_replan_period = LaunchConfiguration("waypoint_replan_period")
@@ -81,6 +82,7 @@ def generate_launch_description():
                 "delete_clicked_point_topic": waypoint_delete_topic,
                 "replace_clicked_point_topic": waypoint_replace_topic,
                 "status_topic": waypoint_status_topic,
+                "resume_from_current_topic": waypoint_resume_from_current_topic,
                 "path_topic": global_path_topic,
                 "publish_pure_pursuit_plan": True,
                 "pure_pursuit_plan_topic": pure_pursuit_plan_topic,
@@ -251,10 +253,14 @@ def generate_launch_description():
             DeclareLaunchArgument("waypoint_delete_topic", default_value="/waypoint_sequence/delete_nearest"),
             DeclareLaunchArgument("waypoint_replace_topic", default_value="/waypoint_sequence/replace_nearest"),
             DeclareLaunchArgument("waypoint_status_topic", default_value="/waypoint_sequence/status"),
+            DeclareLaunchArgument(
+                "waypoint_resume_from_current_topic",
+                default_value="/waypoint_sequence/resume_from_current",
+            ),
             DeclareLaunchArgument("waypoints_topic", default_value="waypoints"),
             DeclareLaunchArgument("waypoints_pose_topic", default_value="waypoints_pose_array"),
             DeclareLaunchArgument("waypoint_replan_period", default_value="1.0"),
-            DeclareLaunchArgument("waypoint_goal_tolerance", default_value="1.5"),
+            DeclareLaunchArgument("waypoint_goal_tolerance", default_value="1.0"),
             DeclareLaunchArgument("waypoint_edit_radius", default_value="1.5"),
             DeclareLaunchArgument("waypoint_enable_interactive_markers", default_value="true"),
             DeclareLaunchArgument("waypoint_interactive_marker_ns", default_value="waypoint_editor"),

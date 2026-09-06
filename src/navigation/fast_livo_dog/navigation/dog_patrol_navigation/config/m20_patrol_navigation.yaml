@@ -11,6 +11,7 @@ navigation_mission_coordinator:
       global_path: /global_path
       pause_patrol: /waypoint_sequence/pause
       resume_patrol: /waypoint_sequence/resume
+      resume_patrol_from_current: /waypoint_sequence/resume_from_current
       nav_cmd: /NAV_CMD
       target_point: /navigation/target_point
       target_goal: /navigation/target_goal
@@ -87,6 +88,9 @@ navigation_mission_coordinator:
       arrival_linear_speed: 0.05
       arrival_angular_speed: 0.10
       arrival_hold_time: 0.50
+      # RECOVER_PATROL returns to the map pose saved when APPROACH_TARGET
+      # started, then resumes the paused waypoint task.
+      recovery_position_tolerance: 0.25
       # APPROACH_TARGET also tracks a moving target. Replan periodically even
       # when each individual bbox update is below target_replan_distance.
       approach_replan_period: 0.50
@@ -96,7 +100,7 @@ navigation_mission_coordinator:
 
     runtime:
       tick_rate: 10.0
-      status_rate: 5.0
+      status_rate: 10.0
       strict_ready_checks: true
       ready_lidar_timeout: 0.50
       ready_event_period: 1.0

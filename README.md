@@ -4,7 +4,7 @@
 
 ## 当前状态
 
-- `dog_patrol_interfaces`：已实现，保存主状态机、任务事件、目标框和导航状态消息。
+- `dog_patrol_interfaces`：已实现，保存主状态机、任务事件、目标框和导航观测状态消息。
 - `dog_patrol_perception_interfaces`：已实现，保存感知内部 capability、授权证据和主目标 crop 合同。
 - `dog_patrol_manager`：已实现，包含 ROS-independent 状态机和 `mission_supervisor` ROS 2 节点。
 - `navigation/`：已迁入 fast_livo_dog 完整导航链，并提供 2D 导航协调器。
@@ -105,10 +105,10 @@ Apache-2.0。具体范围和许可证副本见 [`LICENSES/README.md`](LICENSES/R
 - `dog_patrol_interfaces` 是跨团队共享合同，不属于导航或感知任一实现目录。
 - 主状态机只编排业务状态，不实现检测、跟踪、人脸或语音算法。
 - 导航和感知可以通过 ROS 2 直接交换数据，但不得依赖对方的私有代码 Module。
-- `TARGET_LOST` 和 `TARGET_REACQUIRED` 由感知发布；导航发现 bbox 过期时先本地停车并发布导航 `BLOCKED` 状态。
+- `TARGET_LOST` 由感知在连续丢失超时后发布；导航发现目标数据无效时只执行本地安全停车并按需发布 `EXECUTION_ERROR`。
 - 感知内部的授权流程只向主状态机映射最终授权、未授权或技术错误结果。
 
-详细合同见 [`docs/contracts/perception_navigation_interface.md`](docs/contracts/perception_navigation_interface.md)，业务流程见 [`docs/workflows/机器狗巡逻与可疑目标处置流程（更新后）.docx`](docs/workflows/机器狗巡逻与可疑目标处置流程（更新后）.docx)。
+系统完整实现说明见 [`docs/contracts/perception_navigation_system_implementation.md`](docs/contracts/perception_navigation_system_implementation.md)，严格接口合同见 [`docs/contracts/perception_navigation_interface.md`](docs/contracts/perception_navigation_interface.md)，业务流程见 [`docs/workflows/机器狗巡逻与可疑目标处置流程（更新后）.docx`](docs/workflows/机器狗巡逻与可疑目标处置流程（更新后）.docx)。
 
 感知编排模块说明见 [`src/perception/README.md`](src/perception/README.md)。
 人脸算法迁入、主目标 crop、mission 会话和唯一预览规则见

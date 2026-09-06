@@ -60,7 +60,6 @@ class Observer(Node):
         self.saw_verify = False
         self.final_state: int | None = None
         self.loss_seen = False
-        self.reacquired_seen = False
         self.create_subscription(
             MissionState, f"{prefix}/mission/state", self.on_state, qos()
         )
@@ -82,7 +81,6 @@ class Observer(Node):
             "state_seq": int(msg.state_seq),
             "state": int(msg.state),
             "target_id": int(msg.target_id),
-            "blocked": bool(msg.blocked),
             "stamp": self.get_clock().now().nanoseconds,
         }
         self.states.append(item)
@@ -102,9 +100,6 @@ class Observer(Node):
         if msg.event == MissionEvent.TARGET_LOST:
             self.loss_seen = True
             print("[fake-integration] TARGET_LOST observed; return to camera view now", flush=True)
-        elif msg.event == MissionEvent.TARGET_REACQUIRED:
-            self.reacquired_seen = True
-            print("[fake-integration] TARGET_REACQUIRED observed", flush=True)
 
     def on_evidence(self, msg: AuthorizationEvidence) -> None:
         self.evidence.append({
@@ -324,7 +319,6 @@ def main() -> int:
         choices=(
             "normal",
             "authorized_reencounter",
-            "tracking_reacquire",
             "tracking_loss_timeout",
             "startup_visible",
         ),
@@ -383,7 +377,7 @@ def main() -> int:
             parser.error(
                 "--preview requires an interactive graphical session with DISPLAY set"
             )
-        if args.scenario in ("tracking_reacquire", "tracking_loss_timeout", "startup_visible"):
+        if args.scenario in ("tracking_loss_timeout", "startup_visible"):
             print(
                 "[fake-integration] tracking-only scenario: be visible before "
                 "starting and remain visible "
@@ -554,8 +548,6 @@ def main() -> int:
                     and now >= reencounter_observe_deadline
                 ):
                     break
-            if args.scenario == "tracking_reacquire" and observer.reacquired_seen:
-                break
             if args.scenario == "startup_visible":
                 observed_states = {item["state"] for item in observer.states}
                 target_confirmed = any(
@@ -604,10 +596,8 @@ def main() -> int:
             "absence_observed": absence_observed_wall_time is not None,
             "return_observed": return_observed_wall_time is not None,
         }
-        if args.scenario == "tracking_reacquire":
-            functional_pass = observer.loss_seen and observer.reacquired_seen
-        elif args.scenario == "tracking_loss_timeout":
-            functional_pass = observer.loss_seen and not observer.reacquired_seen
+        if args.scenario == "tracking_loss_timeout":
+            functional_pass = observer.loss_seen
         elif args.scenario == "startup_visible":
             target_confirmed = any(
                 item["event"] == MissionEvent.TARGET_CONFIRMED for item in observer.events
@@ -655,7 +645,6 @@ def main() -> int:
                 "scenario": args.scenario,
                 "saw_verify_identity": observer.saw_verify,
                 "target_lost_seen": observer.loss_seen,
-                "target_reacquired_seen": observer.reacquired_seen,
                 "visited_states": sorted(visited_states),
                 "final_state": observer.final_state,
                 "evidence_count": len(observer.evidence),

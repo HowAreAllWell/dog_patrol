@@ -111,12 +111,13 @@ src/dog_patrol_perception_tracking/config/bot_sort.yaml
 
 核心参数：
 
-- `target.lost_threshold_frames`：主目标和 semantic identity 的 missing 保留窗口，默认 `180`。
+- `target.lost_threshold_frames`：主目标和 semantic identity 的 missing 保留窗口，默认 `100`（按当前 10 FPS ROS 图像输入约 10 秒）。
 - `sid.recover_sim_thresh_strict`：INACTIVE 恢复的严格外观相似度阈值。
 - `sid.recover_sim_thresh_relaxed`
 - `sid.recover_relaxed_max_missing_frames`
 
-现场换 FPS 时要重算帧数。例如 30fps 下 180 帧约 6 秒；25fps 下约 7.2 秒。
+现场换 FPS 时要重算帧数。当前默认 100 帧：10 FPS 输入约 10 秒；30 FPS 输入约 3.3 秒。
+这个内部帧窗口与任务级 `target.lost_event_timeout_sec=10.0` 秒事件分开配置。
 
 ### missing assignment
 
@@ -260,4 +261,4 @@ ros2 run dog_patrol_perception_tracking dog_patrol_perception_tracking_node --ro
 - TensorRT engine 能加载，画面有人时能检测。
 - 视频叠字里的 `id=` 在短遮挡和交叉时不频繁跳。
 - `/mission/event` 和 `/perception/selected_target_bbox` 能被外部节点观测。
-- 主目标 `target_id` 在短时遮挡中保持，事件状态可从 `TARGET_CONFIRMED` 到 `TARGET_LOST` 再回 `TARGET_REACQUIRED`。
+- 主目标 `target_id` 在短时遮挡中保持；只有连续丢失达到任务超时才发布一次 `TARGET_LOST`，随后由总控恢复巡检。

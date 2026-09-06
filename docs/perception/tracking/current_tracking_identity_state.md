@@ -153,7 +153,7 @@ VisualizerRecorder::Render(frame, tracks, primary, identity_result)
 
 mission ROS output 当前包括：
 
-- `/mission/event` 的 `SOURCE_PERCEPTION` READY、TARGET_CONFIRMED、TARGET_LOST、TARGET_REACQUIRED；
+- `/mission/event` 的 `SOURCE_PERCEPTION` READY、TARGET_CONFIRMED、TARGET_LOST；
 - `/perception/selected_target_bbox` 的当前帧 semantic target bbox；
 - overlay 中的 semantic id、identity state、supporting raw id 和 primary 状态。
 

@@ -9,79 +9,7 @@ readiness 和授权 orchestrator 都运行安装产物中的真实节点：
 - `run_fake_integration.py`：启动上述真实主流程与感知节点，加上 fake navigation，记录状态、事件、
   分阶段 evidence、流程耗时、进程资源和 `tegrastats`。
 
-## 导航协调器单独测试
-
-`run_fake_integration.py` 中的 `fake_nodes.py --role navigation` 只验证感知和总控的状态
-交互，它会伪造导航 `READY`、`TARGET_POSITION_READY` 和 `ARRIVED_AND_STOPPED`，不会验证
-真正的雷达投影、TF、Nav2 planner 或 `/global_path`。要测试导航协调器本身，必须运行真实
-导航链，再使用 `tools/navigation_coordinator/mock_target_publisher.py` 作为临时感知输入。
-
-这个 mock 节点只做两件事：
-
-1. 在真实状态进入 `PATROL` 后，以 `SOURCE_PERCEPTION` 发布一次 `TARGET_CONFIRMED`；
-2. 在 `CONFIRM_TARGET`、`APPROACH_TARGET`、`VERIFY_IDENTITY` 和 `TRACK_INTRUDER` 中，
-   按当前 ROS 时间持续发布 `TargetBoundingBox`。
-
-它不会伪造 `/livox/lidar`、TF、`/compute_path_to_pose`、`TARGET_POSITION_READY` 或速度。
-因此，目标点、全局路径、到达事件必须由真实协调器产生。
-
-### 测试 A：只验证 bbox 到目标地图位置
-
-适合机器人静止、已经有真实 Livox 点云和定位 TF 的情况：
-
-```bash
-cd /mnt/nvme/workspace/dog_patrol
-source /opt/ros/humble/setup.bash
-source install/setup.bash
-
-# 终端 1：启动 app，打开传感器和 3D/2D 定位；先不要让机器狗运动
-python3 src/orchestration/robot_console/robot_console/app.py
-
-# 终端 2：启动导航，或在 app 中点击导航
-export DOG_PATROL_NAV_ROOT=/mnt/nvme/workspace/dog_patrol/src/navigation/fast_livo_dog
-ros2 launch move navigation.launch.py use_sim_time:=false \
-  params_file:=$DOG_PATROL_NAV_ROOT/config/nav_parameters.yaml
-
-# 终端 3：发布 mock bbox。x/y 必须覆盖真实相机画面中目标对应的区域
-python3 tools/navigation_coordinator/mock_target_publisher.py \
-  --target-id 1001 \
-  --x-min 500 --y-min 220 --x-max 780 --y-max 900 \
-  --image-width 1280 --image-height 1024 \
-  --frame-id camera_link --rate 10
-```
-
-观察：
-
-```bash
-ros2 topic echo /mission/state
-ros2 topic echo /mission/event
-ros2 topic echo /navigation/target_point
-ros2 topic echo /navigation/target_status
-ros2 topic echo /navigation/target_goal
-ros2 topic echo /global_path
-```
-
-成功链路应为：`PATROL -> CONFIRM_TARGET -> TARGET_POSITION_READY -> APPROACH_TARGET`，
-随后出现 `map` frame 的 `/navigation/target_point`、`/navigation/target_goal` 和非空
-`/global_path`。如果没有目标点，优先检查 bbox 是否真的覆盖目标投影、bbox frame、
-图像分辨率、`/livox/lidar` frame 和设备外参；不要先调 planner。
-
-### 测试 B：验证真实目标路径和到达停止
-
-测试 A 成功后，保持 mock bbox 运行，并让机器狗在可控环境中运动。协调器会按
-`m20_patrol_navigation.yaml` 的默认设置，每 `0.50 s` 至少尝试一次目标重规划，目标
-移动超过 `0.25 m` 时提前重规划，到达 `3.25 m` 内且速度持续低于停止阈值后发布
-`ARRIVED_AND_STOPPED`。测试时重点观察：
-
-```bash
-ros2 topic hz /global_path
-ros2 topic echo /navigation/target_status
-ros2 topic echo /NAV_CMD
-```
-
-不要同时运行真实 tracking 和 mock bbox，否则两个节点会同时发布同一个 bbox topic。
-
-### 测试 C：只验证总控与感知的状态交互
+## 测试 A：只验证总控与感知的状态交互
 
 这类测试不验证真实距离和路径，使用已有 fake integration：
 
@@ -97,7 +25,7 @@ python3 tools/fake_integration/run_fake_integration.py \
 `normal`、`dual_pass` 和 `dual_reject` 还会启动真实 face/voice provider；它们适合验证
 感知内部认证和 supervisor 状态转移，不适合作为导航协调器距离计算的验收。
 
-### 测试 D：接入真实 tracking
+### 测试 B：接入真实 tracking
 
 真实 tracking 在 `runtime.mode:=mission` 下不会无条件发布 bbox：它需要订阅有效的
 `/mission/state`，在 `PATROL` 先发布 `TARGET_CONFIRMED`，进入 `CONFIRM_TARGET` 后才发布
@@ -170,15 +98,14 @@ ros2 run dog_patrol_perception_tracking dog_patrol_perception_tracking_node \
   -p visualization.enable:=true \
   -p recording.enable:=false
 
-# 终端 6：只模拟认证结果和处置完成，不发布 bbox
+# 终端 6：只模拟认证结果，不发布 bbox
 python3 tools/navigation_coordinator/mock_mission_events.py \
-  --result unauthorized \
-  --complete-after 10
+  --result unauthorized
 ```
 
 终端 6 的行为是：真实导航到达 3 m 并使 supervisor 进入 `VERIFY_IDENTITY` 后，发布
-`UNAUTHORIZED`，触发 `TRACK_INTRUDER`；等待 `--complete-after` 秒后发布操作员来源的
-`HANDLING_COMPLETE`，supervisor 应回到 `PATROL`，导航协调器恢复 waypoint 巡检。
+`UNAUTHORIZED`，触发 `TRACK_INTRUDER`。之后需要让真实目标离开画面并持续超过
+`target.lost_event_timeout_sec`（默认 10 秒），由 tracking 发布 `TARGET_LOST`，导航协调器再恢复巡检。
 
 验证完整过程：
 
@@ -187,7 +114,6 @@ ros2 topic echo /mission/state
 ros2 topic echo /mission/event
 ros2 topic echo /perception/selected_target_bbox
 ros2 topic echo /navigation/target_point
-ros2 topic echo /navigation/target_status
 ros2 topic hz /global_path
 ```
 
@@ -205,14 +131,13 @@ STARTUP
 
 其中 `TARGET_CONFIRMED` 和 bbox 必须来自真实 tracking，`TARGET_POSITION_READY`、
 `ARRIVED_AND_STOPPED`、目标点和全局路径必须来自真实导航协调器，只有
-`UNAUTHORIZED` 和 `HANDLING_COMPLETE` 由测试工具模拟。
+`UNAUTHORIZED` 由测试工具模拟，`TARGET_LOST` 必须来自真实 tracking。
 
-第一次建议将 `--complete-after` 设置为 `-1`，先观察 `TRACK_INTRUDER` 是否能够持续收到
-真实 bbox 和更新目标路径；确认跟踪正常后，再改成 `--complete-after 10` 测试返回巡检。
+先观察 `TRACK_INTRUDER` 是否能够持续收到真实 bbox 和更新目标路径；确认跟踪正常后，
+让测试目标离开画面，测试 10 秒最终丢失后的巡检恢复。
 如果测试人员一直留在画面中，回到 `PATROL` 后真实 tracking 可能再次发布
 `TARGET_CONFIRMED`，这是当前“巡检状态继续检测”的真实行为，不是状态机回退失败。
-测试返回巡检时，建议在 `HANDLING_COMPLETE` 前停止 tracking 或让测试目标离开画面，
-避免立即开启下一次目标流程。
+返回巡检后若测试目标再次出现，tracking 可在新的 `PATROL state_seq` 下开启下一次目标流程。
 
 如果外部相机驱动已经发布原始 ROS 图像，可以将 tracking 切换到 `ros_image` 模式。该模式不会
 打开 Hik MVS，只订阅指定的 `sensor_msgs/msg/Image`，适合 `fast_livo_dog` 的双 topic 驱动：

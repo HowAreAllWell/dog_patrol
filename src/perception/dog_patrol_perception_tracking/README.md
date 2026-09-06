@@ -16,10 +16,12 @@ Dog patrol 的正式 perception tracking 模块，包含相机接入、检测、
 - `target_image_ros_adapter`：mission/standalone 共用的 ROS transport seam；以有界异步丢旧队列向独立人脸进程发布当前 crop，并在无可信当前目标时显式取消排队或正在转换的旧值
 - `face_overlay_adapter`：缓存人脸 provider 返回的轻量 bbox；只在 target、source stamp 和可用帧号与
   当前诊断 job 匹配且结果不超过 0.5 秒时，绘制到既有 `VisualizerRecorder` canvas
-- `mission_coordinator`：ROS-independent 任务输出协调 seam；按任务状态 / semantic target / state sequence 只产生当前帧可信 bbox，并负责配置化同目标 loss/reacquire event 时序
-- `mission_frame_transaction`：ROS-independent 一帧任务事务；在 identity 输出后统一执行 primary 更新、PATROL 目标确认、fresh bbox、loss/reacquire，并返回本帧 primary 诊断
+- `mission_coordinator`：ROS-independent 任务输出协调 seam；按任务状态、semantic target 和 state sequence 只产生当前帧可信 bbox，并在目标连续丢失超时后产生一次 `TARGET_LOST`
+- `mission_frame_transaction`：ROS-independent 一帧任务事务；在 identity 输出后统一执行 primary 更新、PATROL 目标确认、fresh bbox 和目标丢失判定，并返回本帧 primary 诊断
 - `perception_readiness`：ROS-independent READY 聚合 seam；以 required capability contribution 和 `STARTUP state_seq` 产生至多一次 aggregate READY action
-- `mission_ros_adapter`：`dog_patrol_interfaces` 的唯一 ROS transport seam；可靠/transient state 输入、aggregate READY/event 输出和 best-effort 新鲜 bbox 输出均在此处映射
+- `mission_ros_adapter`：`dog_patrol_interfaces` 的唯一 ROS transport seam；负责可靠/transient
+  `MissionState` 输入、感知事件和 best-effort 新鲜 bbox 输出。三个感知 capability 的聚合以及
+  公共 `SOURCE_PERCEPTION/READY` 由 `perception_readiness` 节点负责，不由 tracking adapter 代发
 
 未接入或未完成：
 - identity 层尚未迁移为完整的新状态机；`IdentityManager` 是公开接口并持有当前 identity runtime state。内部 `IdentityAssignmentEngineAdapter` 只承担 assignment / recovery / update engine 适配，调用已抽取的 policy、cost、solver、birth、binding、store、mutation 和 projection helper，保持既有 debug row、raw-to-semantic mapping 与 public behavior。Phase 5 BirthManager 已固定为唯一运行时 birth / hidden candidate 路径，但 primary/output 仍保持当前公开语义。
@@ -49,8 +51,9 @@ SID 生效配置的镜像；`MotTracker` 的 `config/bot_sort.yaml` 解析仍由
 - `detector.raw_conf_threshold`
 - `detector.person_conf_threshold` / `detector.car_conf_threshold`
 - `tracker.*`
-- `target.lost_threshold_frames`
-- `target.lost_event_timeout_sec` / `target.reacquire_retention_sec` / `target.handled_ignore_absence_sec`
+- `target.lost_threshold_frames`（tracking/identity 内部的帧级生命周期阈值）
+- `target.lost_event_timeout_sec`（任务级最终 `TARGET_LOST` 的 source-time 超时，当前为 10 s）
+- `target.handled_ignore_absence_sec`（核验或持续跟踪结束后，上一目标需要连续不可见多久才允许再次被选中；当前为 30 s）
 - `mission.state_topic` / `mission.event_topic` / `mission.selected_target_bbox_topic`
 - `perception.camera_optical_frame_id`
 - `visualization.enable`（overlay preview；默认 `false`）
@@ -138,12 +141,15 @@ src/perception/dog_patrol_perception_tracking/scripts/check_orin_env.sh
 src/perception/dog_patrol_perception_tracking/scripts/bench_hik_mvs_camera.sh
 ```
 
-`MissionCoordinator::Config` 当前提供 `lost_event_timeout=1.0s` 和
-`reacquire_retention=6s`，两者必须为正且前者更短。它只使用注入的单调
-source-time，不按固定帧数计时；输出当前 target 的新鲜 bbox 只允许在
+`MissionCoordinator::Config` 当前只提供 `lost_event_timeout=10s`。它只使用注入的单调
+source-time，不按固定帧数计时；计时由后续进入任务事务的处理帧推进，如果相机/推理线程
+完全停止而没有新的 `Update()`，该 coordinator 不会凭空生成 `TARGET_LOST`，输入故障应由
+readiness/技术故障监控报告。输出当前 target 的新鲜 bbox 只允许在
 `CONFIRM_TARGET`、`APPROACH_TARGET`、`VERIFY_IDENTITY`、`TRACK_INTRUDER`。
-live node 将它绑定到上述 ROS 参数：`TARGET_LOST` / `TARGET_REACQUIRED` 只由
-coordinator 的 one-shot action 转发，绝不缓存 bbox。`PATROL` 在当前帧锁定语义 ID 后发送
+live node 将它绑定到上述 ROS 参数：最终 `TARGET_LOST` 只由 coordinator 的 one-shot
+action 转发，绝不缓存 bbox；目标丢失后在同一个 `state_seq` 内禁止重新发布旧任务 bbox，
+直到总控发布新的任务状态。
+`PATROL` 在当前帧锁定语义 ID 后发送
 `TARGET_CONFIRMED`，不会发送 bbox；由于 mission event 是 volatile transport，在 authoritative
 state 未推进时会按至多每 100 ms 重试同一 state sequence 的确认；收到相同目标的
 authoritative `CONFIRM_TARGET`、`APPROACH_TARGET`、`VERIFY_IDENTITY` 或
@@ -171,9 +177,9 @@ source /path/to/dog_patrol/install/setup.bash
 ```
 
 - `/mission/state`：reliable、transient-local、keep-last 1。adapter 拒绝未知 enum、无效
-  phase/target/block 组合、同 sequence 冲突消息以及旧的 wraparound-safe `state_seq`。
+  phase/target 组合、同 sequence 冲突消息以及旧的 wraparound-safe `state_seq`。
 - `/mission/event`：reliable、volatile、keep-last 10。发布 aggregate `READY`、
-  `TARGET_CONFIRMED` 和 coordinator 的 `TARGET_LOST` / `TARGET_REACQUIRED`，source 为
+  `TARGET_CONFIRMED` 和 coordinator 的 `TARGET_LOST`，source 为
   `SOURCE_PERCEPTION`。
 - `/perception/selected_target_bbox`：best-effort、volatile、keep-last 5。只传当前帧、当前
   semantic `target_id` 的可信框；`Header.stamp` 为相机 source timestamp，`frame_id` 为
@@ -183,36 +189,30 @@ source /path/to/dog_patrol/install/setup.bash
 runtime 诊断元数据；公开消息不编码未在 shared contract 中定义的字段。
 
 ROS subscription callback 只验证并加锁保存 snapshot；camera、detector、tracker 和 identity
-由 live tick mutex 串行执行。identity 输出后的 primary、target confirmation、bbox/loss/reacquire
+由 live tick mutex 串行执行。identity 输出后的 primary、target confirmation、bbox/loss
 frame decision 由 `MissionFrameTransaction` 在 adapter 的 mission mutex 下执行。即使用
 `MultiThreadedExecutor` 也不会并发进入 detector/tracker/identity；mission-state subscription
 置于独立的 mutually-exclusive callback group，使它在 camera acquisition 或 inference 较慢时
 仍能及时写入最新 snapshot。capability status、event 和 bbox 都在发布前于同一 mission mutex 下复核
 完整 snapshot；frame transaction 的 one-shot action 在该短临界区内计算并发布，因此不会把旧
-sequence、旧 target 或已 blocked 的 frame action 发到 ROS，亦不会因 state 交错而吞掉
-新的 target-confirmed/loss/reacquisition action。
+sequence 或旧 target 的 frame action 发到 ROS，亦不会因 state 交错而吞掉新的
+target-confirmed/loss action。
 
 无图形会话可运行独立进程 smoke：启动 `mission_ros_adapter_smoke`，使用另一个 ROS 2
 进程向默认 `/issue84/smoke/mission/state` 发布 `STARTUP(100)`、`PATROL(101)`、
-`CONFIRM_TARGET(102,target_id=42)`，再发布同目标的 blocked
-`CONFIRM_TARGET(103, BLOCK_TARGET_LOST)`；通过外部 `ros2 topic echo` 观察 tracking capability status、
-TARGET_CONFIRMED、当前帧 bbox、TARGET_LOST 与 TARGET_REACQUIRED。该 fixture 使用固定的
+`CONFIRM_TARGET(102,target_id=42)`；通过外部 `ros2 topic echo` 观察 tracking capability status、
+TARGET_CONFIRMED、当前帧 bbox 和 TARGET_LOST。该 fixture 使用固定的
 可信 synthetic frame，只验收 DDS/adapter transport，不能替代真 Hik 相机中的真实检测验收。
-默认 `smoke.reacquire_retention_sec=30` 只为给 CLI 操作留出时间；production node 仍使用
-`target.reacquire_retention_sec=6`。
 
-完整 lifecycle 回归由 CTest `test_mission_pipeline_integration` 覆盖。它启动安装后的真实
-`dog_patrol_manager mission_supervisor` 和 `dog_patrol_perception_orchestrator perception_readiness`，
-再通过 production `MissionFrameTransaction`
-和 `MissionRosAdapter` 验证 STARTUP readiness、PATROL 首帧确认、fresh bbox、
-loss/block/reacquire/unblock、VERIFY、handled suppression 和 next-target selection。运行测试前必须
-source `/path/to/dog_patrol/install/setup.bash`；fixture 使用独立 ROS domain，并在退出时清理
-整个 supervisor process group。默认 CTest 使用无资产确定性 observations；在 Orin 上可显式追加
-`--visual-video`、`--detector-engine`、`--tracker-config`，使 historical Hik migration 录制先经过实际
-`PreprocessInfer → DetFilter → MotTracker → IdentityManager`，再用其 observations 执行同一 mission
-lifecycle。该模式不是 active H.264 runtime 入口。命令、资产哈希、帧号和 DDS echo/info/hz 证据见
-`../../../docs/perception/tracking/mission_contract_integration.md`；迁移前的 Orin/Hik 现场证据仍保留在
-`../../../docs/perception/tracking/issue87_integrated_acceptance.md`。
+当前自动化回归由本包的 core、transport 和 mission transaction 单元测试覆盖，重点验证
+`MissionFrameTransaction`、`MissionRosAdapter` 的 STARTUP readiness、PATROL 首帧确认、
+fresh bbox、loss/recovery、VERIFY、handled suppression 和 next-target selection。跨节点现场
+闭环使用工作区中的 `tools/fake_integration` 与 `tools/navigation_coordinator` 测试工具，
+不把 standalone tracking 节点误认为完整 mission supervisor。运行测试前必须 source
+`/path/to/dog_patrol/install/setup.bash`；Orin 真实相机验收仍需显式使用相机、engine 和
+tracker 资产。命令、资产哈希、帧号和 DDS echo/info/hz 证据见
+`../../../docs/perception/tracking/mission_contract_integration.md`；迁移前的 Orin/Hik
+现场证据仍保留在 `../../../docs/perception/tracking/issue87_integrated_acceptance.md`。
 
 建议 engine 路径：
 - `/path/to/dog_patrol/assets/models/engines/orin_jp621_trt_local/yolo26n_fp16_640.engine`
@@ -220,7 +220,7 @@ lifecycle。该模式不是 active H.264 runtime 入口。命令、资产哈希�
 ## 下游输出
 
 下游 patrol 集成只使用 `dog_patrol_interfaces`：`/mission/event` 上的
-`SOURCE_PERCEPTION` READY、TARGET_CONFIRMED、TARGET_LOST、TARGET_REACQUIRED，以及
+`SOURCE_PERCEPTION` READY、TARGET_CONFIRMED、TARGET_LOST，以及
 `/perception/selected_target_bbox` 的当前帧 `TargetBoundingBox`。UDP JSON、upstream bearing
 和 `vision_msgs/Detection2DArray` 不属于支持的接口。
 
@@ -353,7 +353,7 @@ capture、inference、render/write 的 FPS、queue/render/write drop 和 p50/p95
 - `tracker.gmc_enabled` 由 ROS 参数控制，当前默认 `false`；移动平台或明显相机运动场景可显式设为 `true`。`tracker.reid_enabled` / `with_reid` 运行时会强制为 `true` 并打印告警。
 
 主目标生命周期配置：
-- `target.lost_threshold_frames`（默认 `180`；主目标/语义 identity missing 超过该帧数才进入 LOST 并允许重选，约 7.2s@25fps）
+- `target.lost_threshold_frames`（默认 `100`；主目标/语义 identity missing 超过该帧数才进入 LOST 并允许重选。它是内部帧级生命周期：10 FPS 输入约 10 s，30 FPS 输入约 3.3 s；任务级最终丢失事件由 `target.lost_event_timeout_sec` 独立控制）
 
 语义 ID / 外观库恢复配置（`sid.*`）：
 - `sid.feat_bank_size`（每个语义 ID 的特征库长度）
@@ -552,7 +552,7 @@ overlay 的渲染画布从 source BGR8 frame clone，绝不回写或标注 clean
 - `--overlay-video-name <name>`（默认 `eval_overlay.mkv`，仅接受文件名）
 - `--save-eval-video <true|false>` / `--eval-video-name <name>`（旧参数别名，分别等同 overlay record/name）
 - `--short-dataset-dir-names <true|false>`（默认开启，子目录用 `s01/s02/...`）
-- `--target-lost-threshold-frames <n>`（默认 `180`）
+- `--target-lost-threshold-frames <n>`（默认 `100`）
 - `--results-root <path>`
 - `--run-name <name>`
 - `--datasets <a,b,c>`

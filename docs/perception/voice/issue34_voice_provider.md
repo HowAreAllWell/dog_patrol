@@ -8,7 +8,7 @@
 `/perception/authorization_evidence` 发布现有 `AuthorizationEvidence`；本 issue 不新增或修改
 公共 ROS message、manager 状态机、授权聚合规则或 `required_not_passed=2`。
 
-provider 只接受未阻塞的 `VERIFY_IDENTITY` 和正数 `target_id`。`state_seq + target_id` 相同的周期
+provider 只接受有效的 `VERIFY_IDENTITY` 和正数 `target_id`。`state_seq + target_id` 相同的周期
 状态只保留一个任务；首次进入会在独立 worker 中建立一个 `R818VoiceAdapter` task session，最多
 执行两个 response window。第一窗失败立即发布 `NOT_PASSED` 并继续第二窗；第二窗失败再发布
 `NOT_PASSED`，任一窗通过发布 `PASSED`。模型、ADB、stream、helper、Prompt 或恢复故障发布
@@ -16,7 +16,7 @@ provider 只接受未阻塞的 `VERIFY_IDENTITY` 和正数 `target_id`。`state_
 
 ## 取消和并发边界
 
-状态阻塞、离开 `VERIFY_IDENTITY`、`state_seq` 变化或 `target_id` 变化会递增内部 generation，
+离开 `VERIFY_IDENTITY`、`state_seq` 变化或 `target_id` 变化会递增内部 generation，
 请求当前 task 的 cooperative stop，并发布旧 session 的 `CANCELLED`。迟到 response 在发布前同时
 通过 generation 和 session 检查；旧 task 的 context cleanup 完成后，worker 才会启动新 task，因而
 任意时刻最多存在一个 R818 hardware session。ROS MissionState callback 只更新 desired session 和
