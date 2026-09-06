@@ -10,6 +10,7 @@ data/
 assets/models/engines/
 assets/models/reid/
 assets/models/upstream/
+src/navigation/fast_livo_dog/navigation/patrol/mobileclip2_b.ts
 *.engine
 *.onnx
 *.pt
