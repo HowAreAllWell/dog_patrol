@@ -33,6 +33,10 @@ def generate_launch_description():
     tracked_target_image_topic = LaunchConfiguration("tracked_target_image_topic")
     authorization_evidence_topic = LaunchConfiguration("authorization_evidence_topic")
     authorization_command_topic = LaunchConfiguration("authorization_command_topic")
+    python_prefix = [
+        EnvironmentVariable("DOG_PATROL_PYTHON", default_value="python3"),
+        " ",
+    ]
 
     tracking_params = PathJoinSubstitution([assets_root, "runtime", "perception_tracking.yaml"])
     tracker_config = PathJoinSubstitution([assets_root, "runtime", "bot_sort.yaml"])
@@ -110,6 +114,7 @@ def generate_launch_description():
         executable="perception_readiness",
         name="perception_readiness",
         output="screen",
+        prefix=python_prefix,
         parameters=[
             {
                 "use_sim_time": use_sim_time,
@@ -124,6 +129,7 @@ def generate_launch_description():
         executable="perception_authorization",
         name="perception_authorization",
         output="screen",
+        prefix=python_prefix,
         parameters=[
             {
                 "use_sim_time": use_sim_time,

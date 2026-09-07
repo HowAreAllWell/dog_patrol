@@ -33,11 +33,6 @@ class RobotBackendNode(Node):
         # 主动清空 RViz 可视化的发布者（停止时发送空消息）
         self.pub_clear_path_ = self.create_publisher(Path, '/global_localization/path', 10)
         self.pub_clear_scan_ = self.create_publisher(PointCloud2, '/global_localization/cur_scan', 10)
-        # 停止导航时主动清空全局规划路径与局部路径（蓝线）
-        self.pub_clear_global_path_ = self.create_publisher(Path, '/global_path', 10)
-        self.pub_clear_local_path_ = self.create_publisher(Path, '/local_path', 10)
-        self.pub_clear_local_path_rl_ = self.create_publisher(Path, '/local_path_rl_debug', 10)
-
         # 匹配 Nav2 代价地图的 Transient Local QoS 策略，以确保清空消息成功送达
         costmap_qos = QoSProfile(
             depth=1,
@@ -123,18 +118,9 @@ class RobotBackendNode(Node):
         self.pub_clear_scan_.publish(empty_cloud)
 
     def clear_nav_visualization(self):
-        """停止导航后，主动向 RViz 发送空的全局规划路径与代价地图，清除残影"""
+        """清理 UI 专用导航可视化，不写入控制链路径 topic。"""
         now = self.get_clock().now().to_msg()
-        # 1. 清空全局规划路径与局部规划路径（蓝线）
-        empty_plan = Path()
-        empty_plan.header = Header()
-        empty_plan.header.stamp = now
-        empty_plan.header.frame_id = 'map'
-        self.pub_clear_global_path_.publish(empty_plan)
-        self.pub_clear_local_path_.publish(empty_plan)
-        self.pub_clear_local_path_rl_.publish(empty_plan)
-
-        # 2. 清空代价地图，向 RViz 广播 1x1 大小的空栅格地图 (数据为 0 标识无障碍物)
+        # 清空代价地图，向 RViz 广播 1x1 大小的空栅格地图 (数据为 0 标识无障碍物)
         empty_grid = OccupancyGrid()
         empty_grid.header = Header()
         empty_grid.header.stamp = now

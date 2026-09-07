@@ -1,6 +1,6 @@
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument
-from launch.substitutions import LaunchConfiguration
+from launch.substitutions import EnvironmentVariable, LaunchConfiguration
 from launch_ros.actions import Node
 
 
@@ -13,12 +13,17 @@ def generate_launch_description():
     evidence_topic = LaunchConfiguration("authorization_evidence_topic")
     command_topic = LaunchConfiguration("authorization_command_topic")
     provider = LaunchConfiguration("provider")
+    python_prefix = [
+        EnvironmentVariable("DOG_PATROL_PYTHON", default_value="python3"),
+        " ",
+    ]
 
     readiness = Node(
         package="dog_patrol_perception_voice",
         executable="perception_voice_readiness",
         name="perception_voice_readiness",
         output="screen",
+        prefix=python_prefix,
         parameters=[
             {
                 "mission_state_topic": state_topic,
@@ -35,6 +40,7 @@ def generate_launch_description():
         executable="perception_voice_provider",
         name="perception_voice_provider",
         output="screen",
+        prefix=python_prefix,
         parameters=[
             {
                 "mission_state_topic": state_topic,

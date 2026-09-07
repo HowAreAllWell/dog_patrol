@@ -13,12 +13,14 @@ RE_LEVEL_TAG = re.compile(r'(\[(?:INFO|WARN|WARNING|ERROR|FATAL|DEBUG)\s*\])', f
 
 CATEGORY_COLORS = {
     "SYS": "#FFFFFF",
+    "MISSION": "#4DD0E1",
     "BUILD": "#B39DDB",
     "CAMERA": "#9C27B0",
     "LIDAR": "#F48FB1",
     "MAP": "#8BC34A",
     "LOC": "#03A9F4",
     "NAV": "#FF9100",
+    "PERCEPTION": "#26A69A",
     "BAG": "#FF9800",
     "RVIZ": "#9E9E9E",
     "ALL": "#E0E0E0"
@@ -34,12 +36,14 @@ class LogEngine:
         raw_prefix = prefix.strip()
         category = "ALL"
         if "[SYS]" in raw_prefix: category = "SYS"
+        elif "[MISSION]" in raw_prefix: category = "MISSION"
         elif "[BUILD]" in raw_prefix: category = "BUILD"
         elif "[CAMERA]" in raw_prefix: category = "CAMERA"
         elif "[LIDAR]" in raw_prefix: category = "LIDAR"
         elif "[MAP]" in raw_prefix: category = "MAP"
         elif "[LOC]" in raw_prefix: category = "LOC"
         elif "[NAV]" in raw_prefix: category = "NAV"
+        elif "[PERCEPTION]" in raw_prefix: category = "PERCEPTION"
         elif "[BAG]" in raw_prefix: category = "BAG"
         elif "[RVIZ]" in raw_prefix: category = "RVIZ"
 

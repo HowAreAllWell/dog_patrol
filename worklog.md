@@ -1,4 +1,84 @@
 # worklog
+## 2026-09-07 - 修复“停止节点”未停止感知任务
+
+- UI 的“停止节点”按钮调用 `stop_all(keep_sensors=True)` 时，原逻辑会同时跳过传感器和
+  感知任务的停止，导致感知 launch 继续运行。
+- 现在 `keep_sensors=True` 只保留相机/雷达驱动，仍然会停止感知进程组、清理感知子节点并
+  重置任务会话。
+
+## 2026-09-07 - 调整 UI 感知任务区域排版
+
+- 移除左侧面板中单独的 `[感知任务]` 标题，保留原有感知启动/停止按钮和回调。
+- 在核心节点、感知任务和传感器数据注入区域之间增加垂直留白，感知按钮高度调整为
+  `42px`，避免控件和分组标题挤在一起。
+
+## 2026-09-07 - 修复 UI 停止感知时子节点残留
+
+- 感知 launch 现在通过 `setsid` 建立独立进程组，UI 停止感知时向整个进程组发送
+  `SIGINT`，超时后再发送 `SIGKILL`，避免只停止 launch 父进程而留下 tracking、face、
+  voice 和授权节点。
+- 原有按节点名清理逻辑继续作为兜底，并增加感知 bringup 进程匹配项。
+- 不影响传感器、导航和任务管理器进程。
+
+## 2026-09-07 - 感知 Python 节点统一使用 DOG_PATROL_PYTHON
+
+- bringup 中的 `perception_readiness` 和 `perception_authorization` 现在与 face、voice
+  一样，通过 `DOG_PATROL_PYTHON` 启动；未设置时回退到 `python3`。
+- app 启动时统一使用 `m20_nav`，因此感知侧所有 Python 节点共享同一个解释器和依赖环境。
+- tracking 节点仍为 C++ 节点，不涉及 Python 解释器；重新编译感知 bringup 的 8 个包全部成功。
+
+## 2026-09-07 - voice 节点统一使用 DOG_PATROL_PYTHON
+
+- `voice.launch.py` 的 `perception_voice_readiness` 和 `perception_voice_provider` 现在都通过
+  `DOG_PATROL_PYTHON` 启动，未设置时回退到 `python3`。
+- app 启动时会把 `DOG_PATROL_PYTHON` 设为 `m20_nav`，因此 voice 与 face 使用同一个已验证的
+  虚拟环境；Vosk 和 R818 音频链保持不变。
+- 重新编译 `dog_patrol_perception_voice` 成功，并用 `m20_nav` 验证 Vosk 导入正常。
+
+## 2026-09-07 - 回退感知 launch 的显式解释器分流
+
+- 系统 Python 已补齐 OpenCV、TensorRT、PyCUDA 和语音运行依赖，人脸侧在真机验证
+  `cuda.init()` 成功并识别到 1 个 CUDA 设备。
+- 因 face、voice、readiness 和 authorization 的已安装 ROS console script 均使用
+  `#!/usr/bin/python3`，回退感知 launch 中新增的 `prefix`、`face_python`、
+  `voice_python` 和 `system_python` 参数，恢复由各安装入口 shebang 决定解释器。
+- 该回退不改变 tracking、face、voice、readiness、authorization 的算法、参数、topic 和
+  状态机行为。重新构建这些 Python 包时应使用系统 Python，确保生成入口继续指向
+  `/usr/bin/python3`。
+- `m20_nav` 仍保留独立的 OpenCV、NumPy、TensorRT 和 PyCUDA，可以用于手工运行或调试
+  face；是否可统一运行 voice 和 orchestrator 以实际依赖导入检查结果为准。
+
+## 2026-09-07 - 感知人脸节点固定使用系统 Python
+
+- 系统 Python 已验证具备可用的 OpenCV 4.5.4、NumPy 1.21.5、TensorRT 10.3.0、PyCUDA
+  和 CUDA 设备访问能力。
+- 修正 face launch 的解释器回退逻辑：`DOG_PATROL_FACE_PYTHON` 未设置时直接使用
+  `/usr/bin/python3`，不再回退到通用的 `DOG_PATROL_PYTHON`。这样 app 即使使用
+  `m20_nav` 启动其他 Python 子进程，也不会把 face provider 错误地带回虚拟环境。
+- `face_python:=...` 仍可在 launch 命令中显式覆盖；voice、readiness 和 authorization
+  继续使用系统 Python，tracking 保持原生节点。
+- 本次只调整感知节点运行解释器选择，不修改人脸算法、TensorRT 模型、ROS topic 或任务
+  状态机逻辑。
+
+## 2026-09-07 - 明确感知模块的 Python 运行解释器
+
+- 感知 tracking 节点是原生 ROS 节点，不依赖 Python 解释器；face、voice、readiness 和
+  authorization 节点由感知 bringup launch 分别指定运行解释器。
+- `face.launch.py` 新增 `python_executable`，同时用于 `perception_face_readiness` 和
+  `perception_face_provider`。默认优先读取 `DOG_PATROL_FACE_PYTHON`，其次读取
+  `DOG_PATROL_PYTHON`，最后回退到 `/usr/bin/python3`。
+- `voice.launch.py` 新增 `python_executable`，同时用于 `perception_voice_readiness` 和
+  `perception_voice_provider`。默认读取 `DOG_PATROL_SYSTEM_PYTHON`，未设置时使用
+  `/usr/bin/python3`。
+- `perception_stack.launch.py` 新增 `face_python`、`voice_python` 和 `system_python`，
+  分别传递给 face、voice 及 `perception_readiness`/`perception_authorization`，使不同模块
+  可以按各自依赖选择解释器，不修改算法、ROS 接口或状态机逻辑。
+- `app.py` 启动 UI 时优先使用 `/mnt/nvme/venv/m20_nav/bin/python3`，并设置
+  `DOG_PATROL_PYTHON`、`VIRTUAL_ENV` 和 `PATH`；UI 启动的子进程会继承该环境。没有该
+  虚拟环境时才沿用启动 UI 的解释器。
+- 这次调整属于节点运行入口和依赖环境配置，不等于把所有 ROS 包都改成虚拟环境编译；
+  C++ 包仍按 ROS/系统工具链构建，Python 节点是否使用虚拟环境由 launch 参数和环境变量
+  决定。
 
 ## 2026-09-06 - waypoint 全局路径改为只发布当前目标单段路径
 

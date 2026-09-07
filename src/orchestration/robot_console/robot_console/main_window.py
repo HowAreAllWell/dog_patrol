@@ -94,12 +94,14 @@ class RobotMainWindow(QMainWindow):
         self.log_batch_buffers = {
             "ALL": [],
             "SYS": [],
+            "MISSION": [],
             "BUILD": [],
             "CAMERA": [],
             "LIDAR": [],
             "MAP": [],
             "LOC": [],
             "NAV": [],
+            "PERCEPTION": [],
             "BAG": [],
             "RVIZ": []
         }
@@ -216,7 +218,7 @@ class RobotMainWindow(QMainWindow):
         
         core_grid = QGridLayout()
         core_grid.setHorizontalSpacing(5)
-        core_grid.setVerticalSpacing(10)
+        core_grid.setVerticalSpacing(15)
         core_grid.addWidget(self.chk_livo_mode, 0, 0, 1, 6)
         
         self.btn_mapping_mid = self.create_btn("🚀 单次建图", "#8BC34A", lambda: self.start_mapping("device_parameters.yaml"))
@@ -242,11 +244,11 @@ class RobotMainWindow(QMainWindow):
         
         left_layout.addLayout(core_grid)
 
-        lbl_perception = QLabel("<b>[ 感知任务 ]</b>")
-        lbl_perception.setStyleSheet("font-size: 13px; color: #333;")
-        left_layout.addWidget(lbl_perception)
+        left_layout.addSpacing(16)
         self.btn_perception = self.create_btn("启动感知任务", "#00897B", self.toggle_perception)
+        self.btn_perception.setFixedHeight(42)
         left_layout.addWidget(self.btn_perception)
+        left_layout.addSpacing(3)
 
         lbl_s7 = QLabel("<b>[ 注入传感器数据 ]</b>")
         lbl_s7.setStyleSheet("font-size: 13px; color: #333;")
@@ -357,12 +359,14 @@ class RobotMainWindow(QMainWindow):
         tab_configs = [
             ("ALL", "ALL"),
             ("SYS", "SYS"),
+            ("MISSION", "MISSION"),
             ("BUILD", "BUILD"),
             ("CAMERA", "CAMERA"),
             ("LIDAR", "LIDAR"),
             ("MAP", "MAP"),
             ("LOC", "LOC"),
             ("NAV", "NAV"),
+            ("PERCEPTION", "PERCEPTION"),
             ("BAG", "BAG"),
             ("RVIZ", "RVIZ")
         ]
@@ -1331,10 +1335,10 @@ class RobotMainWindow(QMainWindow):
         self.process_manager = process
         self.setup_process_env(process)
         process.readyReadStandardOutput.connect(
-            lambda p=process: self.handle_process_out(p, "[SYS] ")
+            lambda p=process: self.handle_process_out(p, "[MISSION] ")
         )
         process.readyReadStandardError.connect(
-            lambda p=process: self.handle_process_err(p, "[SYS] ")
+            lambda p=process: self.handle_process_err(p, "[MISSION] ")
         )
         process.finished.connect(self._mission_manager_finished)
         cmd = (
@@ -1346,8 +1350,11 @@ class RobotMainWindow(QMainWindow):
     def _mission_manager_finished(self, exit_code, exit_status):
         del exit_status
         if not self._closing:
-            self.append_log(
-                f"[SYS] 任务管理器已退出，exit_code={exit_code}；业务状态协调已暂停。"
+            level = "[INFO]" if exit_code == 0 else "[ERROR]"
+            self.log_engine.parse_and_append_log(
+                f"{level} 任务管理器已退出，exit_code={exit_code}；业务状态协调已暂停。",
+                prefix="[MISSION] ",
+                is_stderr=(exit_code != 0),
             )
         self.process_manager = None
         if not self._closing and self._manager_should_run:
@@ -1388,7 +1395,7 @@ class RobotMainWindow(QMainWindow):
         self.append_log("[SYS] 正在启动感知任务（tracking / face / voice）...")
         use_sim = "true" if self.sensor_state != "RUNNING" else "false"
         cmd = (
-            f"{self.env_setup} && exec ros2 launch dog_patrol_perception_bringup "
+            f"{self.env_setup} && exec setsid ros2 launch dog_patrol_perception_bringup "
             f"perception_stack.launch.py use_sim_time:={use_sim} "
             f"assets_root:={self.assets_root} image_topic:=/left_camera/image_raw "
             "preview:=true"
@@ -1411,7 +1418,8 @@ class RobotMainWindow(QMainWindow):
         del exit_status
         if not self._closing:
             self.append_log(
-                f"[PERCEPTION] 感知任务已退出，exit_code={exit_code}。"
+                f"[PERCEPTION] 感知任务已退出，exit_code={exit_code}。",
+                category="PERCEPTION",
             )
             self.reset_mission_session("感知任务退出")
         self.process_perception = None
@@ -1419,13 +1427,15 @@ class RobotMainWindow(QMainWindow):
         self.update_ui_state(self.current_state)
 
     def stop_perception(self):
-        if self.process_perception and self.process_perception.state() == QProcess.Running:
+        process = self.process_perception
+        if process and process.state() == QProcess.Running:
             self.append_log("[SYS] 正在停止感知任务...")
-            self.stop_qprocess(self.process_perception)
+            self.stop_perception_process_group(process)
         self.process_perception = None
         self.is_perception_running = False
         self.safe_kill_processes(
             [
+                "dog_patrol_perception_bringup",
                 "dog_patrol_perception_tracking_node",
                 "perception_face_readiness",
                 "perception_face_provider",
@@ -1439,6 +1449,35 @@ class RobotMainWindow(QMainWindow):
         self.reset_mission_session("感知任务关闭")
         self.update_ui_state(self.current_state)
 
+    def stop_perception_process_group(self, process):
+        """Stop the perception launch and all nodes it spawned as one group."""
+        pid = process.processId()
+        try:
+            pgid = os.getpgid(pid)
+        except (OSError, ProcessLookupError):
+            pgid = None
+
+        # start_perception uses setsid, so this cannot target the UI process group.
+        if pgid is not None and pgid != os.getpgrp():
+            try:
+                os.killpg(pgid, signal.SIGINT)
+            except ProcessLookupError:
+                pass
+            except OSError:
+                self.stop_qprocess(process)
+            if process.waitForFinished(3000):
+                return
+            try:
+                os.killpg(pgid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+            except OSError:
+                pass
+            process.waitForFinished(1000)
+            return
+
+        self.stop_qprocess(process)
+
     def stop_all(self, keep_sensors=None):
         self.is_recording = False
         if keep_sensors is None:
@@ -1446,7 +1485,9 @@ class RobotMainWindow(QMainWindow):
             
         if not keep_sensors:
             self.stop_sensor_drivers()
-            self.stop_perception()
+        # "停止节点" keeps the hardware drivers alive, but must still stop
+        # the perception launch and reset its mission session.
+        self.stop_perception()
         
         # 联动关闭录包 QProcess
         if self.bag_process and self.bag_process.state() == QProcess.Running:
