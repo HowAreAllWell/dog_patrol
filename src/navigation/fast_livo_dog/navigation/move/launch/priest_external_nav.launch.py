@@ -2,7 +2,8 @@
 
 RViz Publish Point drives the waypoint manager. This launch starts:
 
-  /clicked_point -> global_path_seq_publisher.py -> /global_path
+  /clicked_point -> global_path_seq_publisher.py -> /waypoint_global_path
+  /mission_global_path + /waypoint_global_path -> navigation_path_mux -> /global_path
   /global_path -> pure_pursuit.py -> /subgoal, /final_goal
   /global_path + /subgoal -> priest_rl_publisher_nav_cmd_fast.py -> /local_path
   /local_path -> priest_mppi_adapter_nav_cmd_dwb_smooth_responsive.py -> /NAV_CMD
@@ -29,6 +30,8 @@ def generate_launch_description():
 
     global_path_topic = LaunchConfiguration("global_path_topic")
     pure_pursuit_plan_topic = LaunchConfiguration("pure_pursuit_plan_topic")
+    waypoint_path_topic = LaunchConfiguration("waypoint_path_topic")
+    mission_path_topic = LaunchConfiguration("mission_path_topic")
     subgoal_topic = LaunchConfiguration("subgoal_topic")
     final_goal_topic = LaunchConfiguration("final_goal_topic")
     local_path_topic = LaunchConfiguration("local_path_topic")
@@ -38,6 +41,7 @@ def generate_launch_description():
     waypoint_delete_topic = LaunchConfiguration("waypoint_delete_topic")
     waypoint_replace_topic = LaunchConfiguration("waypoint_replace_topic")
     waypoint_status_topic = LaunchConfiguration("waypoint_status_topic")
+    waypoint_resume_topic = LaunchConfiguration("waypoint_resume_topic")
     waypoint_resume_from_current_topic = LaunchConfiguration("waypoint_resume_from_current_topic")
     waypoints_topic = LaunchConfiguration("waypoints_topic")
     waypoints_pose_topic = LaunchConfiguration("waypoints_pose_topic")
@@ -82,10 +86,11 @@ def generate_launch_description():
                 "delete_clicked_point_topic": waypoint_delete_topic,
                 "replace_clicked_point_topic": waypoint_replace_topic,
                 "status_topic": waypoint_status_topic,
+                "resume_topic": waypoint_resume_topic,
                 "resume_from_current_topic": waypoint_resume_from_current_topic,
-                "path_topic": global_path_topic,
-                "publish_pure_pursuit_plan": True,
-                "pure_pursuit_plan_topic": pure_pursuit_plan_topic,
+                "path_topic": waypoint_path_topic,
+                "publish_pure_pursuit_plan": False,
+                "pure_pursuit_plan_topic": waypoint_path_topic,
                 "waypoints_topic": waypoints_topic,
                 "waypoints_pose_topic": waypoints_pose_topic,
                 "global_frame": global_frame,
@@ -95,6 +100,22 @@ def generate_launch_description():
                 "edit_radius": waypoint_edit_radius,
                 "enable_interactive_markers": waypoint_enable_interactive_markers,
                 "interactive_marker_namespace": waypoint_interactive_marker_ns,
+            }
+        ],
+    )
+
+    path_mux = Node(
+        package="move",
+        executable="navigation_path_mux",
+        name="navigation_path_mux",
+        output="screen",
+        parameters=[
+            {
+                "waypoint_path_topic": waypoint_path_topic,
+                "mission_path_topic": mission_path_topic,
+                "output_path_topic": global_path_topic,
+                "pure_pursuit_path_topic": pure_pursuit_plan_topic,
+                "mission_state_topic": "/mission/state",
             }
         ],
     )
@@ -244,6 +265,8 @@ def generate_launch_description():
             DeclareLaunchArgument("start_rviz_waypoints", default_value="true"),
             DeclareLaunchArgument("global_path_topic", default_value="global_path"),
             DeclareLaunchArgument("pure_pursuit_plan_topic", default_value="global_path"),
+            DeclareLaunchArgument("waypoint_path_topic", default_value="waypoint_global_path"),
+            DeclareLaunchArgument("mission_path_topic", default_value="mission_global_path"),
             DeclareLaunchArgument("subgoal_topic", default_value="subgoal"),
             DeclareLaunchArgument("final_goal_topic", default_value="final_goal"),
             DeclareLaunchArgument("local_path_topic", default_value="local_path"),
@@ -253,6 +276,7 @@ def generate_launch_description():
             DeclareLaunchArgument("waypoint_delete_topic", default_value="/waypoint_sequence/delete_nearest"),
             DeclareLaunchArgument("waypoint_replace_topic", default_value="/waypoint_sequence/replace_nearest"),
             DeclareLaunchArgument("waypoint_status_topic", default_value="/waypoint_sequence/status"),
+            DeclareLaunchArgument("waypoint_resume_topic", default_value="/waypoint_sequence/resume"),
             DeclareLaunchArgument(
                 "waypoint_resume_from_current_topic",
                 default_value="/waypoint_sequence/resume_from_current",
@@ -275,6 +299,7 @@ def generate_launch_description():
             DeclareLaunchArgument("require_localization_confidence", default_value="false"),
             DeclareLaunchArgument("adapter_path_timeout", default_value="1.2"),
             rviz_waypoints,
+            path_mux,
             pure_pursuit,
             rl_local_path,
             adapter,

@@ -261,6 +261,11 @@ RECOVER_PATROL   TRACK_INTRUDER
 | `/perception/selected_target_bbox` | `TargetBoundingBox` | 感知 | 导航 | 当前目标 bbox |
 | `/navigation/target_status` | `TargetNavigationStatus` | 导航 | 上位机、RViz、调试工具 | 导航内部状态和当前目标距离，仅用于观测 |
 
+导航控制路径的实现约定如下：waypoint 发布器写入 `/waypoint_global_path`，导航协调器
+写入 `/mission_global_path`，两者由 `navigation_path_mux` 根据 `/mission/state` 选择，
+只有 mux 向 Pure Pursuit、RL 和 DWB 链发布 `/global_path`。协调器和 waypoint 发布器
+不得直接同时写 `/global_path`。
+
 所有自定义消息放在独立接口包：
 
 ```text
@@ -516,6 +521,8 @@ eligible 的判定由感知模块负责。
 - `/compute_path_to_pose` action server 已就绪；
 - 严格检查打开时，`/global_path`、waypoint pause/resume 有下游订阅者，且 `/NAV_CMD`
   有发布者。
+
+这里的 `/global_path` 指 mux 的最终输出，不是协调器的私有 `/mission_global_path`。
 
 点云、定位和底层控制链的具体初始化仍由 FAST-LIVO-DOG/Nav2 链负责；Ready 检查不
 替代这些节点自身的生命周期管理。
@@ -792,6 +799,8 @@ bbox。当前实现使用 `target.lost_event_timeout_sec=10.0` 秒的 source-tim
 - 取消 FollowPath 和目标 planner 请求；
 - 清空目标路径、目标点和目标距离缓存；
 - 返回进入 `APPROACH_TARGET` 前保存的巡检中断位姿；
+- 恢复路径发布到 `/mission_global_path` 后，在到达中断位姿前按周期重发，确保下游不会因
+  一次性消息丢失而只看到全局显示却没有局部路径；
 - 到达位置容差并稳定停车后发布 waypoint resume；
 - 不等待 waypoint active 或新的非空巡检路径，直接发布 `PATROL_RECOVERY_COMPLETE`。
 
@@ -1041,7 +1050,8 @@ navigation_ready
 - 状态机清空 `target_id`；
 - 感知停止旧目标 bbox；
 - 导航清理目标缓存；
-- 导航恢复巡逻；
+- mux 切回 waypoint 路径后，只接受 `PATROL` 状态切换之后到达的 waypoint 路径；正常恢复
+  可由 waypoint 节点重发有效缓存路径，超时恢复则从当前位置重新规划；
 - 旧状态版本的事件不会再次生效。
 
 ## 14. 联调参数

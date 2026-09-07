@@ -8,7 +8,10 @@ navigation_mission_coordinator:
       target_status: /navigation/target_status
       lidar: /livox/lidar
       odom: /odom
-      global_path: /global_path
+      # The coordinator publishes its private path. navigation_path_mux is
+      # the only node that publishes the selected path on /global_path.
+      global_path: /mission_global_path
+      selected_global_path: /global_path
       pause_patrol: /waypoint_sequence/pause
       resume_patrol: /waypoint_sequence/resume
       resume_patrol_from_current: /waypoint_sequence/resume_from_current
@@ -21,7 +24,7 @@ navigation_mission_coordinator:
       id: GridBased
 
     controller:
-      # Emptying /global_path clears the RL chain; canceling FollowPath in
+      # Emptying /mission_global_path clears the mission path; canceling FollowPath in
       # parallel makes the 3 m target stop reach DWB without pipeline delay.
       action_name: /follow_path
 

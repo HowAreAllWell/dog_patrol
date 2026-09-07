@@ -1822,6 +1822,7 @@ class RobotMainWindow(QMainWindow):
                 "move.priest_rl_pub",
                 "move.priest_mppi",
                 "move.nav_cmd_domain_bridge",
+                "navigation_path_mux",
                 "navigation_mission_coordinator",
             ]
             self.safe_kill_processes(nav_kill_list, 2500)

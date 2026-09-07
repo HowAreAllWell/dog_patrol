@@ -26,6 +26,8 @@ def generate_launch_description():
                 description="Navigation integration parameter file",
             ),
             DeclareLaunchArgument("use_sim_time", default_value="false"),
+            DeclareLaunchArgument("mission_path_topic", default_value="/mission_global_path"),
+            DeclareLaunchArgument("resume_topic", default_value="/waypoint_sequence/resume"),
             DeclareLaunchArgument(
                 "device_parameters_file",
                 default_value=PathJoinSubstitution(
@@ -45,6 +47,8 @@ def generate_launch_description():
                         "calibration.device_parameters_file": LaunchConfiguration(
                             "device_parameters_file"
                         ),
+                        "topics.global_path": LaunchConfiguration("mission_path_topic"),
+                        "topics.resume_patrol": LaunchConfiguration("resume_topic"),
                     },
                 ],
             ),

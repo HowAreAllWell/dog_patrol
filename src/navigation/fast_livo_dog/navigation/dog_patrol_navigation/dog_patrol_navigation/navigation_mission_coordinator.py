@@ -1,6 +1,7 @@
 """Bridge the patrol mission contract to the existing M20 Nav2 control chain."""
 
 from collections import deque
+import copy
 from math import hypot
 import os
 from typing import Deque, Dict, Optional, Tuple
@@ -184,6 +185,8 @@ class NavigationMissionCoordinator(Node):
         self._patrol_interruption_pose: Optional[PoseStamped] = None
         self._recovery_return_path_requested = False
         self._recovery_return_path_ready = False
+        self._recovery_return_path: Optional[Path] = None
+        self._last_recovery_path_publish: Optional[Time] = None
         self._recovery_return_arrived = False
         self._recovery_hold_start: Optional[Time] = None
         self._patrol_resume_sent_during_recovery = False
@@ -260,7 +263,8 @@ class NavigationMissionCoordinator(Node):
             "topics.target_status": "/navigation/target_status",
             "topics.lidar": "/livox/lidar",
             "topics.odom": "/odom",
-            "topics.global_path": "/global_path",
+            "topics.global_path": "/mission_global_path",
+            "topics.selected_global_path": "/global_path",
             "topics.pause_patrol": "/waypoint_sequence/pause",
             "topics.resume_patrol": "/waypoint_sequence/resume",
             "topics.resume_patrol_from_current": "/waypoint_sequence/resume_from_current",
@@ -363,6 +367,7 @@ class NavigationMissionCoordinator(Node):
         self.lidar_topic = value("topics.lidar").value
         self.odom_topic = value("topics.odom").value
         self.global_path_topic = value("topics.global_path").value
+        self.selected_global_path_topic = value("topics.selected_global_path").value
         self.pause_topic = value("topics.pause_patrol").value
         self.resume_topic = value("topics.resume_patrol").value
         self.resume_from_current_topic = value(
@@ -561,6 +566,8 @@ class NavigationMissionCoordinator(Node):
         if entering_recovery:
             self._recovery_return_path_requested = False
             self._recovery_return_path_ready = False
+            self._recovery_return_path = None
+            self._last_recovery_path_publish = None
             self._recovery_return_arrived = False
             self._recovery_hold_start = None
             self._patrol_resume_sent_during_recovery = False
@@ -583,6 +590,13 @@ class NavigationMissionCoordinator(Node):
             int(msg.state) == MissionState.PATROL
             and previous_mission_state == MissionState.RECOVER_PATROL
         )
+        if returning_from_recovery:
+            # The mission path is private now. Clear it before switching the
+            # mux back to the waypoint source, including the timeout path.
+            self._recovery_return_path = None
+            self._recovery_return_path_ready = False
+            self._last_recovery_path_publish = None
+            self._publish_empty_path()
         if policy.resume_patrol:
             if returning_from_recovery:
                 if not self._patrol_resume_sent_during_recovery:
@@ -920,6 +934,7 @@ class NavigationMissionCoordinator(Node):
         """Return to the patrol interruption pose before resuming waypoints."""
         if self._recovery_return_arrived:
             return
+        self._republish_recovery_path()
         pose = self._patrol_interruption_pose
         if pose is None:
             self.get_logger().warning(
@@ -971,6 +986,8 @@ class NavigationMissionCoordinator(Node):
         self._recovery_return_arrived = True
         self._recovery_return_path_ready = False
         self._recovery_return_path_requested = False
+        self._recovery_return_path = None
+        self._last_recovery_path_publish = None
         self._resume_pub.publish(Empty())
         self._patrol_resume_sent_during_recovery = True
         self._publish_event(
@@ -1034,6 +1051,8 @@ class NavigationMissionCoordinator(Node):
             return "waiting for ComputePathToPose action"
         if self.strict_ready_checks:
             if self.count_subscribers(self.global_path_topic) == 0:
+                return "waiting for navigation_path_mux mission path subscriber"
+            if self.count_subscribers(self.selected_global_path_topic) == 0:
                 return "waiting for /global_path consumer"
             if self.count_subscribers(self.pause_topic) == 0:
                 return "waiting for waypoint pause subscriber"
@@ -1289,9 +1308,13 @@ class NavigationMissionCoordinator(Node):
                 return
         else:
             self._recovery_return_path_ready = True
+            self._recovery_return_path = copy.deepcopy(path)
+            self._last_recovery_path_publish = None
         path.header.frame_id = self.global_frame
         path.header.stamp = now_time(self).to_msg()
         self._path_pub.publish(path)
+        if plan_kind == "recovery":
+            self._last_recovery_path_publish = now_time(self)
         self._planner_failure_start = None
         self._planner_failure_reason = ""
 
@@ -1472,6 +1495,22 @@ class NavigationMissionCoordinator(Node):
         self._plan_generation += 1
         self._plan_in_flight = False
         self._cancel_active_planner_goal("navigation path cleared")
+
+    def _republish_recovery_path(self) -> None:
+        """Keep the volatile recovery path available to the control chain."""
+        path = self._recovery_return_path
+        if not self._recovery_return_path_ready or path is None or not path.poses:
+            return
+        now = now_time(self)
+        if self._last_recovery_path_publish is not None:
+            age = (now - self._last_recovery_path_publish).nanoseconds * 1.0e-9
+            if age < self.stop_republish_period:
+                return
+        republished = copy.deepcopy(path)
+        republished.header.frame_id = self.global_frame
+        republished.header.stamp = now.to_msg()
+        self._path_pub.publish(republished)
+        self._last_recovery_path_publish = now
 
     def _cancel_planner_goal_handle(self, goal_handle, reason: str) -> None:
         try:

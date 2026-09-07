@@ -653,6 +653,13 @@ class RLLocalPlannerNodeROS2(Node):
 
     # ---------- 定时主逻辑 ----------
     def _on_timer(self):
+        # A cleared global plan is authoritative. Clear local output before
+        # checking sensor availability so stale local paths cannot survive a
+        # final waypoint or mission stop.
+        if self.latest_global_plan is None or len(self.latest_global_plan.poses) == 0:
+            self.subgoal_position = None
+            self._publish_empty_local_paths()
+            return
 
         odom = self.latest_odom
         if odom is None:

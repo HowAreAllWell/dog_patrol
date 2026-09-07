@@ -8,7 +8,7 @@ This node keeps the original contract of publishing nav_msgs/Path on
 `global_path`, but it can now execute multiple terminal goals in order:
 
   1. Ask Nav2 planner_server /compute_path_to_pose for the current goal.
-  2. Publish the returned path to `global_path`.
+  2. Publish the returned path to the configured waypoint path topic.
   3. Watch robot pose from TF.
   4. Once the robot is within `goal_tolerance`, advance to the next goal.
 
@@ -156,7 +156,6 @@ class GlobalPathSequencePublisher(Node):
         self._active_goal_handle = None
         self._active_goal_version = -1
         self._last_path: Optional[Path] = None
-        self._resume_bridge_active = False
         self._interactive_markers_dirty = True
         self._interactive_label_distance_bucket: Optional[int] = None
         self._interactive_label_distance_text: Optional[str] = None
@@ -466,11 +465,11 @@ class GlobalPathSequencePublisher(Node):
 
         path_msg = Path()
         path_msg.header = extracted_poses[0].header
+        path_msg.header.stamp = self.get_clock().now().to_msg()
         path_msg.header.frame_id = self.global_frame
         path_msg.poses = extracted_poses
 
         self._last_path = path_msg
-        self._resume_bridge_active = False
         self.path_pub.publish(path_msg)
         if self.pure_pursuit_plan_pub is not None:
             self.pure_pursuit_plan_pub.publish(path_msg)
@@ -522,6 +521,8 @@ class GlobalPathSequencePublisher(Node):
         if waypoint is None:
             return
 
+        was_sequence_done = self.sequence_done
+
         if self.waypoints:
             last = self.waypoints[-1]
             dist = math.hypot(waypoint.x - last.x, waypoint.y - last.y)
@@ -532,14 +533,16 @@ class GlobalPathSequencePublisher(Node):
         self.sequence_version += 1
         self._invalidate_planning_request("waypoint list changed")
         self._interactive_markers_dirty = True
-        if len(self.waypoints) == 1 or self.sequence_done:
-            self.current_index = len(self.waypoints) - 1 if self.sequence_done else 0
+        if len(self.waypoints) == 1 or was_sequence_done:
+            self.current_index = len(self.waypoints) - 1 if was_sequence_done else 0
             self.sequence_done = False
         if self.auto_start_on_click:
             self.paused = False
         self._last_path = None
         self._publish_waypoints()
         self._publish_status()
+        if was_sequence_done and self.auto_start_on_click and not self.paused:
+            self._on_timer()
 
     def _on_delete_clicked_point(self, msg: PointStamped):
         waypoint = self._point_to_waypoint(msg)
@@ -1023,12 +1026,11 @@ class GlobalPathSequencePublisher(Node):
 
     def _on_pause(self, _msg: Empty):
         self.paused = True
-        self._resume_bridge_active = False
         self.sequence_version += 1
         self._invalidate_planning_request("waypoint sequence paused")
-        # Keep the last valid patrol path internally. The coordinator replaces
-        # the public path while handling a target, then resume can use this
-        # path only as a bridge until a fresh Navfn result arrives.
+        # Keep the last valid patrol path as a short bridge for normal resume.
+        # It is never used for timeout recovery, which explicitly replans from
+        # the robot's current pose.
         self._publish_empty_paths()
         self._publish_waypoints()
         self._publish_status("paused")
@@ -1036,12 +1038,17 @@ class GlobalPathSequencePublisher(Node):
     def _on_resume(self, _msg: Empty):
         if self.waypoints:
             self.paused = False
-            self.sequence_done = False
             self.sequence_version += 1
             self._invalidate_planning_request("waypoint sequence resumed")
-            cached_pose_count = self._publish_cached_path()
-            self._resume_bridge_active = cached_pose_count > 0
             self._publish_waypoints()
+            if self.sequence_done:
+                self._last_path = None
+                self._publish_empty_paths()
+                self._publish_status("resumed; waypoint sequence already complete")
+                return
+            cached_pose_count = self._publish_cached_path()
+            if cached_pose_count == 0:
+                self._publish_empty_paths()
             self._publish_status(
                 f"resumed; restored {cached_pose_count} cached path poses"
                 if cached_pose_count > 0
@@ -1057,17 +1064,20 @@ class GlobalPathSequencePublisher(Node):
             return
 
         self.paused = False
-        self.sequence_done = False
         self.sequence_version += 1
         self._invalidate_planning_request(
             "waypoint sequence resumed from current pose after recovery timeout"
         )
         self._last_path = None
-        self._resume_bridge_active = False
         self._publish_empty_paths()
         self._publish_waypoints()
+        if self.sequence_done:
+            self._publish_status(
+                "recovery timed out; waypoint sequence already complete"
+            )
+            return
         self._publish_status(
-            "recovery timed out; discarded cached path and replanning from current pose"
+            "recovery timed out; replanning from current pose"
         )
         self._on_timer()
 
@@ -1089,7 +1099,6 @@ class GlobalPathSequencePublisher(Node):
         return len(path.poses)
 
     def _publish_empty_paths(self):
-        self._resume_bridge_active = False
         msg = Path()
         msg.header.stamp = self.get_clock().now().to_msg()
         msg.header.frame_id = self.global_frame

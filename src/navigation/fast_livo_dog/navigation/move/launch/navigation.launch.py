@@ -38,12 +38,15 @@ def generate_launch_description():
     waypoint_delete_topic = LaunchConfiguration("waypoint_delete_topic")
     waypoint_replace_topic = LaunchConfiguration("waypoint_replace_topic")
     waypoint_status_topic = LaunchConfiguration("waypoint_status_topic")
+    waypoint_resume_topic = LaunchConfiguration("waypoint_resume_topic")
     waypoint_resume_from_current_topic = LaunchConfiguration("waypoint_resume_from_current_topic")
     waypoint_replan_period = LaunchConfiguration("waypoint_replan_period")
     waypoint_goal_tolerance = LaunchConfiguration("waypoint_goal_tolerance")
     waypoint_edit_radius = LaunchConfiguration("waypoint_edit_radius")
     waypoint_enable_interactive_markers = LaunchConfiguration("waypoint_enable_interactive_markers")
     waypoint_interactive_marker_ns = LaunchConfiguration("waypoint_interactive_marker_ns")
+    waypoint_path_topic = LaunchConfiguration("waypoint_path_topic")
+    mission_path_topic = LaunchConfiguration("mission_path_topic")
     adapter_path_timeout = LaunchConfiguration("adapter_path_timeout")
     start_mission_coordinator = LaunchConfiguration("start_mission_coordinator")
     coordinator_params = LaunchConfiguration("coordinator_params")
@@ -116,12 +119,15 @@ def generate_launch_description():
             "waypoint_delete_topic": waypoint_delete_topic,
             "waypoint_replace_topic": waypoint_replace_topic,
             "waypoint_status_topic": waypoint_status_topic,
+            "waypoint_resume_topic": waypoint_resume_topic,
             "waypoint_resume_from_current_topic": waypoint_resume_from_current_topic,
             "waypoint_replan_period": waypoint_replan_period,
             "waypoint_goal_tolerance": waypoint_goal_tolerance,
             "waypoint_edit_radius": waypoint_edit_radius,
             "waypoint_enable_interactive_markers": waypoint_enable_interactive_markers,
             "waypoint_interactive_marker_ns": waypoint_interactive_marker_ns,
+            "waypoint_path_topic": waypoint_path_topic,
+            "mission_path_topic": mission_path_topic,
             "global_path_topic": "global_path",
             "pure_pursuit_plan_topic": "global_path",
             "subgoal_topic": "subgoal",
@@ -159,6 +165,7 @@ def generate_launch_description():
             "use_sim_time": use_sim_time,
             "params_file": coordinator_params,
             "device_parameters_file": device_parameters_file,
+            "mission_path_topic": mission_path_topic,
         }.items(),
     )
     mission_coordinator_group = GroupAction(
@@ -188,6 +195,7 @@ def generate_launch_description():
             DeclareLaunchArgument("waypoint_delete_topic", default_value="/waypoint_sequence/delete_nearest"),
             DeclareLaunchArgument("waypoint_replace_topic", default_value="/waypoint_sequence/replace_nearest"),
             DeclareLaunchArgument("waypoint_status_topic", default_value="/waypoint_sequence/status"),
+            DeclareLaunchArgument("waypoint_resume_topic", default_value="/waypoint_sequence/resume"),
             DeclareLaunchArgument(
                 "waypoint_resume_from_current_topic",
                 default_value="/waypoint_sequence/resume_from_current",
@@ -197,6 +205,8 @@ def generate_launch_description():
             DeclareLaunchArgument("waypoint_edit_radius", default_value="1.5"),
             DeclareLaunchArgument("waypoint_enable_interactive_markers", default_value="true"),
             DeclareLaunchArgument("waypoint_interactive_marker_ns", default_value="waypoint_editor"),
+            DeclareLaunchArgument("waypoint_path_topic", default_value="waypoint_global_path"),
+            DeclareLaunchArgument("mission_path_topic", default_value="mission_global_path"),
             DeclareLaunchArgument("use_map_server", default_value="false", description="Whether to launch map_server in navigation (set false if localization already provides it)"),
             DeclareLaunchArgument("adapter_path_timeout", default_value="1.2"),
             DeclareLaunchArgument("start_mission_coordinator", default_value="true"),

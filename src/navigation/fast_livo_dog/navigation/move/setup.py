@@ -37,6 +37,7 @@ setup(
             ),
             'global_path_publisher = move.global_path_publisher:main',
             'global_path_seq_publisher = move.global_path_seq_publisher:main',
+            'navigation_path_mux = move.navigation_path_mux:main',
             'nav_cmd_domain_bridge = move.nav_cmd_domain_bridge:main',
         ],
     },

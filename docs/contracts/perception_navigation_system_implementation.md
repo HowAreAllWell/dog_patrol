@@ -37,10 +37,24 @@ perception
 
 navigation_mission_coordinator
   -- /mission/event --> mission_supervisor
-  -- /global_path --> 原有 waypoint/Nav2/Pure Pursuit/RL/DWB 链
+
+global_path_seq_publisher
+  -- /waypoint_global_path --> navigation_path_mux
+
+navigation_mission_coordinator
+  -- /mission_global_path --> navigation_path_mux
+
+navigation_path_mux
+  -- /global_path --> Pure Pursuit / RL / DWB 链
 ```
 
 只有总状态机可以改变公共 `MissionState`。感知和导航只能发布事件，不能直接把系统切换到另一个公共状态。导航内部可以有“接近中”“保持停止”等执行策略名称，但不能形成一套和总控并行的业务状态机。
+
+`/global_path` 只允许由 `navigation_path_mux` 发布。waypoint 发布器和导航协调器分别发布到
+`/waypoint_global_path`、`/mission_global_path`，不能直接写下游共同消费的 `/global_path`。
+mux 根据最新的 `MissionState` 选择路径来源：`PATROL`、`CONFIRM_TARGET` 使用 waypoint
+路径；`APPROACH_TARGET`、`VERIFY_IDENTITY`、`TRACK_INTRUDER`、`RECOVER_PATROL` 使用
+任务路径；`STARTUP` 暂不选择有效路径并输出空路径。
 
 ## 2. 公共任务状态机
 
@@ -194,10 +208,14 @@ source + event + observed_state_seq + target_id
 | 输出 | `/mission/event` | `MissionEvent` | READY、位置就绪、到达、故障和恢复完成 |
 | 输出 | `/navigation/target_point` | `geometry_msgs/PointStamped` | map 系目标位置，供显示和调试 |
 | 输出 | `/navigation/target_goal` | `geometry_msgs/PoseStamped` | 本次目标 planner 目标 |
-| 输出 | `/global_path` | `nav_msgs/Path` | 目标处置期间的全局路径 |
+| 输出 | `/mission_global_path` | `nav_msgs/Path` | 协调器的目标处置和恢复私有路径，供 mux 选择 |
 | 输出 | `/waypoint_sequence/pause` | `std_msgs/Empty` | 暂停原巡检 waypoint |
 | 输出 | `/waypoint_sequence/resume` | `std_msgs/Empty` | 恢复原巡检 waypoint |
 | 输出 | `/navigation/target_status` | `TargetNavigationStatus` | 导航内部观测状态和距离 |
+
+waypoint 发布器输出 `/waypoint_global_path`，`navigation_path_mux` 将当前状态允许的
+私有路径唯一转发为 `/global_path`。因此普通巡检和目标任务不会再通过多个发布者竞争同一
+个控制 topic。
 
 协调器不发布 `/NAV_CMD`。底盘命令仍由原有 move/DWB 适配链发布。
 
@@ -212,6 +230,20 @@ source + event + observed_state_seq + target_id
 | `VERIFY_IDENTITY` | 取消移动目标路径，持续停车 | 否 | 可继续 | 否 |
 | `TRACK_INTRUDER` | 按最新目标位置持续更新跟踪路径 | 否 | 是 | 是 |
 | `RECOVER_PATROL` | 取消目标任务，返回巡检断点并恢复 waypoint | 返回期间暂停 | 否 | 返回路径 |
+
+### 4.2.1 路径来源切换
+
+路径来源切换由 `navigation_path_mux` 完成，不由 waypoint 发布器或导航协调器互相覆盖：
+
+| 公共状态 | mux 选择 | 说明 |
+|---|---|---|
+| `STARTUP` | 无 | 输出空路径，等待总控完成 READY |
+| `PATROL`、`CONFIRM_TARGET` | `/waypoint_global_path` | 普通巡检继续使用当前 waypoint 单段路径 |
+| `APPROACH_TARGET`、`VERIFY_IDENTITY`、`TRACK_INTRUDER`、`RECOVER_PATROL` | `/mission_global_path` | 目标接近、停车、跟踪和恢复路径由协调器控制 |
+
+进入目标状态或恢复状态时，mux 先向 `/global_path` 发布空路径，再等待当前来源的新路径；
+返回 `PATROL` 时，mux 不重放任务期间缓存的旧 waypoint 路径，只接受切换后新到达的
+waypoint 私有路径。跨 topic 的到达先后不再决定哪一个发布者拥有路径。
 
 ### 4.3 目标位置确认
 
@@ -265,8 +297,9 @@ source + event + observed_state_seq + target_id
 2. 清空目标路径、目标点、目标距离和到达锁存；
 3. 停止消费旧目标 bbox；
 4. 优先规划返回保存的巡检中断位姿；
-5. 返回并稳定停车后向 waypoint 发送 resume；
-6. 发布一次 `PATROL_RECOVERY_COMPLETE`。
+5. 将恢复路径缓存并按固定周期重发，直到返回并稳定停车；
+6. 向 waypoint 发送 resume；mux 切回 `PATROL` 后只接受状态切换之后到达的 waypoint 路径；
+7. 发布一次 `PATROL_RECOVERY_COMPLETE`。
 
 如果原任务没有 waypoint、恢复路径为空或恢复过程出现技术问题，不能让总控永久等待。恢复 watchdog 到期后总控直接进入 `PATROL`，清空目标，不创建第二层恢复状态。
 

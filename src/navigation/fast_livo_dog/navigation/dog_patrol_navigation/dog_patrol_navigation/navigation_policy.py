@@ -55,8 +55,8 @@ def navigation_policy(
             description="patrolling",
             pause_patrol=False,
             resume_patrol=True,
-            # The waypoint publisher owns /global_path during ordinary patrol.
-            # Clearing it here would race the RViz waypoint navigation chain.
+            # The path mux selects the waypoint source during ordinary patrol.
+            # The coordinator must not clear the shared output directly.
             clear_navigation_path=False,
             reset_target=True,
         )

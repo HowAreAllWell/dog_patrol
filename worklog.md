@@ -1,4 +1,69 @@
 # worklog
+## 2026-09-07 - 隔离 waypoint 与目标任务的全局路径发布
+
+- 审查确认普通 waypoint 发布器和 `navigation_mission_coordinator` 原先分别直接写入
+  `/global_path`。暂停、恢复、恢复超时和任务状态切换时，两个发布者的空路径或旧路径
+  可能交错到达 Pure Pursuit/RL 链，造成回头、只有 global path 没有 local path，或旧
+  waypoint 被重新激活。
+- 保留 `global_path_seq_publisher` 的单 waypoint 单段路径逻辑，不把后续 waypoint
+  拼接进当前控制路径。waypoint 现在发布到 `/waypoint_global_path`，协调器发布到
+  `/mission_global_path`。
+- 新增 `navigation_path_mux` 作为 `/global_path` 的唯一发布者：`PATROL` 和
+  `CONFIRM_TARGET` 选择 waypoint 路径；`APPROACH_TARGET`、`VERIFY_IDENTITY`、
+  `TRACK_INTRUDER` 和 `RECOVER_PATROL` 选择任务路径；`STARTUP` 输出空路径。
+- mux 不根据跨 topic 的 resume 消息推断路径新旧；从任务状态切回 `PATROL` 时先清空
+  `/global_path`，只转发切换后新到达的 waypoint 路径，避免重放暂停前缓存路径。
+- 恢复成功时，协调器缓存恢复到巡检中断位姿的路径并周期重发；恢复超时时仍使用
+  `resume_from_current`，丢弃中断前缓存路径，从当前位置重新规划。已完成 waypoint
+  序列不会被恢复命令重新打开。
+- RL 局部规划器在收到空 global path 或定时发现没有有效 global path 时立即清空 local
+  path，避免最后一个 waypoint 或任务停车后继续使用旧局部轨迹。
+- UI 停止导航时同时停止 `navigation_path_mux`。本次修改已完成受影响导航包构建，功能
+  回归测试通过；真机仍需观察 `/waypoint_global_path`、`/mission_global_path`、
+  `/global_path`、`/local_path` 和 `/NAV_CMD` 的实际切换时序。
+
+## 2026-09-07 - 回退恢复路径和局部路径实验性补丁
+
+- 根据真机复测结果，回退本日后续叠加的恢复路径周期重发、RL 空 global path 定时门控以及完成序列新增 waypoint 立即规划改动。
+- 保留今天测试前已提交的导航基线：单个 waypoint 单段 `/global_path`、原有 waypoint 暂停缓存/恢复、超时从当前位置重新规划和已有恢复 resume 去重逻辑。
+- 感知启动、认证、解释器和 UI 改动均未回退。
+- `dog_patrol_navigation` 和 `move` 已重新编译；waypoint 基线测试通过 5 项。
+- 当前仍需在真机上重新验证恢复阶段的 `/global_path`、`/local_path` 和 `/NAV_CMD`，避免把未验证的路径重发策略再次作为正式修复。
+
+## 2026-09-07 - 修复完成序列新增 waypoint 后局部规划不启动
+
+- 现象：最后一个 waypoint 完成后再次从 RViz 发送新点，可以看到新的 `/global_path`，但局部规划器没有及时恢复输出 `/local_path`。
+- 修改：`global_path_seq_publisher` 在已完成序列收到新 waypoint 后，恢复 `sequence_done=False` 并立即触发当前 waypoint 的 planner 请求，不再等待下一次周期 timer。
+- 验证：新增“完成序列添加 waypoint 后立即重新规划”的回归测试，覆盖 current index、完成标志和立即触发规划。
+
+## 2026-09-07 - 修复最后一个 waypoint 清空全局路径后局部路径残留
+
+- 现象：最后一个 waypoint 到达后，`/global_path` 已清空，但 `/local_path` 仍保留旧局部轨迹，适配器继续向 `FollowPath` 提交或维持旧路径，机器人不能立即停下。
+- 修改：RL 局部规划器收到空 `/global_path` 时立即清空全局路径缓存、subgoal 和上一次动作；定时回调在检查 odom/scan 之前优先处理“没有有效 global path”，持续发布空 `/local_path`。
+- 目的：最后一个 waypoint、任务停车和任意全局路径清空都必须同步终止局部路径输出，不依赖下一帧传感器是否及时到达。
+
+## 2026-09-07 - 修复恢复巡检路径未驱动局部路径
+
+- 现象：认证成功或目标丢失进入 `RECOVER_PATROL` 后，导航协调器能够在 `/global_path` 发布返回巡检中断位姿的路径，但下游 `local_path` 有时没有重新生成，机器人无法沿恢复路径继续执行。
+- 原因：协调器原先只在恢复规划 action 完成时发布一次恢复路径，同时 waypoint 发布器和协调器共享 `/global_path`。暂停/恢复边界的迟到空路径可能覆盖这次发布；协调器仅记录路径 ready，不会再次把有效恢复路径交给局部规划器。
+- 修改：缓存恢复规划得到的 `nav_msgs/Path`，在 `RECOVER_PATROL` 尚未到达中断位姿期间按 `stop_republish_period` 重发；进入恢复时清空旧缓存，到达并发布 `PATROL_RECOVERY_COMPLETE` 时清空恢复路径缓存。目标接近、认证停车和普通 waypoint 路径逻辑保持不变。
+- 验证：待在真机上重新执行“认证成功恢复”和“目标丢失超时恢复”，同时观察 `/global_path`、`/local_path`、`/NAV_CMD` 以及 `navigation_mission_coordinator` 日志，确认恢复路径发布后局部路径持续更新。
+
+## 2026-09-07 - 修复最后一个 waypoint 已完成后恢复巡检被重新打开
+
+- 定位到恢复巡检时的状态问题：`global_path_seq_publisher` 的 `resume` 和 `resume_from_current` 回调无条件把 `sequence_done` 设为 `False`。
+- 当目标任务开始前最后一个 waypoint 已经到达时，恢复命令会错误地重新激活最后一个 waypoint，重新发布它的 `/global_path`，但局部规划链没有对应的新运动段，表现为只有全局路径、没有 `/local_path`。
+- 现在恢复只解除暂停并保留原有 `sequence_done`：未完成序列继续从当前 waypoint 规划，已完成序列保持完成状态，不再回头前往最后一个点。
+- 增加普通恢复和当前位置恢复对已完成 waypoint 序列的回归测试；没有修改 waypoint 到达容差、单段路径发布或局部规划器逻辑。
+
+## 2026-09-07 - 修复恢复巡检后局部路径被 UI 清空
+
+- 现场现象是感知任务结束后，总控已经恢复到 `PATROL`，`/global_path` 能重新出现，但 `/local_path` 可能没有持续输出，导致局部控制链没有继续运行。
+- 检查发现 `robot_ui_backend` 也在发布 `/global_path`、`/local_path` 和 `/local_path_rl_debug`。定位状态变化或 UI 清空动作会向这些控制 topic 发布空路径，可能覆盖 waypoint 节点和 RL 局部规划器刚恢复的有效路径。
+- UI 后端现在只清理自己的轨迹、点云和代价地图可视化，不再写入导航控制链的路径 topic。`/global_path` 由 waypoint/目标导航链维护，`/local_path` 由 RL/PRIEST 局部规划器维护，避免恢复阶段出现多发布者竞争。
+- 同时保留此前的恢复时序修复：先由总控接受 `PATROL`，再发送 waypoint `resume`；成功恢复和恢复超时仍分别使用缓存路径恢复、从当前位置重新规划的既有逻辑。
+- 未修改 FAST-LIVO、Pure Pursuit、RL/PRIEST 推理、DWB 参数和 waypoint 单段路径逻辑。
+
 ## 2026-09-07 - 修复“停止节点”未停止感知任务
 
 - UI 的“停止节点”按钮调用 `stop_all(keep_sensors=True)` 时，原逻辑会同时跳过传感器和
