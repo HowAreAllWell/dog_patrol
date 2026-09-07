@@ -4,7 +4,7 @@ from dog_patrol_interfaces.msg import MissionState
 from geometry_msgs.msg import PoseStamped
 from nav_msgs.msg import Path
 
-from move.navigation_path_mux import (
+from dog_patrol_navigation.navigation_path_mux import (
     MISSION_SOURCE,
     NavigationPathMux,
     NO_SOURCE,
@@ -33,10 +33,11 @@ def test_startup_and_unknown_state_have_no_motion_path_source():
 def test_mux_forwards_only_the_path_owned_by_current_mission_state():
     published = []
     node = SimpleNamespace(
-        _active_source=WAYPOINT_SOURCE,
+        _active_source=NO_SOURCE,
         _mission_state_seen=False,
         _last_state_seq=-1,
         _wait_for_fresh_waypoint_path=False,
+        _waypoint_min_stamp_ns=0,
         _publish=lambda message: published.append(message),
         _publish_empty=lambda: published.append(Path()),
         get_logger=lambda: SimpleNamespace(info=lambda message: None),
@@ -46,15 +47,46 @@ def test_mux_forwards_only_the_path_owned_by_current_mission_state():
     mission_path = Path()
     mission_path.poses.append(PoseStamped())
 
+    state = SimpleNamespace(
+        state_seq=9,
+        state=MissionState.PATROL,
+        header=SimpleNamespace(stamp=SimpleNamespace(sec=10, nanosec=0)),
+    )
+    NavigationPathMux._on_mission_state(node, state)
     NavigationPathMux._on_waypoint_path(node, waypoint_path)
     NavigationPathMux._on_mission_path(node, mission_path)
     assert published[-1] is waypoint_path
 
-    state = SimpleNamespace(state_seq=10, state=MissionState.APPROACH_TARGET)
+    state = SimpleNamespace(
+        state_seq=10,
+        state=MissionState.APPROACH_TARGET,
+        header=SimpleNamespace(stamp=SimpleNamespace(sec=11, nanosec=0)),
+    )
     NavigationPathMux._on_mission_state(node, state)
     assert len(published[-1].poses) == 0
     NavigationPathMux._on_mission_path(node, mission_path)
     assert published[-1] is mission_path
+
+
+def test_mux_drops_paths_until_the_first_mission_state_arrives():
+    published = []
+    node = SimpleNamespace(
+        _active_source=NO_SOURCE,
+        _mission_state_seen=False,
+        _last_state_seq=-1,
+        _wait_for_fresh_waypoint_path=False,
+        _waypoint_min_stamp_ns=0,
+        _publish=lambda message: published.append(message),
+        _publish_empty=lambda: published.append(Path()),
+        get_logger=lambda: SimpleNamespace(info=lambda message: None),
+    )
+    path = Path()
+    path.poses.append(PoseStamped())
+
+    NavigationPathMux._on_waypoint_path(node, path)
+    NavigationPathMux._on_mission_path(node, path)
+
+    assert not published
 
 
 def test_return_to_patrol_waits_for_a_post_switch_waypoint_path():

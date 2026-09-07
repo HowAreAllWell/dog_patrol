@@ -1,6 +1,7 @@
 """Launch the external M20 local navigation chain.
 
-RViz Publish Point drives the waypoint manager. This launch starts:
+RViz Publish Point drives the waypoint manager. This launch starts the move-side
+control chain. The task-navigation launch starts the path mux:
 
   /clicked_point -> global_path_seq_publisher.py -> /waypoint_global_path
   /mission_global_path + /waypoint_global_path -> navigation_path_mux -> /global_path
@@ -31,7 +32,6 @@ def generate_launch_description():
     global_path_topic = LaunchConfiguration("global_path_topic")
     pure_pursuit_plan_topic = LaunchConfiguration("pure_pursuit_plan_topic")
     waypoint_path_topic = LaunchConfiguration("waypoint_path_topic")
-    mission_path_topic = LaunchConfiguration("mission_path_topic")
     subgoal_topic = LaunchConfiguration("subgoal_topic")
     final_goal_topic = LaunchConfiguration("final_goal_topic")
     local_path_topic = LaunchConfiguration("local_path_topic")
@@ -100,22 +100,6 @@ def generate_launch_description():
                 "edit_radius": waypoint_edit_radius,
                 "enable_interactive_markers": waypoint_enable_interactive_markers,
                 "interactive_marker_namespace": waypoint_interactive_marker_ns,
-            }
-        ],
-    )
-
-    path_mux = Node(
-        package="move",
-        executable="navigation_path_mux",
-        name="navigation_path_mux",
-        output="screen",
-        parameters=[
-            {
-                "waypoint_path_topic": waypoint_path_topic,
-                "mission_path_topic": mission_path_topic,
-                "output_path_topic": global_path_topic,
-                "pure_pursuit_path_topic": pure_pursuit_plan_topic,
-                "mission_state_topic": "/mission/state",
             }
         ],
     )
@@ -266,7 +250,6 @@ def generate_launch_description():
             DeclareLaunchArgument("global_path_topic", default_value="global_path"),
             DeclareLaunchArgument("pure_pursuit_plan_topic", default_value="global_path"),
             DeclareLaunchArgument("waypoint_path_topic", default_value="waypoint_global_path"),
-            DeclareLaunchArgument("mission_path_topic", default_value="mission_global_path"),
             DeclareLaunchArgument("subgoal_topic", default_value="subgoal"),
             DeclareLaunchArgument("final_goal_topic", default_value="final_goal"),
             DeclareLaunchArgument("local_path_topic", default_value="local_path"),
@@ -299,7 +282,6 @@ def generate_launch_description():
             DeclareLaunchArgument("require_localization_confidence", default_value="false"),
             DeclareLaunchArgument("adapter_path_timeout", default_value="1.2"),
             rviz_waypoints,
-            path_mux,
             pure_pursuit,
             rl_local_path,
             adapter,

@@ -22,12 +22,12 @@ dog_patrol 中如何被总控、感知和导航协调器组合起来。
    - Nav2 planner server 提供 `/compute_path_to_pose`。
    - `global_path_seq_publisher` 负责 RViz 目标点、waypoint 和普通巡检路径，输出到
      `/waypoint_global_path`。
-   - `navigation_path_mux` 根据 `/mission/state` 在 waypoint 路径和任务路径中选择唯一
-     输出 `/global_path`。
    - `pure_pursuit` 从唯一的 `/global_path` 生成 `/subgoal` 和 `/final_goal`。
    - PRIEST/RL 节点生成 `/local_path`。
    - DWB 适配器跟踪局部路径并发布机器狗最终使用的 `/NAV_CMD`。
 3. **导航任务协调层**
+   - `navigation_path_mux` 根据 `/mission/state` 在 waypoint 路径和任务路径中选择唯一
+     输出 `/global_path`。
    - `navigation_mission_coordinator` 订阅任务状态、感知 bbox、雷达和 odom。
    - 它把 bbox 和雷达点云融合成地图坐标目标，调用 Nav2 planner 生成目标接近路径，
      用实时雷达距离在约 3 m 处停止，并报告到达和执行错误事件。
@@ -44,7 +44,7 @@ Livox/MVS
   -> FAST-LIVO / localization / TF / odom
   -> Nav2 planner + move waypoint
   -> /waypoint_global_path
-  -> navigation_path_mux -> /global_path
+  -> dog_patrol_navigation/navigation_path_mux -> /global_path
   -> pure_pursuit -> /subgoal
   -> PRIEST/RL -> /local_path
   -> DWB adapter -> /NAV_CMD
@@ -58,7 +58,7 @@ perception bbox + /livox/lidar
   -> /navigation/target_point
   -> Nav2 /compute_path_to_pose
   -> /mission_global_path
-  -> navigation_path_mux -> /global_path
+  -> dog_patrol_navigation/navigation_path_mux -> /global_path
   -> 原有局部控制链
 ```
 
@@ -89,18 +89,25 @@ FAST-LIVO-DOG README 中的启动命令可作为底层模块参考，但不要�
 | 立即 | launch 参数解析、可选 map server 配置 | `use_map_server` 默认 `false` |
 | 8 s | Nav2 core | 始终由 `navigation.launch.py` 包含 |
 | 11 s | 外部控制链 | `start_external_nav=true` |
-| 12 s | 任务协调器 | `start_mission_coordinator=true` |
+| 12 s | 任务导航层（mux + 任务协调器） | `start_mission_coordinator=true` |
 
 外部控制链由 `priest_external_nav.launch.py` 启动以下组件：
 
 - waypoint/RViz 目标点节点：`/clicked_point -> /waypoint_global_path`；
-- 路径 mux：`/waypoint_global_path` 或 `/mission_global_path -> /global_path`，当前只
-  允许一个路径来源进入下游控制链；
 - Pure Pursuit：`/global_path -> /subgoal, /final_goal`；
 - PRIEST/RL：`/global_path + /subgoal + /scan -> /local_path`；
 - DWB adapter：`/local_path -> /NAV_CMD`；
 - `nav_cmd_domain_bridge`；
 - `pointcloud_to_laserscan`：`/cloud_registered -> /scan`。
+
+路径 mux 不属于 `move` 控制包。它由
+`dog_patrol_navigation/navigation_mission_coordinator.launch.py` 与任务协调器一起启动，
+读取 `/mission/state`，在 `/waypoint_global_path` 和 `/mission_global_path` 中选择当前
+允许的来源，并作为唯一节点发布最终 `/global_path`。因此 `priest_external_nav.launch.py`
+只负责启动 move 侧控制链，完整任务运行仍由 `navigation.launch.py` 组合两层 launch。
+该 launch 中的 `mission_state_topic`、`mission_path_topic`、`waypoint_path_topic` 和
+`selected_global_path_topic` 会同时传给 mux 和协调器的 Ready 检查，避免自定义 topic
+后两者观察不同的路径链路。
 
 协调器本身也可以单独启动，但生产运行应由 `navigation.launch.py` 统一启动，避免
 重复创建同名节点、重复发布控制路径或重复启动控制链：
@@ -151,9 +158,9 @@ ros2 launch dog_patrol_navigation navigation_mission_coordinator.launch.py \
 | `/navigation/target_status` | `dog_patrol_interfaces/msg/TargetNavigationStatus` | UI/总控/感知 | 默认 10 Hz，反馈距离和导航执行子状态 |
 | `/navigation/target_point` | `geometry_msgs/msg/PointStamped` | UI/调试/后续模块 | bbox+点云稳定融合后发布，frame 为 `map` |
 | `/navigation/target_goal` | `geometry_msgs/msg/PoseStamped` | UI/调试 | 每次调用 planner 前发布本次 planner 目标（当前距目标约 1 m），frame 为 `map` |
-| `/mission_global_path` | `nav_msgs/msg/Path` | `navigation_path_mux` | 协调器目标接近、跟踪和恢复的私有路径 |
-| `/waypoint_global_path` | `nav_msgs/msg/Path` | `navigation_path_mux` | waypoint 发布器生成的当前目标单段巡检路径 |
-| `/global_path` | `nav_msgs/msg/Path` | Pure Pursuit、RL/PRIEST | 仅由 `navigation_path_mux` 发布的状态选择路径 |
+| `/mission_global_path` | `nav_msgs/msg/Path` | `navigation_mission_coordinator` | 协调器目标接近、跟踪和恢复的私有路径，供 mux 选择 |
+| `/waypoint_global_path` | `nav_msgs/msg/Path` | `global_path_seq_publisher` | waypoint 发布器生成的当前目标单段巡检路径，供 mux 选择 |
+| `/global_path` | `nav_msgs/msg/Path` | Pure Pursuit、RL/PRIEST | 仅由 `dog_patrol_navigation/navigation_path_mux` 发布的状态选择路径 |
 | `/waypoint_sequence/pause` | `std_msgs/msg/Empty` | waypoint 节点 | 进入接近、核验、跟踪或恢复时暂停巡逻 waypoint |
 | `/waypoint_sequence/resume` | `std_msgs/msg/Empty` | waypoint 节点 | 恢复阶段回到中断位姿后，或回到 `PATROL` 时恢复巡逻 |
 | `/waypoint_sequence/resume_from_current` | `std_msgs/msg/Empty` | waypoint 节点 | 恢复超时时丢弃旧缓存路径，从当前机器人位姿重新规划当前巡检 waypoint |
@@ -163,8 +170,8 @@ ros2 launch dog_patrol_navigation navigation_mission_coordinator.launch.py \
 和底盘协议由当前 fast_livo_dog move 链保持，不在协调器中重新定义。
 
 `/mission_global_path` 和 `/waypoint_global_path` 是内部输入 topic，不应直接连接到
-Pure Pursuit、RL 或 DWB。下游只订阅 mux 输出的 `/global_path`，从而避免协调器和
-waypoint 发布器同时向同一个控制 topic 写入路径。
+Pure Pursuit、RL 或 DWB。下游只订阅 `dog_patrol_navigation` 中 mux 输出的 `/global_path`，
+从而避免协调器和 waypoint 发布器同时向同一个控制 topic 写入路径。
 
 从任务路径切回 `PATROL` 时，mux 先发布空路径，并等待状态切换后新到达的 waypoint
 路径；它不会直接重放任务期间缓存的旧 waypoint 路径。这样不依赖 mission state、resume
@@ -637,7 +644,8 @@ ros2 topic echo /global_path
 这是 action 计算能力限制，不是 `tick_rate` 没有运行。
 
 `/mission_global_path` 只有目标接近、跟踪或恢复时应有内容；`/waypoint_global_path` 只有
-普通巡检时应被 mux 转发；最终 `/global_path` 的发布者应只有 `navigation_path_mux`。
+普通巡检时应被 mux 转发；最终 `/global_path` 的发布者应只有
+`dog_patrol_navigation/navigation_path_mux`。
 
 ### 9.4 返回巡检后没有局部路径
 

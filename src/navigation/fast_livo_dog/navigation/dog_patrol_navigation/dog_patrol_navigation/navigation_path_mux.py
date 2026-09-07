@@ -72,10 +72,10 @@ class NavigationPathMux(Node):
             depth=1,
         )
 
-        # Before a supervisor is running, preserve the original standalone
-        # waypoint behavior. STARTUP immediately selects NO_SOURCE once the
-        # latched mission state arrives.
-        self._active_source = WAYPOINT_SOURCE
+        # The task-navigation mux must fail closed until the authoritative
+        # mission state arrives. A waypoint path can otherwise win a
+        # cross-topic startup race while the supervisor is still in STARTUP.
+        self._active_source = NO_SOURCE
         self._mission_state_seen = False
         self._last_state_seq = -1
         self._wait_for_fresh_waypoint_path = False

@@ -127,7 +127,6 @@ def generate_launch_description():
             "waypoint_enable_interactive_markers": waypoint_enable_interactive_markers,
             "waypoint_interactive_marker_ns": waypoint_interactive_marker_ns,
             "waypoint_path_topic": waypoint_path_topic,
-            "mission_path_topic": mission_path_topic,
             "global_path_topic": "global_path",
             "pure_pursuit_plan_topic": "global_path",
             "subgoal_topic": "subgoal",
@@ -165,7 +164,10 @@ def generate_launch_description():
             "use_sim_time": use_sim_time,
             "params_file": coordinator_params,
             "device_parameters_file": device_parameters_file,
+            "waypoint_path_topic": waypoint_path_topic,
             "mission_path_topic": mission_path_topic,
+            "selected_global_path_topic": "global_path",
+            "pure_pursuit_plan_topic": "global_path",
         }.items(),
     )
     mission_coordinator_group = GroupAction(

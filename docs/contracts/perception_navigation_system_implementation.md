@@ -50,7 +50,7 @@ navigation_path_mux
 
 只有总状态机可以改变公共 `MissionState`。感知和导航只能发布事件，不能直接把系统切换到另一个公共状态。导航内部可以有“接近中”“保持停止”等执行策略名称，但不能形成一套和总控并行的业务状态机。
 
-`/global_path` 只允许由 `navigation_path_mux` 发布。waypoint 发布器和导航协调器分别发布到
+`/global_path` 只允许由 `dog_patrol_navigation/navigation_path_mux` 发布。waypoint 发布器和导航协调器分别发布到
 `/waypoint_global_path`、`/mission_global_path`，不能直接写下游共同消费的 `/global_path`。
 mux 根据最新的 `MissionState` 选择路径来源：`PATROL`、`CONFIRM_TARGET` 使用 waypoint
 路径；`APPROACH_TARGET`、`VERIFY_IDENTITY`、`TRACK_INTRUDER`、`RECOVER_PATROL` 使用

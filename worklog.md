@@ -1,4 +1,15 @@
 # worklog
+## 2026-09-07 - 将路径 mux 迁移到任务导航包
+
+- `navigation_path_mux` 原先放在 `move` 包中，但它读取 `/mission/state` 并按任务状态仲裁
+  waypoint 路径和目标任务路径，职责属于 `dog_patrol_navigation` 的任务导航集成层。
+- 将 mux 节点和回归测试迁移到 `dog_patrol_navigation`，由
+  `navigation_mission_coordinator.launch.py` 与任务协调器一起启动。
+- `move` 包只保留 waypoint、Pure Pursuit、RL/PRIEST、DWB 适配器和底层控制链；
+  `priest_external_nav.launch.py` 不再启动 mux。
+- 运行时拓扑和行为不变：`/waypoint_global_path`、`/mission_global_path` 仍由 mux 按
+  `/mission/state` 选择，最终只有 mux 发布 `/global_path`。
+
 ## 2026-09-07 - 隔离 waypoint 与目标任务的全局路径发布
 
 - 审查确认普通 waypoint 发布器和 `navigation_mission_coordinator` 原先分别直接写入

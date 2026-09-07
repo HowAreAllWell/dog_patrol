@@ -27,6 +27,8 @@ setup(
         "console_scripts": [
             "navigation_mission_coordinator = "
             "dog_patrol_navigation.navigation_mission_coordinator:main",
+            "navigation_path_mux = "
+            "dog_patrol_navigation.navigation_path_mux:main",
         ],
     },
 )
