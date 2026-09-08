@@ -60,8 +60,10 @@ tracking 的主目标选择、实时推理、现有预览、录制和 mission �
   或来自旧 mission 会话的结果不得绘制。
 - overlay adapter、结果缓存和绘制必须在现有有界诊断 worker 边界内工作。未启动人脸节点、没有
   结果、结果过期或 adapter 异常时，现有 tracking overlay、preview、record 和推理必须保持原行为。
-- 预览继续由现有 `visualization.enable`、统一 tracking launch 和同一个窗口控制。不得新增另一套
-  face preview 开关作为生产入口。人脸 overlay 默认可缺省，关闭预览时不得创建 GUI 副作用。
+- tracking overlay 由统一 tracking launch 通过 `visualization.enable` 生成，并默认发布到
+  `/perception/tracking_overlay`；`visualization.publish_image` 控制 ROS Image 输出，
+  `visualization.window` 只控制兼容 OpenCV 窗口且默认关闭。不得新增另一套 face preview 开关作为生产入口。
+  人脸 overlay 默认可缺省，关闭 overlay 时不得创建 GUI 副作用。
 - 轻量 overlay 使用 `dog_patrol_perception_interfaces/msg/FaceOverlay` 和 best-effort、volatile、
   keep-last(1) QoS；tracking 不依赖人脸包私有类型。
 
@@ -71,8 +73,9 @@ tracking 的主目标选择、实时推理、现有预览、录制和 mission �
   readiness 失败。
 - ROS 集成测试至少覆盖 crop 到 evidence 的 `state_seq + target_id` 绑定，以及人脸 worker 变慢或退出
   时 tracking 不反压。
-- 预览验收必须证明：只打开一个相机和一个窗口；face overlay 在同一 tracking canvas；错目标、旧帧、
-  旧会话不显示；关闭/杀死人脸节点不影响 tracking preview/record；关闭 preview 不产生 GUI。
+- overlay 验收必须证明：只打开一个相机；face overlay 在同一 tracking canvas，并能从
+  `/perception/tracking_overlay` 观察到；错目标、旧帧、旧会话不显示；关闭/杀死人脸节点不影响
+  tracking ROS image/record；默认启动不产生 GUI，只有显式开启 `visualization.window` 才创建窗口。
 - Orin 验收记录功能结果、处理延迟、输入/推理/结果丢弃数、CPU/GPU/RAM 和温度。性能门槛须由项目
   owner 明确确认，不能在迁入时自行降低 tracking 的既有行为或验收标准。
 - 当前实现和无人值守验证已经完成；最后一步是用户参与的仅导航 fake 整流程验收，并保留功能与

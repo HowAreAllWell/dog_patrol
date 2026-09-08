@@ -1398,7 +1398,8 @@ class RobotMainWindow(QMainWindow):
             f"{self.env_setup} && exec setsid ros2 launch dog_patrol_perception_bringup "
             f"perception_stack.launch.py use_sim_time:={use_sim} "
             f"assets_root:={self.assets_root} image_topic:=/left_camera/image_raw "
-            "preview:=true"
+            "preview:=true preview_window:=false "
+            "visualization_topic:=/perception/tracking_overlay"
         )
         process = QProcess(self)
         self.process_perception = process

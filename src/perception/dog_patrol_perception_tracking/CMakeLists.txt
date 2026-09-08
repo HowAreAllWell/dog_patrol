@@ -9,6 +9,7 @@ find_package(ament_cmake REQUIRED)
 find_package(rclcpp REQUIRED)
 find_package(cv_bridge REQUIRED)
 find_package(sensor_msgs REQUIRED)
+find_package(std_msgs REQUIRED)
 find_package(dog_patrol_interfaces REQUIRED)
 find_package(dog_patrol_perception_interfaces REQUIRED)
 find_package(OpenCV REQUIRED)
@@ -194,7 +195,7 @@ if(TRACKING_ENABLE_ORIN_RUNTIME)
   add_executable(dog_patrol_perception_tracking_node src/perception_tracking_node.cpp)
   target_compile_features(dog_patrol_perception_tracking_node PUBLIC cxx_std_17)
   ament_target_dependencies(dog_patrol_perception_tracking_node
-    rclcpp cv_bridge sensor_msgs dog_patrol_interfaces dog_patrol_perception_interfaces)
+    rclcpp cv_bridge sensor_msgs std_msgs dog_patrol_interfaces dog_patrol_perception_interfaces)
   target_link_libraries(dog_patrol_perception_tracking_node
     ${PROJECT_NAME}_core
     ${PROJECT_NAME}_ros_adapter
@@ -262,7 +263,7 @@ if(BUILD_TESTING)
       src/perception_tracking_node.cpp)
     target_compile_features(${PROJECT_NAME}_live_node_compile_check PUBLIC cxx_std_17)
     ament_target_dependencies(${PROJECT_NAME}_live_node_compile_check
-      rclcpp dog_patrol_interfaces dog_patrol_perception_interfaces)
+      rclcpp cv_bridge sensor_msgs std_msgs dog_patrol_interfaces dog_patrol_perception_interfaces)
     target_link_libraries(${PROJECT_NAME}_live_node_compile_check
       ${PROJECT_NAME}_core ${PROJECT_NAME}_ros_adapter)
   endif()

@@ -24,6 +24,8 @@ def generate_launch_description():
     image_topic = LaunchConfiguration("image_topic")
     camera_frame = LaunchConfiguration("camera_frame")
     preview = LaunchConfiguration("preview")
+    preview_window = LaunchConfiguration("preview_window")
+    visualization_topic = LaunchConfiguration("visualization_topic")
     record = LaunchConfiguration("record")
     voice_helper = LaunchConfiguration("voice_helper")
     mission_state_topic = LaunchConfiguration("mission_state_topic")
@@ -75,6 +77,9 @@ def generate_launch_description():
                 "perception.capability_status_topic": capability_status_topic,
                 "target_image.topic": tracked_target_image_topic,
                 "visualization.enable": ParameterValue(preview, value_type=bool),
+                "visualization.publish_image": True,
+                "visualization.image_topic": visualization_topic,
+                "visualization.window": ParameterValue(preview_window, value_type=bool),
                 "recording.enable": ParameterValue(record, value_type=bool),
             },
         ],
@@ -157,6 +162,11 @@ def generate_launch_description():
             DeclareLaunchArgument("image_topic", default_value="/left_camera/image_raw"),
             DeclareLaunchArgument("camera_frame", default_value="camera_link"),
             DeclareLaunchArgument("preview", default_value="true"),
+            DeclareLaunchArgument("preview_window", default_value="false"),
+            DeclareLaunchArgument(
+                "visualization_topic",
+                default_value="/perception/tracking_overlay",
+            ),
             DeclareLaunchArgument("record", default_value="false"),
             DeclareLaunchArgument(
                 "voice_helper",

@@ -26,6 +26,11 @@ readiness 和 launch。它只消费 tracking 的 latest-only `TrackedTargetImage
 `VisualizerRecorder`，不创建第二个相机或预览窗口。详见
 [`dog_patrol_perception_face/README.md`](dog_patrol_perception_face/README.md)。
 
+tracking 的完整监视器画面由同一个 overlay worker 发布为
+`/perception/tracking_overlay`（`sensor_msgs/msg/Image`，`bgr8`）。完整感知栈和 UI 默认发布该 topic
+供 RViz 的 Image display 使用，默认不再打开 OpenCV 监视器弹窗；只有显式设置
+`visualization.window:=true` 才启用兼容窗口。
+
 `dog_patrol_perception_interfaces` 是感知团队内部 ROS 2 interface package，当前提供：
 
 - `CapabilityStatus`：表达 capability 名称、ready/not-ready/error、诊断信息和关联的

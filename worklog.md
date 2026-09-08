@@ -1,4 +1,21 @@
 # worklog
+## 2026-09-08 - 将感知监视器画面发布为 ROS Image
+
+- `VisualizerRecorder` 在原有异步 overlay worker 中增加渲染画面回调；tracking、identity、primary
+  和 face overlay 仍先合成同一张 BGR8 画面，再由 ROS 节点发布，不阻塞检测/跟踪主线程。
+- tracking 新增 `/perception/tracking_overlay`（`sensor_msgs/msg/Image`）输出，使用源相机时间戳、
+  光学坐标系和 `bgr8` 编码，QoS 为 best-effort、volatile、keep-last(1)，可直接添加到 RViz Image display。
+- `visualization.enable` 现在表示生成 overlay，`visualization.publish_image` 控制 ROS 图像输出，
+  `visualization.window` 仅保留旧 OpenCV 弹窗兼容能力且默认关闭；完整感知栈和 UI 默认不再弹窗。
+- 在 `localization_2d.rviz` 中保存 `Perception` Image display，topic 为
+  `/perception/tracking_overlay`，Reliability 为 Best Effort，可随 2D 定位 RViz 直接打开。
+- 同步更新 standalone/fake launch、资产参数、tracking/perception 文档和 UI 启动命令；增加渲染回调、
+  缺少回调失败以及 materializer 配置回归测试。
+- 重新构建 `dog_patrol_perception_tracking` 和 `dog_patrol_perception_bringup`；tracking 包 55 个
+  CTest、404 个测试全部通过。使用独立 ROS domain 向正式 tracking 节点输入一帧合成
+  `1280x1024 bgr8` 图像，实际收到同时间戳、`camera_link`、`step=3840` 的 overlay；最终指标
+  `submitted/enqueued/rendered/streamed=1/1/1/1`、drop/error 全为 0、`previewed=0`。
+
 ## 2026-09-08 - 修复 waypoint 编辑和删除后的完成状态保持
 
 - 修复移动 waypoint 时无条件清除 `sequence_done` 的问题。移动已完成点、未来点或当前

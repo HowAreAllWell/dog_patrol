@@ -17,6 +17,8 @@ def generate_launch_description():
         DeclareLaunchArgument('params_file', default_value=params),
         DeclareLaunchArgument('tracker_config', default_value=tracker_config),
         DeclareLaunchArgument('preview', default_value='false'),
+        DeclareLaunchArgument('preview_window', default_value='false'),
+        DeclareLaunchArgument('visualization_topic', default_value='/perception/tracking_overlay'),
         DeclareLaunchArgument('record', default_value='false'),
         Node(
             package='dog_patrol_perception_tracking',
@@ -30,6 +32,10 @@ def generate_launch_description():
                     'runtime.mode': 'standalone',
                     'visualization.enable': ParameterValue(
                         LaunchConfiguration('preview'), value_type=bool),
+                    'visualization.publish_image': True,
+                    'visualization.image_topic': LaunchConfiguration('visualization_topic'),
+                    'visualization.window': ParameterValue(
+                        LaunchConfiguration('preview_window'), value_type=bool),
                     'recording.enable': ParameterValue(
                         LaunchConfiguration('record'), value_type=bool),
                 },

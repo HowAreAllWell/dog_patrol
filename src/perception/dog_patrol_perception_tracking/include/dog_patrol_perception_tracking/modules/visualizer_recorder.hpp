@@ -6,6 +6,7 @@
 #include <condition_variable>
 #include <deque>
 #include <filesystem>
+#include <functional>
 #include <memory>
 #include <mutex>
 #include <string>
@@ -19,7 +20,7 @@
 
 namespace dog_patrol_perception_tracking {
 
-// The worker-only boundary for diagnostic overlay recording. Implementations must
+// The worker-only boundary for diagnostic overlay artifacts. Implementations must
 // accept the already-rendered canvas and must never run on the inference thread.
 class OverlayArtifactWriter {
  public:
@@ -40,8 +41,12 @@ class OverlayArtifactWriterFactory {
 
 class VisualizerRecorder {
  public:
+  using RenderedFrameCallback =
+      std::function<bool(const cv::Mat &, const SourceFrameMetadata &)>;
+
   struct Config {
     bool enable_preview{false};
+    bool enable_ros_image{false};
     bool enable_recording{false};
     // Result artifacts are constrained to this root. A live camera has no source
     // directory to compare against, so this is the explicit trust boundary that
@@ -109,24 +114,30 @@ class VisualizerRecorder {
     std::uint64_t rendered_frames{0};
     std::uint64_t previewed_frames{0};
     std::uint64_t written_frames{0};
+    std::uint64_t streamed_frames{0};
+    std::uint64_t stream_dropped_frames{0};
     std::uint64_t render_errors{0};
+    std::uint64_t stream_errors{0};
     std::uint64_t write_errors{0};
     double submitted_fps{0.0};
     double rendered_fps{0.0};
     double previewed_fps{0.0};
+    double streamed_fps{0.0};
     double written_fps{0.0};
     PercentileSummary queue_wait;
     PercentileSummary render;
     PercentileSummary write;
 
     std::uint64_t dropped_frames() const {
-      return queue_dropped_frames + render_dropped_frames + write_dropped_frames;
+      return queue_dropped_frames + render_dropped_frames + stream_dropped_frames +
+             write_dropped_frames;
     }
   };
 
   explicit VisualizerRecorder(
       Config config,
-      std::unique_ptr<OverlayArtifactWriterFactory> artifact_writer_factory = nullptr);
+      std::unique_ptr<OverlayArtifactWriterFactory> artifact_writer_factory = nullptr,
+      RenderedFrameCallback rendered_frame_callback = {});
   ~VisualizerRecorder();
 
   VisualizerRecorder(const VisualizerRecorder &) = delete;
@@ -174,6 +185,7 @@ class VisualizerRecorder {
 
   Config config_;
   std::unique_ptr<OverlayArtifactWriterFactory> artifact_writer_factory_;
+  RenderedFrameCallback rendered_frame_callback_;
   cv::Size frame_size_;
   bool initialized_{false};
   bool stopping_{false};

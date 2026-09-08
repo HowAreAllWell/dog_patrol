@@ -34,6 +34,7 @@ mission_supervisor
 perception
   -- /perception/selected_target_bbox --> navigation_mission_coordinator
   -- /mission/event ------------------> mission_supervisor
+  -- /perception/tracking_overlay ----> RViz / UI（仅观测）
 
 navigation_mission_coordinator
   -- /mission/event --> mission_supervisor
@@ -385,7 +386,24 @@ IDLE
 | `TRACK_INTRUDER` | 是 | 持续跟踪入侵者，支持导航更新路径 |
 | `RECOVER_PATROL` | 否 | 清理旧目标和认证上下文，等待新的 `PATROL` |
 
-### 5.6 目标丢失
+### 5.6 感知监视器 ROS 图像
+
+tracking 在有界异步 overlay worker 中把检测框、semantic ID、主目标状态和当前有效的人脸识别框
+绘制到同一张 BGR8 画面，并发布：
+
+| Topic | 类型 | 编码与来源 | 用途 |
+|---|---|---|---|
+| `/perception/tracking_overlay` | `sensor_msgs/msg/Image` | `bgr8`；保留源相机 `header.stamp` 和光学 `frame_id` | RViz Image、UI 和调试观测 |
+
+该 topic 使用 best-effort、volatile、keep-last(1) QoS，只承载监视画面，不参与目标选择、认证结论、
+导航融合或公共状态转移。完整感知栈和 UI 默认发布该 topic；OpenCV 独立窗口默认关闭，只有显式设置
+`visualization.window=true` 才打开兼容窗口。在 RViz 中添加 `Image` display，选择
+`/perception/tracking_overlay` 和 `raw` transport 即可。
+
+画面转换和 ROS 发布都在 overlay worker 内执行，检测/跟踪主线程只向容量受限的队列提交当前帧；
+消费者过慢时允许丢弃监视帧，不能反压业务感知链。`visualization.enable=false` 时不生成或发布画面。
+
+### 5.7 目标丢失
 
 感知任务级目标丢失同时覆盖：
 

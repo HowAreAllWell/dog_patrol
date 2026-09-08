@@ -109,6 +109,7 @@ TEST(PerceptionConfigMaterializerTest, VisualizerMirrorsSanitizedIdentityConfig)
 
   PerceptionConfigMaterializer::VisualizerInput visualizer_input;
   visualizer_input.enable_preview = true;
+  visualizer_input.enable_ros_image = true;
   visualizer_input.enable_recording = true;
   visualizer_input.queue_capacity = -4;
   visualizer_input.recording_output_root = "/tmp/out";
@@ -118,6 +119,7 @@ TEST(PerceptionConfigMaterializerTest, VisualizerMirrorsSanitizedIdentityConfig)
       PerceptionConfigMaterializer::MaterializeVisualizerConfig(visualizer_input, identity_config);
 
   EXPECT_TRUE(config.enable_preview);
+  EXPECT_TRUE(config.enable_ros_image);
   EXPECT_TRUE(config.enable_recording);
   EXPECT_EQ(config.queue_capacity, 0U);
   EXPECT_EQ(config.recording_output_root, "/tmp/out");

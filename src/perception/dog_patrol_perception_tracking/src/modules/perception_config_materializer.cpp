@@ -74,6 +74,7 @@ VisualizerRecorder::Config PerceptionConfigMaterializer::MaterializeVisualizerCo
     const IdentityManager::Config &identity_config) {
   VisualizerRecorder::Config config;
   config.enable_preview = input.enable_preview;
+  config.enable_ros_image = input.enable_ros_image;
   config.enable_recording = input.enable_recording;
   config.recording_output_root = input.recording_output_root;
   config.recording_path = input.recording_path;

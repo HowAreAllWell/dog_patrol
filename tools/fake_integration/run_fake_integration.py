@@ -350,7 +350,7 @@ def main() -> int:
     parser.add_argument(
         "--preview",
         action="store_true",
-        help="enable the tracking diagnostic overlay preview (requires DISPLAY)",
+        help="publish the tracking diagnostic overlay as a ROS Image topic",
     )
     args = parser.parse_args()
     root = args.output_root / time.strftime("%Y%m%d_%H%M%S")
@@ -372,10 +372,6 @@ def main() -> int:
         ):
             parser.error(
                 f"{args.scenario} requires face config and voice model/config/helper"
-            )
-        if args.preview and not os.environ.get("DISPLAY"):
-            parser.error(
-                "--preview requires an interactive graphical session with DISPLAY set"
             )
         if args.scenario in ("tracking_loss_timeout", "startup_visible"):
             print(
@@ -435,7 +431,12 @@ def main() -> int:
             f"camera.image_topic:={args.image_topic}",
         ] + common[1:]
         if args.preview:
-            tracking += ["-p", "visualization.enable:=true"]
+            tracking += [
+                "-p",
+                "visualization.enable:=true",
+                "-p",
+                "visualization.publish_image:=true",
+            ]
         processes.append(spawn(tracking, root / "tracking.log"))
         if args.scenario in perception_scenarios:
             for executable, log in (("perception_voice_readiness", "voice_readiness.log"),

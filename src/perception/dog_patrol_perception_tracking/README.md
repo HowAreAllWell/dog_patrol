@@ -29,7 +29,7 @@ Dog patrol 的正式 perception tracking 模块，包含相机接入、检测、
 - 控制逻辑
 
 当前工作流分为三个独立入口：`capture_ffv1` 只采集 Hik MVS clean BGR8 并写 FFV1/MKV；
-`dog_patrol_perception_tracking_node` 执行 live inference，并可独立开启 diagnostic overlay preview/record；
+`dog_patrol_perception_tracking_node` 执行 live inference，并可独立开启 diagnostic overlay ROS image/record；
 `offline_eval_recordings` 只回放显式选择的 capture take 或视频并把结果写入 eval 目录。三者不共享
 录制开关，也不会把 overlay 写回 clean source dataset。
 
@@ -56,7 +56,10 @@ SID 生效配置的镜像；`MotTracker` 的 `config/bot_sort.yaml` 解析仍由
 - `target.handled_ignore_absence_sec`（核验或持续跟踪结束后，上一目标需要连续不可见多久才允许再次被选中；当前为 30 s）
 - `mission.state_topic` / `mission.event_topic` / `mission.selected_target_bbox_topic`
 - `perception.camera_optical_frame_id`
-- `visualization.enable`（overlay preview；默认 `false`）
+- `visualization.enable`（生成 tracking/identity/primary/face overlay；默认 `false`）
+- `visualization.publish_image`（将 overlay 发布为 `sensor_msgs/msg/Image`；默认 `true`）
+- `visualization.image_topic`（overlay ROS 图像 topic；默认 `/perception/tracking_overlay`）
+- `visualization.window`（兼容旧 OpenCV 弹窗；默认 `false`，现场运行不需要打开）
 - `visualization.queue_capacity`（异步 overlay render/write queue；默认 `4`）
 - `recording.enable` / `recording.output_root` / `recording.path` / `recording.fps`（当前 live result 录制强制为 FFV1/MKV；`path` 必须位于可信 diagnostic output root，且 result root 不得与受保护的 clean `data/captures/` 重叠或经符号链接指向它）
 - `runtime.inference_timing_metrics`（默认 `true`，输出 inference p50/p95/p99）
@@ -117,7 +120,7 @@ Orin 性能测量入口：运行 standalone 后执行
 和 inference 指标。在人脸消费者正常速度与故意降速两种条件下对比 tracking FPS；若 FPS 明显下降，
 或 crop 带宽/序列化成本超出部署预算，则以这些记录作为切换共享内存 adapter 的基线证据。
 
-预览和 FFV1 diagnostic overlay 录制可独立启用：
+overlay ROS image 和 FFV1 diagnostic overlay 录制可独立启用：
 
 ```bash
 ros2 launch dog_patrol_perception_tracking \
@@ -314,15 +317,27 @@ ros2 run dog_patrol_perception_tracking dog_patrol_perception_tracking_node --ro
 四种 live mode 独立配置（追加到 `ros2 run ... dog_patrol_perception_tracking_node`）：
 
 - inference-only：`-p visualization.enable:=false -p recording.enable:=false`（干净性能 baseline）
-- preview：`-p visualization.enable:=true -p recording.enable:=false`（需要本地图形会话）
+- overlay image：`-p visualization.enable:=true -p visualization.publish_image:=true -p recording.enable:=false`
+- OpenCV window：在 overlay image 参数基础上追加 `-p visualization.window:=true`（兼容调试，不是现场必需）
 - record：`-p visualization.enable:=false -p recording.enable:=true -p recording.path:=/path/to/diagnostics/live.mkv`
-- preview+record：`-p visualization.enable:=true -p recording.enable:=true -p recording.path:=/path/to/diagnostics/live.mkv`
+- overlay image+record：`-p visualization.enable:=true -p recording.enable:=true -p recording.path:=/path/to/diagnostics/live.mkv`
 
-预览和录制从同一 worker 产生同一 tracking/identity/primary/face overlay canvas。face bbox 来自
+ROS 图像输出和录制从同一 worker 产生同一 tracking/identity/primary/face overlay canvas。face bbox 来自
 best-effort、keep-last(1) 的 `/perception/face_overlay`，错目标、未来帧和过期结果自动抑制；没有 face
-节点时原有行为不变。worker 队列有界、队满丢弃最新诊断帧而不等待编码或显示；每秒日志会输出
-capture、inference、render/write 的 FPS、queue/render/write drop 和 p50/p95/p99。请将 live overlay
-放在 `data/diagnostics/live_overlays/` 等结果目录，不能当作 source dataset。
+节点时原有行为不变。`/perception/tracking_overlay` 使用 `bgr8` 编码、源相机时间戳和相机光学
+坐标系，QoS 为 best-effort、volatile、keep-last(1)，适合 RViz Image 显示。worker 队列有界、队满
+丢弃最新诊断帧而不等待编码、DDS 发布或显示；每秒日志会输出 capture、inference、render、stream/write
+的 FPS、drop 和 p50/p95/p99。`visualization.window=true` 才会额外打开旧 OpenCV 窗口，默认不打开。
+
+在 RViz 中查看监视器画面：添加 `Image` display，将 `Image Topic` 设置为
+`/perception/tracking_overlay`，Transport 选择 `raw`。启动完整感知栈时，UI 会默认打开 overlay ROS
+图像发布，因此不需要单独启动监视器窗口；也可以直接检查：
+
+```bash
+ros2 topic info /perception/tracking_overlay -v
+ros2 topic hz /perception/tracking_overlay
+ros2 topic echo /perception/tracking_overlay --once
+```
 
 ## 基本验证重点
 

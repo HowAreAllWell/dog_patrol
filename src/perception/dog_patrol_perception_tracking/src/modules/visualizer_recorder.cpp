@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdlib>
+#include <exception>
 #include <filesystem>
 #include <limits>
 #include <sstream>
@@ -175,8 +176,10 @@ class Ffv1OverlayArtifactWriterFactory final : public OverlayArtifactWriterFacto
 }  // namespace
 
 VisualizerRecorder::VisualizerRecorder(
-    Config config, std::unique_ptr<OverlayArtifactWriterFactory> artifact_writer_factory)
-    : config_(std::move(config)), artifact_writer_factory_(std::move(artifact_writer_factory)) {
+    Config config, std::unique_ptr<OverlayArtifactWriterFactory> artifact_writer_factory,
+    RenderedFrameCallback rendered_frame_callback)
+    : config_(std::move(config)), artifact_writer_factory_(std::move(artifact_writer_factory)),
+      rendered_frame_callback_(std::move(rendered_frame_callback)) {
   if (artifact_writer_factory_ == nullptr) {
     artifact_writer_factory_ = std::make_unique<Ffv1OverlayArtifactWriterFactory>();
   }
@@ -221,6 +224,18 @@ bool VisualizerRecorder::ValidateConfig(const Config &config, std::string *error
 }
 
 std::string VisualizerRecorder::ModeName(const Config &config) {
+  if (config.enable_ros_image) {
+    if (config.enable_preview && config.enable_recording) {
+      return "ros_image_preview_record";
+    }
+    if (config.enable_preview) {
+      return "ros_image_preview";
+    }
+    if (config.enable_recording) {
+      return "ros_image_record";
+    }
+    return "ros_image";
+  }
   if (config.enable_preview && config.enable_recording) {
     return "preview_record";
   }
@@ -239,6 +254,9 @@ bool VisualizerRecorder::Initialize(const cv::Size &frame_size, std::string *err
   }
   if (!ValidateConfig(config_, error)) {
     return false;
+  }
+  if (config_.enable_ros_image && !rendered_frame_callback_) {
+    return Fail(error, "ROS image overlay output requires a rendered frame callback");
   }
   if (frame_size.width <= 0 || frame_size.height <= 0) {
     return Fail(error, "visualizer recorder requires positive frame dimensions");
@@ -282,7 +300,7 @@ bool VisualizerRecorder::Initialize(const cv::Size &frame_size, std::string *err
   frame_size_ = frame_size;
   initialized_ = true;
   started_at_ = std::chrono::steady_clock::now();
-  if (config_.enable_preview || config_.enable_recording) {
+  if (config_.enable_preview || config_.enable_ros_image || config_.enable_recording) {
     worker_ = std::thread(&VisualizerRecorder::WorkerLoop, this);
   }
   if (error != nullptr) {
@@ -296,7 +314,8 @@ void VisualizerRecorder::Submit(cv::Mat frame, std::vector<Track> tracks, Primar
                                 std::string primary_decision_reason,
                                 std::string primary_reject_reason,
                                 SourceFrameMetadata source) {
-  if (!initialized_ || (!config_.enable_preview && !config_.enable_recording)) {
+  if (!initialized_ || (!config_.enable_preview && !config_.enable_ros_image &&
+                        !config_.enable_recording)) {
     return;
   }
   {
@@ -379,6 +398,7 @@ VisualizerRecorder::MetricsSnapshot VisualizerRecorder::Metrics() const {
     snapshot.submitted_fps = static_cast<double>(snapshot.submitted_frames) / elapsed;
     snapshot.rendered_fps = static_cast<double>(snapshot.rendered_frames) / elapsed;
     snapshot.previewed_fps = static_cast<double>(snapshot.previewed_frames) / elapsed;
+    snapshot.streamed_fps = static_cast<double>(snapshot.streamed_frames) / elapsed;
     snapshot.written_fps = static_cast<double>(snapshot.written_frames) / elapsed;
   }
   snapshot.queue_wait = Summarize(queue_wait_ms_);
@@ -537,6 +557,27 @@ void VisualizerRecorder::WorkerLoop() {
       ++metrics_.rendered_frames;
       Observe(&queue_wait_ms_, std::chrono::duration<double, std::milli>(dequeued_at - job.enqueued_at).count());
       Observe(&render_ms_, std::chrono::duration<double, std::milli>(rendered_at - render_started_at).count());
+    }
+
+    if (config_.enable_ros_image) {
+      bool streamed = false;
+      if (rendered_frame_callback_) {
+        try {
+          streamed = rendered_frame_callback_(canvas, job.source);
+        } catch (const std::exception &exception) {
+          {
+            std::lock_guard<std::mutex> lock(metrics_mutex_);
+            ++metrics_.stream_errors;
+          }
+          AddError("ROS image overlay publish failed: " + std::string(exception.what()));
+        }
+      }
+      std::lock_guard<std::mutex> lock(metrics_mutex_);
+      if (streamed) {
+        ++metrics_.streamed_frames;
+      } else {
+        ++metrics_.stream_dropped_frames;
+      }
     }
 
     if (config_.enable_preview) {

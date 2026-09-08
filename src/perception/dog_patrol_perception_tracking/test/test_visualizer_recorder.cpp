@@ -168,6 +168,67 @@ TEST(VisualizerRecorderTest, FourLiveModesAreIndependentlyNamedAndValidated) {
   config.enable_preview = true;
   EXPECT_EQ(VisualizerRecorder::ModeName(config), "preview_record");
   EXPECT_TRUE(VisualizerRecorder::ValidateConfig(config, &error)) << error;
+
+  config.enable_preview = false;
+  config.enable_recording = false;
+  config.enable_ros_image = true;
+  EXPECT_EQ(VisualizerRecorder::ModeName(config), "ros_image");
+  EXPECT_TRUE(VisualizerRecorder::ValidateConfig(config, &error)) << error;
+}
+
+TEST(VisualizerRecorderTest, RenderedFrameCallbackReceivesAnnotatedCanvasAndSourceMetadata) {
+  VisualizerRecorder::Config config;
+  config.enable_ros_image = true;
+
+  std::mutex mutex;
+  std::condition_variable changed;
+  cv::Mat received_canvas;
+  SourceFrameMetadata received_source;
+  VisualizerRecorder recorder(
+      config, nullptr,
+      [&mutex, &changed, &received_canvas, &received_source](const cv::Mat &canvas,
+                                                              const SourceFrameMetadata &source) {
+        {
+          std::lock_guard<std::mutex> lock(mutex);
+          received_canvas = canvas.clone();
+          received_source = source;
+        }
+        changed.notify_all();
+        return true;
+      });
+  std::string error;
+  ASSERT_TRUE(recorder.Initialize(cv::Size(64, 64), &error)) << error;
+
+  SourceFrameMetadata source;
+  source.source_timestamp_ns = 1234567890123U;
+  source.optical_frame_id = "camera_link";
+  const cv::Mat frame(64, 64, CV_8UC3, cv::Scalar(3, 5, 7));
+  recorder.Submit(frame, {}, PrimaryTargetResult{}, IdentityManagerResult{}, {}, {}, source);
+
+  {
+    std::unique_lock<std::mutex> lock(mutex);
+    ASSERT_TRUE(changed.wait_for(lock, std::chrono::seconds(1),
+                                 [&received_canvas] { return !received_canvas.empty(); }));
+  }
+  recorder.Shutdown();
+
+  EXPECT_EQ(received_canvas.size(), cv::Size(64, 64));
+  EXPECT_EQ(received_canvas.type(), CV_8UC3);
+  EXPECT_EQ(received_canvas.at<cv::Vec3b>(0, 0), cv::Vec3b(3, 5, 7));
+  EXPECT_GT(cv::norm(received_canvas, frame, cv::NORM_INF), 0.0);
+  EXPECT_EQ(received_source.source_timestamp_ns, source.source_timestamp_ns);
+  EXPECT_EQ(received_source.optical_frame_id, source.optical_frame_id);
+  EXPECT_EQ(recorder.Metrics().streamed_frames, 1U);
+}
+
+TEST(VisualizerRecorderTest, RosImageOutputRequiresAFrameCallback) {
+  VisualizerRecorder::Config config;
+  config.enable_ros_image = true;
+  VisualizerRecorder recorder(config);
+  std::string error;
+  EXPECT_FALSE(recorder.Initialize(cv::Size(8, 8), &error));
+  EXPECT_NE(error.find("rendered frame callback"), std::string::npos);
+  recorder.Shutdown();
 }
 
 TEST(VisualizerRecorderTest, ActiveRecordingRequiresFfv1MkvPathAndBoundedQueue) {

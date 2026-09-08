@@ -67,6 +67,7 @@ class PerceptionConfigMaterializer {
 
   struct VisualizerInput {
     bool enable_preview{false};
+    bool enable_ros_image{false};
     bool enable_recording{false};
     std::string recording_output_root{"data/diagnostics/live_overlays"};
     std::string recording_path{"data/diagnostics/live_overlays/tracking_overlay.mkv"};

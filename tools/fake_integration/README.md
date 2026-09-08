@@ -44,6 +44,7 @@ ros2 run dog_patrol_perception_tracking dog_patrol_perception_tracking_node \
   -p camera.input_mode:=ros_image \
   -p camera.image_topic:=/left_camera/image_raw \
   -p visualization.enable:=true \
+  -p visualization.publish_image:=true \
   -p recording.enable:=false
 ```
 
@@ -61,6 +62,7 @@ ros2 run dog_patrol_perception_tracking dog_patrol_perception_tracking_node \
 ros2 topic echo /mission/event
 ros2 topic echo /perception/selected_target_bbox
 ros2 topic hz /perception/selected_target_bbox
+ros2 topic hz /perception/tracking_overlay
 ```
 
 真实 tracking 和导航协调器联调时，推荐先用测试 A 确认坐标、外参和 planner，再切换

@@ -45,6 +45,9 @@ dog_patrol_perception_tracking_node:
       reid_model_path: ""
     visualization:
       enable: false
+      publish_image: true
+      image_topic: "/perception/tracking_overlay"
+      window: false
       queue_capacity: 4
     recording:
       enable: false
