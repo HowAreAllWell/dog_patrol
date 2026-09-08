@@ -1,4 +1,30 @@
 # worklog
+## 2026-09-08 - 修复录屏视频白名单注册的异常帧数问题并完成 zby 注册
+
+- 现场日志确认人脸节点实际完成了 649 次 TensorRT 推理，授权流程收到的是
+  `not_passed`，不是节点未执行或进程崩溃；较早的一次任务曾出现 `passed`，说明识别链路本身可用。
+- 发现 `/home/orin/Videos/Screencasts/face.mp4` 的 OpenCV 元数据错误报告为 10583 帧、1000 FPS，
+  实际只有 142 个可解码帧，导致旧注册器抽取不存在的帧并得到不足模板。注册器现在先统计实际可解码
+  帧数，再按全视频范围采样，并限制异常高帧率录屏的候选推理数量。
+- 使用该视频替换 `zby` 白名单：生成 12 个模板，5 个独立留出帧全部匹配到 `zby`，相似度范围
+  `0.9160`--`0.9985`，生产阈值为 `0.55`；旧模板备份到
+  `face/whitelist_backups/zby/20260908_205427_979053/`。
+- 真机 TensorRT 预检返回 `face preflight ready`；注册器回归测试 13 项通过。运行中的人脸 provider
+  需要重启后重新加载新白名单目录，不能依赖进程启动前的旧内存数据库。
+
+## 2026-09-08 - 增加可复用的人脸白名单注册工具
+
+- 新增 `dog_patrol_perception_face.enrollment` 和 `perception_face_enroll` 入口，统一使用生产 face
+  detector、五点对齐和 SFace TensorRT recognition，不再依赖不存在的 `app/manage_whitelist.py`
+  或不兼容的 `gallery.npz` 格式。
+- 支持单张图片、视频和图片目录；执行单人、置信度、人脸尺寸、亮度和清晰度检查，视频从全程候选中
+  按人脸像素尺度分布选择多模板，避免运行时尺度加权导致远近人脸无法匹配。
+- 视频保留帧不参与模板生成，并与完整现有白名单竞争；只有全部匹配到待注册身份且超过生产阈值才写入。
+- 模板通过白名单目录外 staging 完整生成和验证后再切换；同名身份默认拒绝覆盖，`--replace` 会将
+  旧模板备份到 `whitelist_backups/<name>/<timestamp>/`。
+- 增加身份名安全、采样隔离、尺度选择、竞争身份拒绝、模板加载、同名保护、备份和一次性 iterable
+  等回归测试，并在 face/资产 README 中记录统一操作方式。
+
 ## 2026-09-08 - 将感知监视器画面发布为 ROS Image
 
 - `VisualizerRecorder` 在原有异步 overlay worker 中增加渲染画面回调；tracking、identity、primary

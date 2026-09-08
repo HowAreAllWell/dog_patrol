@@ -79,3 +79,18 @@ find tracking face voice -type f -not -path '*/whitelist/*' -print0 | sort -z | 
 ```
 
 白名单应由受控资产系统单独记录校验和，不应公开提交。
+
+新增或更新白名单人员使用 face 包内的统一注册工具，不生成 `gallery.npz`：
+
+```bash
+source /opt/ros/humble/setup.bash
+source /mnt/nvme/workspace/dog_patrol/install/setup.bash
+source /mnt/nvme/venv/m20_nav/bin/activate
+python3 -m dog_patrol_perception_face.enrollment \
+  --name person_001 \
+  --source ~/person_001.mp4 \
+  --assets-root /mnt/nvme/workspace/dog_patrol/src/perception/dog_patrol_perception_assets_20260813
+```
+
+工具只在质量检查和保留帧竞争验证全部通过后，写入 `face/whitelist/<name>/*.npy`。更新已有身份
+必须显式增加 `--replace`；操作前停止感知，完成后重新启动以加载新白名单。

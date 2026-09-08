@@ -26,6 +26,48 @@ ros2 launch dog_patrol_perception_face face.launch.py \
   config_file:=/absolute/path/to/face.yaml
 ```
 
+## 注册白名单人员
+
+白名单注册使用与生产 provider 完全相同的 face detector、五点对齐和 SFace TensorRT recognition
+模型，不需要重新训练。每个身份保存为 `whitelist/<name>/*.npy` 多模板目录；模板文件名携带人脸
+像素尺寸，运行时按当前 `size_sigma` 对余弦相似度做尺度加权后取该身份的最高模板分数。
+
+先停止感知任务，准备只包含一个人的清晰图片、视频或图片目录。使用统一虚拟环境执行：
+
+```bash
+cd /mnt/nvme/workspace/dog_patrol
+source /opt/ros/humble/setup.bash
+source install/setup.bash
+source /mnt/nvme/venv/m20_nav/bin/activate
+
+python3 -m dog_patrol_perception_face.enrollment \
+  --name person_001 \
+  --source ~/person_001.mp4 \
+  --report /tmp/person_001_enrollment.json
+```
+
+工具默认从 `DOG_PATROL_ASSETS_ROOT` 读取资产；未设置时使用当前工作区的
+`dog_patrol_perception_assets_20260813`。也可通过 `--assets-root`、`--config`、
+`--detector-engine`、`--recognition-engine` 和 `--whitelist-dir` 显式覆盖。
+
+视频默认每 5 帧检查一次，要求每个候选画面只有一张脸，并检查置信度、人脸尺寸、亮度和清晰度；
+从合格候选中按人脸像素尺度分布选择 12 个模板，另留 6 帧不参与注册。保留帧会同时与所有现有
+身份竞争，必须全部匹配到新身份且超过 `similarity_threshold`，否则不写白名单。单张图片可以注册，
+但没有独立保留帧验证，可靠性低于视频或多图目录。
+
+同名身份默认拒绝覆盖。确认更新已有人员时使用：
+
+```bash
+python3 -m dog_patrol_perception_face.enrollment \
+  --name person_001 \
+  --source ~/person_001_new.mp4 \
+  --replace
+```
+
+旧模板会移动到白名单同级的 `whitelist_backups/<name>/<timestamp>/`，staging 目录也位于白名单
+目录外，避免 readiness/provider 在写入中途加载半套模板。注册完成后重新启动感知，使 face readiness
+和 provider 重新加载白名单。`.npy` 是生物特征数据，不应提交到公开仓库。
+
 `face_metrics` 定期及退出时记录输入、队列丢弃、过期丢弃、窗口和推理耗时；最终整流程脚本同时保存
 CPU/GPU/RAM、温度、阶段耗时和 tracking preview 指标。更详细的模块边界见
 [`COLLABORATION.md`](COLLABORATION.md)。

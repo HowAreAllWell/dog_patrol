@@ -37,6 +37,7 @@ setup(
         "console_scripts": [
             "perception_face_provider = dog_patrol_perception_face.provider:main",
             "perception_face_readiness = dog_patrol_perception_face.readiness_node:main",
+            "perception_face_enroll = dog_patrol_perception_face.enrollment:main",
         ],
     },
 )
