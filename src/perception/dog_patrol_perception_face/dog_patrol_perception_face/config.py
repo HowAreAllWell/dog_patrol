@@ -23,7 +23,7 @@ class FaceConfig:
     crop_freshness_timeout_seconds: float = 1.0
     overlay_inference_hz: float = 10.0
     face_min_score: float = 0.5
-    face_min_box_ratio: float = 0.08
+    face_min_box_ratio: float = 0.03
     stop_after_matched: bool = True
     matched_hold_seconds: float = 5.0
 

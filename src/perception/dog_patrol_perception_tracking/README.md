@@ -53,7 +53,7 @@ SID 生效配置的镜像；`MotTracker` 的 `config/bot_sort.yaml` 解析仍由
 - `tracker.*`
 - `target.lost_threshold_frames`（tracking/identity 内部的帧级生命周期阈值）
 - `target.lost_event_timeout_sec`（任务级最终 `TARGET_LOST` 的 source-time 超时，当前为 10 s）
-- `target.handled_ignore_absence_sec`（核验或持续跟踪结束后，上一目标需要连续不可见多久才允许再次被选中；当前为 30 s）
+- `target.handled_ignore_absence_sec`（核验或持续跟踪结束后，上一目标需要连续不可见多久才允许再次被选中；当前为 60 s）
 - `mission.state_topic` / `mission.event_topic` / `mission.selected_target_bbox_topic`
 - `perception.camera_optical_frame_id`
 - `visualization.enable`（生成 tracking/identity/primary/face overlay；默认 `false`）

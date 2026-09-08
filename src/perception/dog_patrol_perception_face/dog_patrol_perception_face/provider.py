@@ -354,6 +354,8 @@ class FaceEvidenceController:
         verifier: FaceVerifier,
     ) -> tuple[FaceEvidenceResult, str, tuple[int, int, int, int] | None]:
         deadline = time.monotonic() + self._window_timeout
+        last_detail = ""
+        last_source_box = None
         while True:
             crop_and_arrival = self._pop_latest_crop(
                 request, generation, cancel_event, deadline
@@ -366,6 +368,10 @@ class FaceEvidenceController:
                 )
             crop, arrival_ns = crop_and_arrival
             verdict = self._verify(verifier, crop)
+            if verdict.detail:
+                last_detail = verdict.detail
+            if verdict.box is not None:
+                last_source_box = _to_source_box(verdict.box, crop)
             with self._condition:
                 newer_crop_waiting = bool(self._queue)
             if (
@@ -392,10 +398,13 @@ class FaceEvidenceController:
             if verdict.accepted:
                 return FaceEvidenceResult.PASSED, verdict.detail, box
             if time.monotonic() >= deadline:
+                detail = "verification window elapsed without a match"
+                if last_detail:
+                    detail += f"; last_verdict={last_detail}"
                 return (
                     FaceEvidenceResult.NOT_PASSED,
-                    "verification window elapsed without a match",
-                    None,
+                    detail,
+                    last_source_box,
                 )
 
     def _verify(self, verifier: FaceVerifier, crop: DecodedCrop):

@@ -633,7 +633,7 @@ string detail
 |---|---:|---|
 | `target.lost_threshold_frames` | `100` 帧 | tracker/identity 内部目标生命周期阈值 |
 | `target.lost_event_timeout_sec` | `10.0 s` | 任务级最终 `TARGET_LOST` 阈值 |
-| `target.handled_ignore_absence_sec` | `30.0 s` | 已处理目标再次被选中的抑制时间，不是公共丢失超时 |
+| `target.handled_ignore_absence_sec` | `60.0 s` | 已处理目标再次被选中的抑制时间，不是公共丢失超时 |
 | 当前相机输入 | `10 Hz` | 任务级丢失时间按 source timestamp 计算 |
 | 当前 bbox 图像 | `1280x1024` | 导航投影使用原图坐标 |
 

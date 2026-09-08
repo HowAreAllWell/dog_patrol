@@ -134,7 +134,8 @@ class PerceptionAuthorizationNode(Node):
                 "authorization_evidence "
                 f"state_seq={session.observed_state_seq} target={session.target_id} "
                 f"stage={stage.value} provider={provider.value} "
-                f"result={result.value} stage_elapsed_ms={stage_elapsed_ms:.3f}"
+                f"result={result.value} detail={str(msg.detail).strip()!r} "
+                f"stage_elapsed_ms={stage_elapsed_ms:.3f}"
             )
             self._publish_transition(transition, evidence=msg)
 

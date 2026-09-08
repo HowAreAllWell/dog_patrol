@@ -55,7 +55,7 @@ class ProductionFaceVerifier(FaceVerifier):
         temporal_window=10,
         min_frames_for_decision=5,
         min_score=0.5,
-        min_box_ratio=0.08,
+        min_box_ratio=0.03,
     ):
         self._detector = detector
         self._recognition = recognition

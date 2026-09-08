@@ -26,7 +26,7 @@ dog_patrol_perception_tracking_node:
       # Internal tracker lifecycle only; final mission loss is time-based below.
       lost_threshold_frames: 100
       lost_event_timeout_sec: 10.0
-      handled_ignore_absence_sec: 30.0
+      handled_ignore_absence_sec: 60.0
     mission:
       state_topic: "/mission/state"
       event_topic: "/mission/event"

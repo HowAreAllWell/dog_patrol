@@ -21,6 +21,6 @@ crop_freshness_timeout_seconds: 1.0
 # faces so recognition only runs on usable crops.
 overlay_inference_hz: 10.0
 face_min_score: 0.5
-face_min_box_ratio: 0.08
+face_min_box_ratio: 0.03
 stop_after_matched: true
 matched_hold_seconds: 5.0

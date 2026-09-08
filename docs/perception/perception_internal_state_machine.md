@@ -386,7 +386,7 @@ PATROL -> CONFIRM_TARGET -> timeout -> PATROL -> CONFIRM_TARGET -> ...
 `PATROL state_seq`。新的巡检序号允许感知重新评估画面，因此不能把旧序号的
 `TARGET_CONFIRMED` 或 bbox 继续带入新任务。当前感知侧实际保留的 handled-ID 机制
 只针对从 `VERIFY_IDENTITY` 或 `TRACK_INTRUDER` 正常结束后回到巡检的目标，参数是
-`target.handled_ignore_absence_sec=30.0`；它不是确认超时专用冷却，也不适用于把目标
+`target.handled_ignore_absence_sec=60.0`；它不是确认超时专用冷却，也不适用于把目标
 永久屏蔽。
 
 确认超时后的实际行为是：

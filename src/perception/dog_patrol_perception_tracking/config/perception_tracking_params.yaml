@@ -50,7 +50,7 @@ dog_patrol_perception_tracking_node:
       max_area_ratio: 4.0
       pending_recovery_frames: 3
       lost_event_timeout_sec: 10.0
-      handled_ignore_absence_sec: 30.0
+      handled_ignore_absence_sec: 60.0
 
     mission:
       state_topic: "/mission/state"

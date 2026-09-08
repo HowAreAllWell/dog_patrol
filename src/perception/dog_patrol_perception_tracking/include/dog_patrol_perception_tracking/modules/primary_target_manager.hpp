@@ -24,7 +24,7 @@ class PrimaryTargetManager {
     float min_area_ratio{0.25F};
     float max_area_ratio{4.0F};
     int pending_recovery_frames{3};
-    Duration handled_ignore_absence{std::chrono::seconds{30}};
+    Duration handled_ignore_absence{std::chrono::seconds{60}};
   };
 
   explicit PrimaryTargetManager(Config config);

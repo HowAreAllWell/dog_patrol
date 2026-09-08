@@ -338,7 +338,7 @@ class PerceptionTrackingNode : public rclcpp::Node {
     this->declare_parameter<double>("target.max_area_ratio", 4.0);
     this->declare_parameter<int>("target.pending_recovery_frames", 3);
     this->declare_parameter<double>("target.lost_event_timeout_sec", 10.0);
-    this->declare_parameter<double>("target.handled_ignore_absence_sec", 30.0);
+    this->declare_parameter<double>("target.handled_ignore_absence_sec", 60.0);
 
     this->declare_parameter<std::string>("mission.state_topic", "/mission/state");
     this->declare_parameter<std::string>("mission.event_topic", "/mission/event");
