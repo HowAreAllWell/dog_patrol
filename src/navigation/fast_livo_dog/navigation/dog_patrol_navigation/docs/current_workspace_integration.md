@@ -62,6 +62,61 @@ perception bbox + /livox/lidar
   -> 原有局部控制链
 ```
 
+### 1.1 导航协调器的内部结构
+
+`navigation_mission_coordinator.py` 是 ROS 边界和任务编排层，不再把所有导航算法状态
+集中放在一个类中。它仍然是唯一负责以下工作的节点：
+
+- 订阅 `/mission/state`、bbox、雷达和 odom；
+- 根据权威 `MissionState` 执行一次状态进入动作；
+- 驱动各内部组件，并在组件返回结果后发布 topic、事件和诊断；
+- 在异步 planner 结果返回时校验当前 `state_seq`、任务状态、目标 ID 和 planner 类型；
+- 维护 `/mission_global_path` 的发布、FollowPath 取消以及 waypoint pause/resume 通知。
+
+它不拥有第二套业务状态机，也不直接发布速度或最终 `/global_path`。
+
+内部模块职责如下：
+
+| 模块 | 负责内容 | 不负责内容 |
+|---|---|---|
+| `navigation_policy.py` | 将 `MissionState` 映射为状态进入动作和周期执行权限 | 保存运行状态、执行 ROS 操作 |
+| `navigation_target_fusion.py` | bbox/雷达同步、点云准备、投影、TF、目标滤波、新鲜度和融合健康 | 修改任务状态、调用 planner、发布路径 |
+| `navigation_motion_controller.py` | standoff 目标、接近/跟踪重规划节流、距离/速度/持续时间到达判断 | ROS action、topic 发布、任务状态转换 |
+| `navigation_planner_client.py` | `ComputePathToPose` 异步请求、generation、旧请求取消和结果回调 | 判断业务状态是否接受结果 |
+| `patrol_recovery_controller.py` | 中断位姿、恢复路径缓存重发、恢复到达保持和 resume 标记 | 发布 mission event、控制 waypoint 节点 |
+| `target_estimator.py` | 点云 ROI、深度聚类和目标位置估计/滤波基础算法 | 订阅 ROS topic、推进总任务状态 |
+
+组件之间的调用顺序固定为：
+
+```text
+/mission/state
+  -> navigation_mission_coordinator
+  -> navigation_policy
+  -> fusion / motion / planner / recovery
+  -> coordinator 校验结果
+  -> /mission/event、/mission_global_path、诊断 topic
+```
+
+关键一致性约束：
+
+1. 状态切换先更新当前状态和目标，再清理不属于新状态的 fusion、motion 和 planner
+   缓存；旧 planner action 通过 generation 失效，迟到结果不能重新发布路径。
+2. 目标路径只写入 `/mission_global_path`，waypoint 路径只写入
+   `/waypoint_global_path`；`navigation_path_mux` 按 `/mission/state` 选择来源并唯一发布
+   `/global_path`。
+3. 接近和跟踪 planner 结果必须同时匹配当前任务状态、当前 `state_seq`、当前
+   `target_id` 和仍然有效的目标位置；目标在 action 计算期间移动超过阈值时丢弃旧路径，
+   等待下一次规划。
+4. 恢复路径由协调器缓存并周期重发；恢复完成或超时切回 `PATROL` 时清理任务路径，
+   超时使用 `resume_from_current` 从当前位置重新规划，避免沿旧中断路径回头。
+5. 运动组件只返回 `stop`、`arrived` 或 planner goal 等纯决策，真正的 ROS 发布和任务
+   事件仍集中在协调器，便于审查状态序号和发布顺序。
+
+这次拆分保持任务状态、topic、消息字段、参数含义和底层 Pure Pursuit、RL/PRIEST、DWB
+控制链的外部约定不变。对于旧实现中可能造成错误运动或永久等待的边界，重构同时明确了
+更严格的安全处理：planner 失败按请求上下文归属，失败重试受节流限制，过期结果不能影响
+新任务；恢复时 TF 不可用或已经到位保持时只发送停止，不继续重发运动路径。
+
 ## 2. 节点和启动所有权
 
 ### 2.1 总入口
@@ -148,7 +203,7 @@ ros2 launch dog_patrol_navigation navigation_mission_coordinator.launch.py \
 | `/perception/selected_target_bbox` | `dog_patrol_interfaces/msg/TargetBoundingBox` | 感知 tracking | 当前目标框；必须携带目标 ID、图像尺寸和 `camera_link` frame |
 | `/livox/lidar` | `sensor_msgs/msg/PointCloud2` | Livox/FAST-LIVO 驱动 | 雷达点云；默认 frame 必须是 `livox_frame` |
 | `/odom` | `nav_msgs/msg/Odometry` | FAST-LIVO/odom bridge | 当前速度和 odom 数据；用于停止确认 |
-| `/compute_path_to_pose` | `nav2_msgs/action/ComputePathToPose` | Nav2 planner server | 协调器用目标前 3 m 的地图位姿请求全局路径 |
+| `/compute_path_to_pose` | `nav2_msgs/action/ComputePathToPose` | Nav2 planner server | 协调器为目标接近、跟踪和巡检恢复请求全局路径 |
 
 ### 3.2 导航协调器的输出
 
@@ -261,14 +316,20 @@ Pure Pursuit、RL 或 DWB。下游只订阅 `dog_patrol_navigation` 中 mux 输�
 
 ### 4.4 APPROACH_TARGET
 
-协调器每次使用最新的目标地图位置计算一个距目标约 3.0 m 的 standoff goal，并调用
-Nav2 `ComputePathToPose`。目标在接近过程中可以移动，因此不是一次性固定终点：
+协调器每次使用最新的目标地图位置计算一个距目标约 1.0 m 的 planner goal，并调用
+Nav2 `ComputePathToPose`；是否停止仍由实时雷达平面距离的 3.0 m 条件独立决定。目标在
+接近过程中可以移动，因此不是一次性固定终点：
 
 - 定时重规划周期为 `motion.approach_replan_period=0.50 s`；
 - 目标相对上一次规划移动至少 `motion.target_replan_distance=0.25 m` 时提前重规划；
 - 同时只有一个 action request 在飞行，实际频率受 planner 计算时间限制；
 - action 返回路径后才更新 `/mission_global_path`，失败不会发布半成品路径；mux 只在
   `APPROACH_TARGET`、`VERIFY_IDENTITY`、`TRACK_INTRUDER` 和 `RECOVER_PATROL` 转发该路径；
+- planner 不可用、目标被拒绝、请求异常或返回空路径都会绑定当前
+  `state_seq + target_id + plan_kind` 记录；过期请求的失败不会污染新任务。只有确认
+  action 可用并实际发起的 planner 尝试才写入请求节流时间；action 未就绪时不伪造时间，
+  等待下一次可用性检查。已发起的恢复请求按 `approach_replan_period` 节流后重试；目标
+  重规划失败或结果过期时先清空旧目标路径并停止，不能继续沿旧目标路径运动；
 - 目标过期或 TF 暂时不可用时立即清空路径并停止；连续的融合、TF 或 planner 技术
   故障达到 `technical_error_timeout` 后才报告 `EXECUTION_ERROR`。单纯 bbox 超时
   不会由导航自动改写全局任务状态，目标丢失事件应由感知端发布 `TARGET_LOST`。
@@ -307,8 +368,12 @@ Nav2 `ComputePathToPose`。目标在接近过程中可以移动，因此不是�
 - 暂停 waypoint 巡逻；
 - 使用进入 `APPROACH_TARGET` 时保存的 `map -> base_footprint` 位姿作为恢复目标；
 - 恢复 planner 返回的路径后，协调器缓存并按 `stop_republish_period` 重发
-  `/mission_global_path`，直到到达中断位姿，避免一次性 volatile 消息丢失导致只有全局
-  显示而没有局部路径；
+  `/mission_global_path`，直到进入中断位姿容差；进入容差后清空运动路径并保持停止，
+  避免到位保持期间旧路径继续驱动；
+- 当前位姿或 TF 暂时不可用时只清空路径并保持停止；已经进入恢复位置容差且正在等待
+  稳定停车时同样只保持停止，不继续重发恢复运动路径；
+- 从恢复运动路径切换到停止时先立即发布一次空路径，后续空路径按
+  `stop_republish_period` 周期重发；
 - 到达位置容差 `0.25 m` 且速度稳定后发布 `/waypoint_sequence/resume` 和
   `PATROL_RECOVERY_COMPLETE`；不等待 waypoint 发布新的非空路径；
 - 如果没有可用的中断位姿，协调器不伪造恢复目标，而是清理任务并直接发布
@@ -477,7 +542,7 @@ src/navigation/fast_livo_dog/navigation/dog_patrol_navigation/config/m20_patrol_
 | `waypoint_replan_period` | `1.0 s` | 普通巡检 waypoint 路径的重新规划周期 |
 
 这里的 `waypoint_goal_tolerance` 只用于普通巡检 waypoint 的切换，不是目标接近阶段的
-`arrival_distance_tolerance=0.25 m`。waypoint 发布器每次只向当前 `current_index` 的
+`arrival_distance_tolerance=0.10 m`。waypoint 发布器每次只向当前 `current_index` 的
 目标请求并发布一段 `/waypoint_global_path`，不会把后续 waypoint 的路径拼接到当前路径
 中。导航协调器的目标路径和恢复路径发布到 `/mission_global_path`；两路都只通过 mux
 进入最终 `/global_path`。

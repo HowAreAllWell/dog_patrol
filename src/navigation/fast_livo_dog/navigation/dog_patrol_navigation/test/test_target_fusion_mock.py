@@ -7,7 +7,7 @@ from std_msgs.msg import Header
 from sensor_msgs.msg import PointField
 from sensor_msgs_py import point_cloud2
 
-from dog_patrol_navigation.navigation_mission_coordinator import (
+from dog_patrol_navigation.navigation_target_fusion import (
     device_lidar_to_camera,
     device_lidar_to_base,
     point_cloud_xyz,

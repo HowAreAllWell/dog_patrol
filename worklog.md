@@ -1,4 +1,45 @@
 # worklog
+## 2026-09-08 - 严格审查导航重构的 planner 与恢复边界
+
+- 核对状态切换：`TargetMotionController.reset_arrival()` 只清除当前状态版本的到达保持，
+  不清除同一目标的 planner 目标基线和节流时间；目标上下文真正 reset 时才全部清除。
+- 修正 planner 记时边界：`NavigationPlannerClient` 只有在 action server 已就绪、确实开始
+  一次 planner 尝试时才通知协调器写入目标/恢复节流时间；action 未就绪不留下假的请求时间，
+  发送异常仍保留已确认可用的尝试节流，避免失败请求 10 Hz 空转。
+- 迟到 planner 结果继续由 generation、`state_seq`、`target_id` 和 `plan_kind` 四层校验；
+  旧请求只被丢弃或取消，不会清理新请求或重新发布旧路径。
+- 核对恢复收口：恢复到位和无中断位姿各自只沿用旧版完成顺序执行一次必要的空路径清理；
+  到位保持期间不重发运动路径。恢复被 reset 或异常切出时清理残留中断位姿，避免下一次恢复
+  使用旧断点。
+- 通过 `dog_patrol_navigation` 的 49 项测试；补齐 `target_estimator.py` 静态检查空行。
+
+## 2026-09-08 - 拆分导航任务协调器内部职责
+
+- `navigation_mission_coordinator.py` 保留 ROS 节点边界、任务状态进入动作、订阅/发布、
+  定时调度和最终业务校验，不再同时持有目标融合、目标运动、Nav2 action 和巡检恢复的
+  全部内部状态。
+- 新增 `navigation_target_fusion.py`，负责 bbox/雷达时间同步、点云准备、投影、TF 转换、
+  目标位置滤波、目标新鲜度和融合健康判断；它只通过回调发布目标点和位置就绪结果，
+  不修改总任务状态。
+- 新增 `navigation_motion_controller.py`，负责目标 standoff 计算、接近/跟踪重规划节流、
+  目标移动阈值和到达停车保持计时；它只返回决策，不创建 ROS action 或发布路径。
+- 新增 `navigation_planner_client.py`，集中管理 `ComputePathToPose` 的异步请求、请求代数、
+  旧 goal 取消和结果回调；状态序号、目标 ID 和路径类型的业务接收条件仍由协调器校验。
+- 新增 `patrol_recovery_controller.py`，负责中断位姿恢复、恢复路径缓存与周期重发、
+  稳定停车判断和恢复完成标记；恢复成功与超时后的 waypoint resume 仍由协调器发布。
+- `navigation_policy.py` 继续作为无状态的任务状态到导航策略映射。`navigation_path_mux`
+  仍是最终 `/global_path` 的唯一发布者，协调器只发布 `/mission_global_path`，因此没有
+  恢复多发布者路径竞争的行为变化。
+- 为运动、恢复和异步 planner generation 增加单元测试，并完成
+  `dog_patrol_navigation` 构建和全部 Python 模块编译检查。
+- 对照重构前的整体协调器保持外部任务流程和接口不变，但没有机械保留已知的边界风险：
+  状态切换只清除当前状态的到达保持，目标 planner 节流仍按目标上下文维护；失败 planner
+  请求携带 `state_seq + target_id + plan_kind`，过期失败不污染新任务，恢复失败按重规划
+  周期重试，避免失败结果导致 10 Hz 忙循环；恢复时 TF 不可用或已经到位保持只发送停止，
+  从有效运动路径切换到停止时立即清空一次，后续停止消息才按周期重发；目标重规划失败
+  或结果过期时清除旧目标路径，不能继续朝过期位置运动。
+- 最终导航包测试为 `47 passed`。
+
 ## 2026-09-07 - 将路径 mux 迁移到任务导航包
 
 - `navigation_path_mux` 原先放在 `move` 包中，但它读取 `/mission/state` 并按任务状态仲裁

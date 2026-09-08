@@ -239,6 +239,7 @@ class TargetEstimator:
 
         box_width = float(bbox.x_max - bbox.x_min)
         box_height = float(bbox.y_max - bbox.y_min)
+
         def roi_mask(horizontal: float, top: float, bottom: float) -> np.ndarray:
             horizontal = float(np.clip(horizontal, 0.0, 0.49))
             top = float(np.clip(top, 0.0, 0.49))

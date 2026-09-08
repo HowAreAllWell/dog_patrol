@@ -36,9 +36,9 @@ def navigation_policy(
 ) -> NavigationPolicy:
     """Map the current global state directly to navigation actions.
 
-    ``previous_mission_state`` is only used to preserve a freshly restored patrol
-    path when the global supervisor changes RECOVER_PATROL to PATROL. It is not
-    an independent state machine.
+    ``previous_mission_state`` is retained for the transition-aware caller API;
+    transition-specific path handling belongs to the coordinator and is not an
+    independent state machine here.
     """
     try:
         state = MissionStateValue(int(mission_state))
@@ -50,7 +50,6 @@ def navigation_policy(
     if state == MissionStateValue.STARTUP:
         return NavigationPolicy(description="initializing")
     if state == MissionStateValue.PATROL:
-        returning_from_recovery = previous_mission_state == MissionStateValue.RECOVER_PATROL
         return NavigationPolicy(
             description="patrolling",
             pause_patrol=False,
