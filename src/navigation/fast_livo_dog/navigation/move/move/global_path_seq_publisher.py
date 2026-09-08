@@ -559,28 +559,72 @@ class GlobalPathSequencePublisher(Node):
 
         self._delete_waypoint(idx, f"deleted waypoint {idx + 1}, nearest click dist={dist:.2f} m")
 
+    @staticmethod
+    def _progress_after_waypoint_removal(
+        current_index: int,
+        sequence_done: bool,
+        removed_index: int,
+        remaining_count: int,
+    ) -> tuple[int, bool, bool]:
+        """Keep completion progress stable after removing one waypoint.
+
+        The publisher represents completed points implicitly: points before
+        ``current_index`` are complete, and ``sequence_done`` means every
+        remaining point is complete.  Removing a point must therefore adjust
+        only the index needed to keep the same logical target.
+        """
+        if remaining_count <= 0:
+            return 0, True, True
+
+        if sequence_done:
+            return min(current_index, remaining_count - 1), True, False
+
+        if removed_index < current_index:
+            return current_index - 1, False, False
+
+        if removed_index == current_index:
+            # The removed point was the final pending point.  All remaining
+            # points were already completed, so do not reopen the last one.
+            if current_index >= remaining_count:
+                return remaining_count - 1, True, True
+            return current_index, False, True
+
+        return current_index, False, False
+
+    @staticmethod
+    def _waypoint_edit_affects_active_goal(
+        current_index: int,
+        sequence_done: bool,
+        edited_index: int,
+    ) -> bool:
+        """Return whether editing a waypoint requires a new active path."""
+        return not sequence_done and edited_index == current_index
+
     def _delete_waypoint(self, idx: int, detail: str):
         if idx < 0 or idx >= len(self.waypoints):
             return
 
-        clear_paths = idx <= self.current_index
+        previous_index = self.current_index
+        previous_sequence_done = self.sequence_done
         removed = self.waypoints.pop(idx)
-        if not self.waypoints:
-            self.current_index = 0
-            self.sequence_done = True
-            clear_paths = True
-        else:
-            if idx < self.current_index:
-                self.current_index -= 1
-            elif idx == self.current_index:
-                self.current_index = min(self.current_index, len(self.waypoints) - 1)
-            self.sequence_done = False
+        (
+            self.current_index,
+            self.sequence_done,
+            plan_affected,
+        ) = self._progress_after_waypoint_removal(
+            previous_index,
+            previous_sequence_done,
+            idx,
+            len(self.waypoints),
+        )
 
-        self.sequence_version += 1
-        self._invalidate_planning_request("waypoint deleted")
-        self._last_path = None
+        if plan_affected:
+            self.sequence_version += 1
+            self._invalidate_planning_request("waypoint deleted")
+            self._last_path = None
+
         self._interactive_markers_dirty = True
-        if clear_paths:
+        if plan_affected:
             self._publish_empty_paths()
         self._publish_waypoints()
         self._publish_status(f"{detail}: ({removed.x:.2f}, {removed.y:.2f})")
@@ -600,13 +644,18 @@ class GlobalPathSequencePublisher(Node):
 
         old = self.waypoints[idx]
         self.waypoints[idx] = Waypoint(waypoint.x, waypoint.y, old.yaw)
-        self.sequence_version += 1
-        self._invalidate_planning_request("waypoint replaced")
         self._interactive_markers_dirty = True
-        if idx <= self.current_index:
+
+        if self._waypoint_edit_affects_active_goal(
+            self.current_index,
+            self.sequence_done,
+            idx,
+        ):
+            self.sequence_version += 1
+            self._invalidate_planning_request("waypoint replaced")
             self._last_path = None
             self._publish_empty_paths()
-        self.sequence_done = False
+
         self._publish_waypoints()
         self._publish_status(
             f"replaced waypoint {idx + 1}: ({old.x:.2f}, {old.y:.2f}) -> "
@@ -961,12 +1010,17 @@ class GlobalPathSequencePublisher(Node):
         if feedback.event_type != InteractiveMarkerFeedback.MOUSE_UP:
             return
 
-        self.sequence_version += 1
-        self._invalidate_planning_request("waypoint dragged")
-        self.sequence_done = False
-        if idx <= self.current_index:
+        if self._waypoint_edit_affects_active_goal(
+            self.current_index,
+            self.sequence_done,
+            idx,
+        ):
+            self.sequence_version += 1
+            self._invalidate_planning_request("waypoint dragged")
             self._last_path = None
             self._publish_empty_paths()
+
+        self._interactive_markers_dirty = True
         self._publish_waypoints()
         self._publish_status(
             f"dragged waypoint {idx + 1}: ({old.x:.2f}, {old.y:.2f}) -> "
@@ -1002,22 +1056,27 @@ class GlobalPathSequencePublisher(Node):
         if not self.waypoints:
             return
         removed_index = len(self.waypoints) - 1
+        previous_index = self.current_index
+        previous_sequence_done = self.sequence_done
         removed = self.waypoints.pop()
-        self.sequence_version += 1
-        self._invalidate_planning_request("waypoint undo")
+        (
+            self.current_index,
+            self.sequence_done,
+            plan_affected,
+        ) = self._progress_after_waypoint_removal(
+            previous_index,
+            previous_sequence_done,
+            removed_index,
+            len(self.waypoints),
+        )
+
+        if plan_affected:
+            self.sequence_version += 1
+            self._invalidate_planning_request("waypoint undo")
+
         self._interactive_markers_dirty = True
-        clear_paths = removed_index <= self.current_index
-        if not self.waypoints:
-            self.current_index = 0
-            self.sequence_done = True
-            clear_paths = True
-        elif self.current_index >= len(self.waypoints):
-            self.current_index = max(0, len(self.waypoints) - 1)
-            self.sequence_done = False
-        else:
-            self.sequence_done = False
-        self._last_path = None
-        if clear_paths:
+        if plan_affected:
+            self._last_path = None
             self._publish_empty_paths()
         self._publish_waypoints()
         self._publish_status(

@@ -128,3 +128,71 @@ def test_advance_if_reached_does_not_advance_outside_tolerance():
     assert not advanced
     assert node.current_index == 0
     assert calls == []
+
+
+def test_removing_completed_waypoint_preserves_completion_progress():
+    current_index, sequence_done, plan_affected = (
+        GlobalPathSequencePublisher._progress_after_waypoint_removal(
+            current_index=2,
+            sequence_done=True,
+            removed_index=2,
+            remaining_count=2,
+        )
+    )
+
+    assert current_index == 1
+    assert sequence_done
+    assert not plan_affected
+
+
+def test_removing_middle_waypoint_keeps_previous_and_next_progress():
+    current_index, sequence_done, plan_affected = (
+        GlobalPathSequencePublisher._progress_after_waypoint_removal(
+            current_index=1,
+            sequence_done=False,
+            removed_index=1,
+            remaining_count=2,
+        )
+    )
+
+    assert current_index == 1
+    assert not sequence_done
+    assert plan_affected
+
+
+def test_removing_last_pending_waypoint_does_not_reopen_previous_waypoint():
+    current_index, sequence_done, plan_affected = (
+        GlobalPathSequencePublisher._progress_after_waypoint_removal(
+            current_index=1,
+            sequence_done=False,
+            removed_index=1,
+            remaining_count=1,
+        )
+    )
+
+    assert current_index == 0
+    assert sequence_done
+    assert plan_affected
+
+
+def test_editing_completed_or_future_waypoint_does_not_affect_active_goal():
+    assert not GlobalPathSequencePublisher._waypoint_edit_affects_active_goal(
+        current_index=2,
+        sequence_done=True,
+        edited_index=0,
+    )
+    assert not GlobalPathSequencePublisher._waypoint_edit_affects_active_goal(
+        current_index=2,
+        sequence_done=False,
+        edited_index=0,
+    )
+    assert not GlobalPathSequencePublisher._waypoint_edit_affects_active_goal(
+        current_index=2,
+        sequence_done=False,
+        edited_index=3,
+    )
+    assert GlobalPathSequencePublisher._waypoint_edit_affects_active_goal(
+        current_index=2,
+        sequence_done=False,
+        edited_index=2,
+    )
