@@ -79,11 +79,11 @@ class AuthorizationHarness:
             self.executor.spin_once(timeout_sec=0.05)
         return predicate()
 
-    def publish_state(self, seq, target):
+    def publish_state(self, seq, target, *, state=MissionState.VERIFY_IDENTITY):
         msg = MissionState()
         msg.header.stamp.sec = seq
         msg.state_seq = seq
-        msg.state = MissionState.VERIFY_IDENTITY
+        msg.state = state
         msg.target_id = target
         self.state_pub.publish(msg)
         for _ in range(5):
@@ -262,9 +262,29 @@ def test_state_replacement_cancels_active_work(harness):
     harness.publish_state(22, 47)
     harness.publish_state(22, 47)
 
-    assert command_keys(harness.commands) == [
+    expected_commands = [
         (21, 46, AuthorizationCommand.INITIAL_FACE),
         (21, 46, AuthorizationCommand.CANCEL),
         (22, 47, AuthorizationCommand.INITIAL_FACE),
-        (22, 47, AuthorizationCommand.CANCEL),
     ]
+    # A repeated VERIFY snapshot is a heartbeat, not a cancellation request.
+    assert command_keys(harness.commands) == expected_commands
+    assert not harness.events
+
+    harness.publish_evidence(
+        21, 46, AuthorizationEvidence.INITIAL_FACE, "face", AuthorizationEvidence.PASSED
+    )
+    assert command_keys(harness.commands) == expected_commands
+    assert not harness.events
+
+    # Leaving VERIFY cancels the current work exactly once.
+    harness.publish_state(23, 47, state=MissionState.RECOVER_PATROL)
+    harness.publish_state(23, 47, state=MissionState.RECOVER_PATROL)
+    expected_commands.append((22, 47, AuthorizationCommand.CANCEL))
+    assert command_keys(harness.commands) == expected_commands
+
+    harness.publish_evidence(
+        22, 47, AuthorizationEvidence.INITIAL_FACE, "face", AuthorizationEvidence.PASSED
+    )
+    assert command_keys(harness.commands) == expected_commands
+    assert not harness.events

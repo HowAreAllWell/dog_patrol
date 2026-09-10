@@ -52,13 +52,30 @@
 - 完整 colcon 测试汇总为 571 项，0 errors、2 failures、0 skipped。失败为
   `test_state_replacement_cancels_active_work` 和 `test_target_image_ros_smoke`。
   已单独检出未经修改的 `a29c2d2`、构建原接口及相关包，并在该基线复现相同两项失败；
-  不能将完整测试报告标为全通过。本修复未改动这两个测试及其所属功能。
+  不能将该次完整测试报告标为全通过。首次修复未改动这两个测试及其所属功能。
 - 最初 Python 测试收集遇到用户目录 pytest 与 ROS Humble 插件不兼容；使用
   `PYTHONNOUSERSITE=1` 隔离后重新运行得到上述结果，未修改系统 Python 包。
 
 2026-09-10 接入 `2160940` 后重新验证：7 个包构建成功，完整 colcon 测试仍为
 571 项，0 errors、2 failures、0 skipped，失败仍是上述两项。主目标、帧事务、
 任务 ROS adapter 和总控测试均通过，其中包含同步后的默认 60 秒边界测试。
+
+### CI 依赖及原有测试的后续处理
+
+首次 GitHub CI 在构建阶段因缺少 `cv_bridge` 中止，尚未运行测试。CI 现补装
+`ros-humble-cv-bridge`；该依赖已在原分支的 tracking 包中声明，本地 WSL 已安装。
+补齐后，GitHub CI 的构建、部署产物检查及 tracking 的全部 49 项 CTest 通过，
+包括在 WSL 失败的 `test_target_image_ros_smoke`，唯一剩余失败是核验节点的旧测试。
+
+核验测试在历史删除 `blocked` 字段时，把“阻断任务”的输入改成了重复 VERIFY 心跳，
+但保留了 CANCEL 预期。现修正测试：同会话心跳应继续核验，真正进入
+`RECOVER_PATROL` 才取消当前任务；同时验证重复恢复和迟到证据不产生额外命令或结果。
+本次仅调整测试输入与断言，核验生产逻辑未改变。修正后本地核验编排包的 39 项测试
+全部通过。最新完整 CI 结果以 PR 检查为准。
+
+WSL 的图像传输 smoke 仍存在环境差异：独立诊断副本中，110 帧均生成有效裁剪并完成
+发布调用，但发布端未发现订阅端，订阅端未收到消息；延长发现等待也未解决。
+具体 DDS 环境原因尚未定位。原测试在 GitHub CI 通过，因此未修改或跳过该测试。
 
 ## 部署与回退
 
