@@ -95,7 +95,8 @@ std::optional<MissionSnapshot> MissionRosAdapter::MissionFromMessage(
     const MissionStateMessage &message) {
   const auto phase = MissionPhaseFromMessage(message.state);
   if (!phase.has_value() ||
-      message.target_id > static_cast<std::uint32_t>(std::numeric_limits<int>::max())) {
+      message.target_id > static_cast<std::uint32_t>(std::numeric_limits<int>::max()) ||
+      message.handled_target_id > static_cast<std::uint32_t>(std::numeric_limits<int>::max())) {
     return std::nullopt;
   }
 
@@ -107,7 +108,13 @@ std::optional<MissionSnapshot> MissionRosAdapter::MissionFromMessage(
   if (HasActiveTarget(phase.value()) && target_id <= 0) {
     return std::nullopt;
   }
-  return MissionSnapshot{message.state_seq, phase.value(), target_id};
+  const int handled_target_id = static_cast<int>(message.handled_target_id);
+  if (handled_target_id > 0 &&
+      phase.value() != MissionPhase::kPatrol &&
+      !(phase.value() == MissionPhase::kRecoverPatrol && handled_target_id == target_id)) {
+    return std::nullopt;
+  }
+  return MissionSnapshot{message.state_seq, phase.value(), target_id, handled_target_id};
 }
 
 builtin_interfaces::msg::Time MissionRosAdapter::TimeMessage(const std::uint64_t nanoseconds) {
@@ -171,7 +178,8 @@ bool MissionRosAdapter::StoreMissionState(const MissionStateMessage &message) {
   std::lock_guard<std::mutex> lock(mission_mutex_);
   if (latest_mission_.has_value() && latest_mission_->state_seq == mission->state_seq &&
       (latest_mission_->phase != mission->phase ||
-       latest_mission_->target_id != mission->target_id)) {
+       latest_mission_->target_id != mission->target_id ||
+       latest_mission_->handled_target_id != mission->handled_target_id)) {
     return false;
   }
   if (!state_sequence_.AcceptsCurrentOrNewer(mission->state_seq)) {

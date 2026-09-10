@@ -1,3 +1,7 @@
+from dataclasses import replace
+
+import pytest
+
 from dog_patrol_manager.state_machine import (
     EventSource,
     EventType,
@@ -93,6 +97,7 @@ def test_authorized_flow_restores_patrol_before_clearing_target():
     assert result.changed
     assert result.snapshot.state == GlobalState.RECOVER_PATROL
     assert result.snapshot.target_id == 87
+    assert result.snapshot.handled_target_id == 87
 
     result = machine.handle_event(
         event(
@@ -104,6 +109,7 @@ def test_authorized_flow_restores_patrol_before_clearing_target():
     )
     assert result.snapshot.state == GlobalState.PATROL
     assert result.snapshot.target_id == 0
+    assert result.snapshot.handled_target_id == 87
 
 
 def test_unauthorized_flow_recovers_when_target_is_lost():
@@ -115,12 +121,14 @@ def test_unauthorized_flow_recovers_when_target_is_lost():
     )
     assert result.snapshot.state == GlobalState.TRACK_INTRUDER
     assert result.snapshot.target_id == 87
+    assert result.snapshot.handled_target_id == 0
 
     result = machine.handle_event(
         event(machine, EventSource.PERCEPTION, EventType.TARGET_LOST, 87)
     )
     assert result.snapshot.state == GlobalState.RECOVER_PATROL
     assert result.snapshot.target_id == 87
+    assert result.snapshot.handled_target_id == 87
 
     result = machine.handle_event(
         event(
@@ -132,6 +140,7 @@ def test_unauthorized_flow_recovers_when_target_is_lost():
     )
     assert result.snapshot.state == GlobalState.PATROL
     assert result.snapshot.target_id == 0
+    assert result.snapshot.handled_target_id == 87
 
 
 def test_stale_and_wrong_source_events_are_rejected():
@@ -361,6 +370,7 @@ def test_confirm_timeout_uses_patrol_recovery_path():
     assert result.accepted
     assert result.snapshot.state == GlobalState.RECOVER_PATROL
     assert result.snapshot.target_id == 42
+    assert result.snapshot.handled_target_id == 0
 
 
 def test_recovery_timeout_returns_to_patrol_without_blocking():
@@ -375,6 +385,7 @@ def test_recovery_timeout_returns_to_patrol_without_blocking():
     assert result.accepted
     assert result.snapshot.state == GlobalState.PATROL
     assert result.snapshot.target_id == 0
+    assert result.snapshot.handled_target_id == 0
 
 
 def test_duplicate_ready_event_is_idempotent():
@@ -403,3 +414,189 @@ def test_reset_session_invalidates_readiness_and_active_target():
     assert not machine.perception_ready
     assert not machine.navigation_ready
     assert snapshot.state_seq == previous_seq + 1
+
+
+def advance_to_state(machine, state, target_id=87):
+    start_patrol(machine)
+    transitions = (
+        (EventSource.PERCEPTION, EventType.TARGET_CONFIRMED),
+        (EventSource.NAVIGATION, EventType.TARGET_POSITION_READY),
+        (EventSource.NAVIGATION, EventType.ARRIVED_AND_STOPPED),
+        (EventSource.PERCEPTION, EventType.UNAUTHORIZED),
+    )
+    for source, event_type in transitions:
+        result = machine.handle_event(
+            event(machine, source, event_type, target_id)
+        )
+        assert result.accepted
+        if result.snapshot.state == state:
+            return
+    raise AssertionError(f"cannot advance to {state}")
+
+
+@pytest.mark.parametrize(
+    "state",
+    [
+        GlobalState.CONFIRM_TARGET,
+        GlobalState.APPROACH_TARGET,
+        GlobalState.VERIFY_IDENTITY,
+    ],
+)
+@pytest.mark.parametrize(
+    "source,event_type",
+    [
+        (EventSource.PERCEPTION, EventType.TARGET_LOST),
+        (EventSource.PERCEPTION, EventType.EXECUTION_ERROR),
+        (EventSource.NAVIGATION, EventType.EXECUTION_ERROR),
+    ],
+)
+def test_unfinished_target_tasks_never_grant_handled_exemption(
+    state, source, event_type
+):
+    machine = MissionStateMachine()
+    advance_to_state(machine, state)
+
+    result = machine.handle_event(event(machine, source, event_type, 87))
+    assert result.accepted
+    assert result.snapshot.state == GlobalState.RECOVER_PATROL
+    assert result.snapshot.handled_target_id == 0
+
+    result = machine.handle_event(
+        event(
+            machine, EventSource.NAVIGATION, EventType.PATROL_RECOVERY_COMPLETE, 87
+        )
+    )
+    assert result.accepted
+    assert result.snapshot.state == GlobalState.PATROL
+    assert result.snapshot.handled_target_id == 0
+
+
+@pytest.mark.parametrize(
+    "source", [EventSource.PERCEPTION, EventSource.NAVIGATION]
+)
+def test_intruder_execution_error_does_not_count_as_completed_pursuit(source):
+    machine = MissionStateMachine()
+    advance_to_state(machine, GlobalState.TRACK_INTRUDER)
+
+    result = machine.handle_event(
+        event(machine, source, EventType.EXECUTION_ERROR, 87)
+    )
+    assert result.accepted
+    assert result.snapshot.state == GlobalState.RECOVER_PATROL
+    assert result.snapshot.handled_target_id == 0
+
+
+@pytest.mark.parametrize(
+    "target_state", [GlobalState.VERIFY_IDENTITY, GlobalState.TRACK_INTRUDER]
+)
+@pytest.mark.parametrize(
+    "source", [EventSource.PERCEPTION, EventSource.NAVIGATION]
+)
+def test_handled_outcome_survives_recovery_errors_and_watchdog(
+    target_state, source
+):
+    machine = MissionStateMachine()
+    advance_to_state(machine, target_state)
+    outcome = (
+        EventType.AUTHORIZED
+        if target_state == GlobalState.VERIFY_IDENTITY
+        else EventType.TARGET_LOST
+    )
+    outcome_event = event(machine, EventSource.PERCEPTION, outcome, 87)
+    assert machine.handle_event(outcome_event).snapshot.handled_target_id == 87
+    assert machine.handle_event(outcome_event).duplicate
+    recovery = machine.snapshot
+
+    rejected = machine.handle_event(
+        event(machine, source, EventType.EXECUTION_ERROR, 87)
+    )
+    assert not rejected.accepted
+    assert rejected.snapshot == recovery
+    restored = machine.complete_patrol_recovery("recovery watchdog expired")
+    assert restored.accepted
+    assert restored.snapshot.state == GlobalState.PATROL
+    assert restored.snapshot.target_id == 0
+    assert restored.snapshot.handled_target_id == 87
+
+
+@pytest.mark.parametrize(
+    "bad_fields",
+    [
+        {"target_id": 99},
+        {"source": int(EventSource.NAVIGATION)},
+        {"observed_state_seq": 1},
+    ],
+)
+@pytest.mark.parametrize(
+    "target_state", [GlobalState.VERIFY_IDENTITY, GlobalState.TRACK_INTRUDER]
+)
+def test_invalid_outcome_cannot_mark_a_target_handled(target_state, bad_fields):
+    machine = MissionStateMachine()
+    advance_to_state(machine, target_state)
+    outcome = (
+        EventType.AUTHORIZED
+        if target_state == GlobalState.VERIFY_IDENTITY
+        else EventType.TARGET_LOST
+    )
+    before = machine.snapshot
+    rejected = machine.handle_event(
+        replace(event(machine, EventSource.PERCEPTION, outcome, 87), **bad_fields)
+    )
+    assert not rejected.accepted
+    assert rejected.snapshot == before
+    assert rejected.snapshot.handled_target_id == 0
+
+
+def test_authorized_before_verification_is_not_a_handled_outcome():
+    machine = MissionStateMachine()
+    advance_to_state(machine, GlobalState.CONFIRM_TARGET)
+    before = machine.snapshot
+    result = machine.handle_event(
+        event(machine, EventSource.PERCEPTION, EventType.AUTHORIZED, 87)
+    )
+    assert not result.accepted
+    assert result.snapshot == before
+    assert result.snapshot.handled_target_id == 0
+
+
+@pytest.mark.parametrize("next_action", ["new_target", "reset"])
+def test_handled_outcome_is_cleared_for_next_task_or_session(next_action):
+    machine = MissionStateMachine()
+    advance_to_verify(machine)
+    authorized = event(machine, EventSource.PERCEPTION, EventType.AUTHORIZED, 87)
+    machine.handle_event(authorized)
+    restored = machine.complete_patrol_recovery("recovery watchdog expired")
+    assert restored.snapshot.handled_target_id == 87
+
+    if next_action == "new_target":
+        result = machine.handle_event(
+            event(machine, EventSource.PERCEPTION, EventType.TARGET_CONFIRMED, 99)
+        )
+        assert result.accepted
+        assert result.snapshot.target_id == 99
+        assert result.snapshot.state == GlobalState.CONFIRM_TARGET
+    else:
+        assert machine.reset_session().state == GlobalState.STARTUP
+
+    assert machine.snapshot.handled_target_id == 0
+    assert not machine.handle_event(authorized).accepted
+    assert machine.snapshot.handled_target_id == 0
+
+
+@pytest.mark.parametrize(
+    "state",
+    [
+        GlobalState.CONFIRM_TARGET,
+        GlobalState.APPROACH_TARGET,
+        GlobalState.VERIFY_IDENTITY,
+        GlobalState.TRACK_INTRUDER,
+    ],
+)
+def test_generic_recovery_does_not_infer_handled_outcome_from_detail(state):
+    machine = MissionStateMachine()
+    advance_to_state(machine, state)
+
+    result = machine.begin_patrol_recovery("failed to send AUTHORIZED event")
+    assert result.accepted
+    assert result.snapshot.state == GlobalState.RECOVER_PATROL
+    assert result.snapshot.handled_target_id == 0

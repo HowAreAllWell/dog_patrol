@@ -308,6 +308,7 @@ uint32 state_seq
 uint8 state
 uint32 target_id
 string detail
+uint32 handled_target_id
 ```
 
 字段含义：
@@ -317,11 +318,28 @@ string detail
 - `state`：当前全局状态；
 - `target_id`：当前目标，`0` 表示没有活动目标；
 - `detail`：供日志和界面显示的说明，程序不能解析该字符串决定业务逻辑。
+- `handled_target_id`：总控明确判定已完成业务处理、应进入感知排除名单的目标；
+  `0` 表示本轮没有新增排除。它不是“刚结束任务的目标”，不能由恢复阶段推断。
+
+`handled_target_id` 仅在接受 `AUTHORIZED`，或在 `TRACK_INTRUDER` 接受最终
+`TARGET_LOST` 时设置为当前目标。位置确认超时、接近/核验期间丢失、执行错误等失败
+保持为 `0`。该结果保留在 `RECOVER_PATROL` 及其后的 `PATROL` 中，即使后者的
+`target_id` 已清零；接受下一目标的 `TARGET_CONFIRMED` 或重置会话时清零。
+恢复阶段的错误和恢复 watchdog 不得覆盖已经确定的业务结果。
+
+感知仅在首次处理新的 `PATROL state_seq` 时消费当前快照的 `handled_target_id`，
+不依赖是否收到了中间的核验/恢复状态。重复状态不能重新加入已过期的排除项或重置
+连续离场计时。`STARTUP` 和活动目标阶段的该字段必须为 `0`；恢复阶段非零时必须
+等于 `target_id`。同一序号下的该字段也必须一致。
+
+本字段扩展了 ROS 消息定义。部署时须统一重新构建 `dog_patrol_interfaces` 及所有
+使用 `MissionState` 的节点，不能混用旧接口生成物和新接口节点。
 
 `state_seq` 在以下任一权威状态发生变化时加一：
 
 - `state` 改变；
 - `target_id` 改变；
+- `handled_target_id` 改变；
 
 周期性重复发布同一个状态时，`state_seq` 不变。
 

@@ -46,6 +46,8 @@ class MissionSnapshot:
     state: GlobalState
     target_id: int
     detail: str
+    # Keep the completed outcome through recovery and the following PATROL.
+    handled_target_id: int = 0
 
 
 @dataclass(frozen=True)
@@ -115,6 +117,7 @@ class MissionStateMachine:
         self._state_seq = max(1, int(initial_state_seq))
         self._state = GlobalState.STARTUP
         self._target_id = 0
+        self._handled_target_id = 0
         self._detail = "waiting for perception and navigation ready"
 
         self._perception_ready = False
@@ -131,6 +134,7 @@ class MissionStateMachine:
             state=self._state,
             target_id=self._target_id,
             detail=self._detail,
+            handled_target_id=self._handled_target_id,
         )
 
     @property
@@ -145,6 +149,7 @@ class MissionStateMachine:
         """Return to STARTUP without restarting the ROS node."""
         self._state = GlobalState.STARTUP
         self._target_id = 0
+        self._handled_target_id = 0
         self._perception_ready = False
         self._navigation_ready = False
         self._detail = str(detail).strip() or "mission session reset"
@@ -226,6 +231,9 @@ class MissionStateMachine:
         previous_state = self._state
         if event == EventType.TARGET_CONFIRMED:
             self._target_id = target_id
+            self._handled_target_id = 0
+        elif event == EventType.AUTHORIZED:
+            self._handled_target_id = target_id
         if next_state == GlobalState.PATROL:
             self._target_id = 0
 
@@ -281,8 +289,10 @@ class MissionStateMachine:
             snapshot=self.snapshot,
         )
 
-    def begin_patrol_recovery(self, detail: str) -> EventResult:
-        """End the active target task and wait for navigation to restore patrol."""
+    def begin_patrol_recovery(
+        self, detail: str, *, target_handled: bool = False
+    ) -> EventResult:
+        """Restore patrol; failed tasks do not grant a handled-target exemption."""
         if self._state not in {
             GlobalState.CONFIRM_TARGET,
             GlobalState.APPROACH_TARGET,
@@ -295,6 +305,7 @@ class MissionStateMachine:
 
         previous_state = self._state
         previous_target = self._target_id
+        self._handled_target_id = previous_target if target_handled else 0
         self._state = GlobalState.RECOVER_PATROL
         reason = str(detail).strip() or "target task ended"
         self._detail = (
@@ -366,7 +377,10 @@ class MissionStateMachine:
         self._remember_event(key)
         detail = str(raw_event.detail).strip() or "target lost"
         return self.begin_patrol_recovery(
-            f"{source.name}/TARGET_LOST: {detail}"
+            f"{source.name}/TARGET_LOST: {detail}",
+            # Ending an intruder pursuit is a completed business outcome;
+            # losing a target before that stage is an unfinished task.
+            target_handled=self._state == GlobalState.TRACK_INTRUDER,
         )
 
     def _handle_execution_error(

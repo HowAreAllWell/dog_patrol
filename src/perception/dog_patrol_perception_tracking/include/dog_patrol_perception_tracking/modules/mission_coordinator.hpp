@@ -27,6 +27,9 @@ struct MissionSnapshot {
   std::uint32_t state_seq{0};
   MissionPhase phase{MissionPhase::kStartup};
   int target_id{0};
+  // Authoritative business disposition, retained through the following PATROL.
+  // A recovery target alone does not imply successful handling.
+  int handled_target_id{0};
 };
 
 enum class PerceptionMissionEvent {

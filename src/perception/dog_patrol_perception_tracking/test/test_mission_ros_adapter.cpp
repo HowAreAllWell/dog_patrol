@@ -3,6 +3,7 @@
 #include <cstdint>
 #include <functional>
 #include <memory>
+#include <limits>
 #include <thread>
 #include <vector>
 
@@ -36,11 +37,13 @@ using TargetBoundingBoxMessage = dog_patrol_interfaces::msg::TargetBoundingBox;
 using CapabilityStatusMessage = dog_patrol_perception_interfaces::msg::CapabilityStatus;
 
 MissionStateMessage State(const std::uint32_t sequence, const std::uint8_t phase,
-                          const std::uint32_t target_id = 0U) {
+                          const std::uint32_t target_id = 0U,
+                          const std::uint32_t handled_target_id = 0U) {
   MissionStateMessage message;
   message.state_seq = sequence;
   message.state = phase;
   message.target_id = target_id;
+  message.handled_target_id = handled_target_id;
   return message;
 }
 
@@ -137,6 +140,64 @@ TEST_F(MissionRosAdapterTest, AcceptsRecoveryStateWithTargetCorrelationId) {
   ASSERT_TRUE(snapshot.has_value());
   EXPECT_EQ(snapshot->phase, MissionPhase::kRecoverPatrol);
   EXPECT_EQ(snapshot->target_id, 42);
+}
+
+TEST_F(MissionRosAdapterTest, ValidatesExplicitDispositionAgainstItsPhaseAndTarget) {
+  auto snapshot = MissionRosAdapter::MissionFromMessage(
+      State(18U, MissionStateMessage::RECOVER_PATROL, 42U, 42U));
+  ASSERT_TRUE(snapshot.has_value());
+  EXPECT_EQ(snapshot->handled_target_id, 42);
+  snapshot = MissionRosAdapter::MissionFromMessage(
+      State(19U, MissionStateMessage::PATROL, 0U, 42U));
+  ASSERT_TRUE(snapshot.has_value());
+  EXPECT_EQ(snapshot->target_id, 0);
+  EXPECT_EQ(snapshot->handled_target_id, 42);
+  EXPECT_FALSE(MissionRosAdapter::MissionFromMessage(
+      State(20U, MissionStateMessage::RECOVER_PATROL, 43U, 42U)).has_value());
+  EXPECT_FALSE(MissionRosAdapter::MissionFromMessage(
+      State(20U, MissionStateMessage::STARTUP, 0U, 42U)).has_value());
+  EXPECT_FALSE(MissionRosAdapter::MissionFromMessage(
+      State(20U, MissionStateMessage::VERIFY_IDENTITY, 42U, 42U)).has_value());
+  EXPECT_FALSE(MissionRosAdapter::MissionFromMessage(
+      State(20U, MissionStateMessage::PATROL, 0U,
+            std::numeric_limits<std::uint32_t>::max())).has_value());
+}
+
+TEST_F(MissionRosAdapterTest, RejectsConflictingDispositionAtTheSameStateSequence) {
+  auto node = std::make_shared<rclcpp::Node>("mission_disposition_consistency");
+  MissionRosAdapter adapter(*node, MissionRosAdapter::Config{});
+  ASSERT_TRUE(adapter.StoreMissionState(State(19U, MissionStateMessage::PATROL, 0U, 42U)));
+  EXPECT_FALSE(adapter.StoreMissionState(State(19U, MissionStateMessage::PATROL, 0U, 43U)));
+  EXPECT_FALSE(adapter.StoreMissionState(State(19U, MissionStateMessage::PATROL)));
+  EXPECT_TRUE(adapter.StoreMissionState(State(19U, MissionStateMessage::PATROL, 0U, 42U)));
+  ASSERT_TRUE(adapter.CurrentMission().has_value());
+  EXPECT_EQ(adapter.CurrentMission()->handled_target_id, 42);
+}
+
+TEST_F(MissionRosAdapterTest, PatrolMessageAlonePreservesHandledTargetAcrossRosTransport) {
+  auto node = std::make_shared<rclcpp::Node>("mission_disposition_receiver");
+  MissionRosAdapter::Config config;
+  config.mission_state_topic = "/handled_disposition/mission/state";
+  config.mission_event_topic = "/handled_disposition/mission/event";
+  MissionRosAdapter adapter(*node, config);
+  auto publisher_node = std::make_shared<rclcpp::Node>("mission_disposition_publisher");
+  auto publisher = publisher_node->create_publisher<MissionStateMessage>(
+      config.mission_state_topic, MissionRosAdapter::MissionStateQos());
+  rclcpp::executors::SingleThreadedExecutor executor;
+  executor.add_node(node);
+  executor.add_node(publisher_node);
+  // No prior recovery message: the current durable snapshot is sufficient.
+  publisher->publish(State(19U, MissionStateMessage::PATROL, 0U, 42U));
+  ASSERT_TRUE(SpinUntil(executor, [&adapter] {
+    return adapter.CurrentMission().has_value();
+  }));
+  ASSERT_EQ(adapter.CurrentMission()->handled_target_id, 42);
+  adapter.ProcessFrame({TrustedPerson(42, 7, cv::Rect2f{10, 10, 80, 80}),
+                         TrustedPerson(99, 8, cv::Rect2f{120, 10, 40, 40})},
+                        MissionCoordinator::TimePoint{}, Metadata(1710000000000000000ULL));
+  EXPECT_EQ(adapter.CurrentPrimary().primary_target_id, 99);
+  executor.remove_node(publisher_node);
+  executor.remove_node(node);
 }
 
 TEST_F(MissionRosAdapterTest, DeclaresTheSharedContractQosProfiles) {

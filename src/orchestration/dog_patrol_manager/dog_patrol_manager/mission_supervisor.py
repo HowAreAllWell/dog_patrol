@@ -190,6 +190,7 @@ class MissionSupervisor(Node):
         msg.state_seq = int(snapshot.state_seq)
         msg.state = int(snapshot.state)
         msg.target_id = int(snapshot.target_id)
+        msg.handled_target_id = int(snapshot.handled_target_id)
         msg.detail = str(snapshot.detail)[: self._max_detail_length]
         self._state_pub.publish(msg)
 

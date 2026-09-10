@@ -364,10 +364,10 @@ PATROL(seq=N)
   -> TARGET_CONFIRMED(target=T, seq=N)
   -> CONFIRM_TARGET(seq=N+1)
   -> 目标位置计算超时
-  -> RECOVER_PATROL(seq=N+1, target_id=T)
-  -> PATROL(seq=N+2, target_id=0)
+  -> RECOVER_PATROL(seq=N+2, target_id=T, handled_target_id=0)
+  -> PATROL(seq=N+3, target_id=0, handled_target_id=0)
   -> 感知重新评估目标 T
-  -> 条件满足后允许再次发布 TARGET_CONFIRMED(target=T, seq=N+2)
+  -> 条件满足后允许再次发布 TARGET_CONFIRMED(target=T, seq=N+3)
 ```
 
 `TARGET_CONFIRMED` 因此是“当前巡检周期选中了目标”的一次性事件，不是某个 semantic ID 整个生命周期只能发布一次的事件。
@@ -385,7 +385,8 @@ PATROL -> CONFIRM_TARGET -> timeout -> PATROL -> CONFIRM_TARGET -> ...
 `CONFIRM_TARGET`，先进入 `RECOVER_PATROL`，导航恢复完成或恢复超时后再进入新的
 `PATROL state_seq`。新的巡检序号允许感知重新评估画面，因此不能把旧序号的
 `TARGET_CONFIRMED` 或 bbox 继续带入新任务。当前感知侧实际保留的 handled-ID 机制
-只针对从 `VERIFY_IDENTITY` 或 `TRACK_INTRUDER` 正常结束后回到巡检的目标，参数是
+只针对总控明确报告 `handled_target_id` 的目标：`AUTHORIZED` 或 `TRACK_INTRUDER`
+最终 `TARGET_LOST` 后的业务收口。它不再根据前序任务阶段推断，参数是
 `target.handled_ignore_absence_sec=60.0`；它不是确认超时专用冷却，也不适用于把目标
 永久屏蔽。
 
@@ -393,8 +394,11 @@ PATROL -> CONFIRM_TARGET -> timeout -> PATROL -> CONFIRM_TARGET -> ...
 
 - 感知在 `RECOVER_PATROL` 中清理旧任务目标，不发布旧任务 bbox 或确认事件。
 - 进入新的 `PATROL state_seq` 后，感知重新执行巡检选目标规则。
-- 从核验/持续跟踪任务结束回到巡检时，handled-ID 机制会暂时排除上一目标；该目标
+- 从核验/持续跟踪任务正常结束回到巡检时，总控将 `handled_target_id` 保留到新的
+  `PATROL` 快照，感知只排除该 ID；即使漏收中间状态也能应用结果。该目标
   连续不可见达到 `handled_ignore_absence_sec` 后才解除排除，期间其他合格目标仍可被选中。
+- 定位确认超时、接近/核验期间丢失、执行错误等失败返回巡逻时，该字段为 0，
+  不新增排除。重复巡逻心跳不能重置离场计时或重新添加已到期的排除项。
 - 这不是公共事件，不新增 `TARGET_REACQUIRED`。
 
 确认位置超时的等待时间由总控参数 `confirm_target_timeout=5.0` 秒控制；恢复等待由

@@ -225,7 +225,7 @@ PrimaryTargetResult PrimaryTargetManager::UpdateForPatrol(const std::vector<Iden
 PrimaryTargetResult PrimaryTargetManager::UpdateForMission(
     const std::vector<IdentityObservation> &identities,
     const std::optional<MissionSnapshot> &mission,
-    const std::optional<MissionSnapshot> &previous_mission,
+    const std::optional<MissionSnapshot> & /*previous_mission*/,
     const TimePoint now) {
   if (!mission.has_value()) {
     return Update(identities);
@@ -235,18 +235,10 @@ PrimaryTargetResult PrimaryTargetManager::UpdateForMission(
       (!last_mission_for_primary_.has_value() ||
        last_mission_for_primary_->state_seq != mission->state_seq ||
        last_mission_for_primary_->phase != MissionPhase::kPatrol)) {
-    int handled_semantic_id = -1;
-    const auto preceding_mission =
-        previous_mission.has_value() && previous_mission->state_seq != mission->state_seq
-            ? previous_mission
-            : last_mission_for_primary_;
-    if (preceding_mission.has_value() && preceding_mission->target_id > 0 &&
-        (preceding_mission->phase == MissionPhase::kRecoverPatrol ||
-         preceding_mission->phase == MissionPhase::kVerifyIdentity ||
-         preceding_mission->phase == MissionPhase::kTrackIntruder)) {
-      handled_semantic_id = preceding_mission->target_id;
-    }
-    ResetForPatrolCycle(handled_semantic_id);
+    // Recovery is also used for position-confirmation failures and execution
+    // errors. Only the supervisor's explicit disposition may exclude a person.
+    // Read the current snapshot so skipped intermediate callbacks are harmless.
+    ResetForPatrolCycle(mission->handled_target_id);
   }
 
   last_mission_for_primary_ = mission;

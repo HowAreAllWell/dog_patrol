@@ -116,7 +116,7 @@ TEST(PrimaryTargetManagerTest,
   ASSERT_EQ(verified.primary_target_id, 11);
 
   const dog_patrol_perception_tracking::MissionSnapshot next_patrol{
-      12U, dog_patrol_perception_tracking::MissionPhase::kPatrol, 0};
+      12U, dog_patrol_perception_tracking::MissionPhase::kPatrol, 0, 11};
   const auto selected = mgr.UpdateForMission(
       {handled, next_eligible}, next_patrol, verification, start + 2ms);
 
@@ -129,7 +129,48 @@ TEST(PrimaryTargetManagerTest,
   EXPECT_EQ(handled.supporting_raw_track_id, 101);
 }
 
-TEST(PrimaryTargetManagerTest, HandledIdentityUsesDefaultThirtySecondContinuousAbsenceBeforePatrolEligibility) {
+TEST(PrimaryTargetManagerTest, PreviousTaskPhaseAloneDoesNotExcludeUnfinishedTarget) {
+  using namespace dog_patrol_perception_tracking;
+  const auto person = MakeIdentity(11, 101, ClassId::kPerson, cv::Rect2f(0, 0, 80, 80));
+  for (const auto phase : {MissionPhase::kConfirmTarget, MissionPhase::kApproachTarget,
+                           MissionPhase::kVerifyIdentity, MissionPhase::kTrackIntruder,
+                           MissionPhase::kRecoverPatrol}) {
+    PrimaryTargetManager mgr(PrimaryTargetManager::Config{});
+    const MissionSnapshot previous{10U, phase, 11};
+    const MissionSnapshot patrol{11U, MissionPhase::kPatrol, 0, 0};
+    mgr.UpdateForMission({person}, previous, std::nullopt, PrimaryTargetManager::TimePoint{});
+    const auto selected = mgr.UpdateForMission(
+        {person}, patrol, previous, PrimaryTargetManager::TimePoint{});
+    EXPECT_TRUE(mgr.IsMissionEligible(person));
+    EXPECT_EQ(selected.state, PrimaryState::kLocked);
+    EXPECT_EQ(selected.primary_target_id, 11);
+  }
+}
+
+TEST(PrimaryTargetManagerTest, PatrolDispositionSurvivesSkippedStatesAndDoesNotRestartExpiredExclusion) {
+  using namespace dog_patrol_perception_tracking;
+  using namespace std::chrono_literals;
+  PrimaryTargetManager::Config config;
+  config.handled_ignore_absence = 60s;
+  PrimaryTargetManager mgr(config);
+  const auto start = PrimaryTargetManager::TimePoint{};
+  const auto handled = MakeIdentity(11, 101, ClassId::kPerson, cv::Rect2f(0, 0, 80, 80));
+  const auto eligible = MakeIdentity(22, 202, ClassId::kPerson, cv::Rect2f(100, 0, 60, 60));
+  // First observed state is PATROL: no VERIFY or RECOVER callback is required.
+  const MissionSnapshot patrol{20U, MissionPhase::kPatrol, 0, 11};
+  auto selected = mgr.UpdateForMission({handled, eligible}, patrol, std::nullopt, start);
+  EXPECT_FALSE(mgr.IsMissionEligible(handled));
+  EXPECT_EQ(selected.primary_target_id, 22);
+  mgr.UpdateForMission({eligible}, patrol, patrol, start + 1s);
+  mgr.UpdateForMission({eligible}, patrol, patrol, start + 60s);
+  EXPECT_FALSE(mgr.IsMissionEligible(handled));
+  mgr.UpdateForMission({eligible}, patrol, patrol, start + 61s);
+  EXPECT_TRUE(mgr.IsMissionEligible(handled));
+  mgr.UpdateForMission({handled, eligible}, patrol, patrol, start + 62s);
+  EXPECT_TRUE(mgr.IsMissionEligible(handled));
+}
+
+TEST(PrimaryTargetManagerTest, HandledIdentityUsesDefaultSixtySecondContinuousAbsenceBeforePatrolEligibility) {
   using namespace std::chrono_literals;
 
   dog_patrol_perception_tracking::PrimaryTargetManager::Config cfg;
@@ -141,13 +182,13 @@ TEST(PrimaryTargetManagerTest, HandledIdentityUsesDefaultThirtySecondContinuousA
   mgr.ResetForPatrolCycle(11);
   mgr.UpdateForPatrol({handled}, start);
   mgr.UpdateForPatrol({}, start);
-  mgr.UpdateForPatrol({}, start + 29s);
+  mgr.UpdateForPatrol({}, start + 59s);
   EXPECT_FALSE(mgr.IsMissionEligible(handled));
 
-  mgr.UpdateForPatrol({}, start + 30s);
+  mgr.UpdateForPatrol({}, start + 60s);
   EXPECT_TRUE(mgr.IsMissionEligible(handled));
 
-  const auto state = mgr.UpdateForPatrol({handled}, start + 30s);
+  const auto state = mgr.UpdateForPatrol({handled}, start + 60s);
   ASSERT_TRUE(state.primary_track.has_value());
   EXPECT_EQ(state.primary_target_id, 11);
 }

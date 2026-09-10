@@ -45,9 +45,9 @@ class PrimaryTargetManager {
   PrimaryTargetResult UpdateForPatrol(const std::vector<IdentityObservation> &identities, TimePoint now);
 
   // Applies the authoritative mission transition and primary selection as one
-  // public runtime operation. Returning from verification or intruder tracking
-  // to a new patrol cycle marks the prior semantic target handled before the
-  // first patrol frame is selected.
+  // public runtime operation. A new patrol cycle applies the current mission's
+  // explicit handled_target_id before the first frame is selected. Previous
+  // phases alone do not establish a business result.
   PrimaryTargetResult UpdateForMission(
       const std::vector<IdentityObservation> &identities,
       const std::optional<MissionSnapshot> &mission,

@@ -32,11 +32,12 @@ IdentityObservation TrustedPerson(const int semantic_id, const int raw_track_id,
 }
 
 MissionSnapshot Mission(const MissionPhase phase, const std::uint32_t state_seq,
-                        const int target_id = 0) {
+                        const int target_id = 0, const int handled_target_id = 0) {
   MissionSnapshot mission;
   mission.phase = phase;
   mission.state_seq = state_seq;
   mission.target_id = target_id;
+  mission.handled_target_id = handled_target_id;
   return mission;
 }
 
@@ -131,7 +132,7 @@ TEST(MissionFrameTransactionTest, TreatsUnrepresentableTargetBoxAsMissing) {
 TEST(MissionFrameTransactionTest, SkipsHandledTargetWhenMissionReturnsToPatrol) {
   auto transaction = ConfiguredTransaction();
   const auto verify = Mission(MissionPhase::kVerifyIdentity, 200U, 42);
-  const auto patrol = Mission(MissionPhase::kPatrol, 201U);
+  const auto patrol = Mission(MissionPhase::kPatrol, 201U, 0, 42);
   const auto source_time = MissionCoordinator::TimePoint{};
   const std::vector<IdentityObservation> current_target{
       TrustedPerson(42, 7, cv::Rect2f{10.0F, 10.0F, 80.0F, 80.0F})};
@@ -153,6 +154,68 @@ TEST(MissionFrameTransactionTest, SkipsHandledTargetWhenMissionReturnsToPatrol) 
   EXPECT_EQ(selection.events.front().event, PerceptionMissionEvent::kTargetConfirmed);
   EXPECT_EQ(selection.events.front().target_id, 99);
   EXPECT_FALSE(selection.target_box.has_value());
+}
+
+TEST(MissionFrameTransactionTest, FailedPeopleRemainSelectableAfterAnotherPersonWasHandled) {
+  using namespace std::chrono_literals;
+  MissionFrameTransaction::Config config;
+  config.primary.handled_ignore_absence = 60s;
+  MissionFrameTransaction transaction(config);
+  const auto start = MissionCoordinator::TimePoint{};
+  const auto a = TrustedPerson(11, 101, cv::Rect2f{10, 10, 80, 80});
+  const auto b = TrustedPerson(22, 202, cv::Rect2f{120, 10, 70, 70});
+  const auto c = TrustedPerson(33, 303, cv::Rect2f{230, 10, 60, 60});
+  const std::vector<IdentityObservation> people{a, b, c};
+  const auto verify = Mission(MissionPhase::kVerifyIdentity, 100U, 11);
+  const auto authorized_recovery = Mission(MissionPhase::kRecoverPatrol, 101U, 11, 11);
+  const auto patrol_after_a = Mission(MissionPhase::kPatrol, 102U, 0, 11);
+  transaction.Update({verify, std::nullopt, people, start, Metadata()});
+  transaction.Update({authorized_recovery, verify, people, start + 1s, Metadata()});
+  auto output = transaction.Update(
+      {patrol_after_a, authorized_recovery, people, start + 2s, Metadata()});
+  ASSERT_EQ(output.primary.primary_target_id, 22);
+  ASSERT_EQ(output.events.size(), 1U);
+  EXPECT_EQ(output.events.front().target_id, 22);
+
+  const auto confirm_b = Mission(MissionPhase::kConfirmTarget, 103U, 22);
+  const auto failed_b = Mission(MissionPhase::kRecoverPatrol, 104U, 22);
+  const auto patrol_after_b = Mission(MissionPhase::kPatrol, 105U);
+  transaction.Update({confirm_b, patrol_after_a, people, start + 3s, Metadata()});
+  transaction.Update({failed_b, confirm_b, people, start + 8s, Metadata()});
+  output = transaction.Update({patrol_after_b, failed_b, people, start + 9s, Metadata()});
+  // A remains excluded; failed B is retried instead of becoming handled.
+  EXPECT_EQ(output.primary.primary_target_id, 22);
+  ASSERT_EQ(output.events.size(), 1U);
+  EXPECT_EQ(output.events.front().event, PerceptionMissionEvent::kTargetConfirmed);
+  EXPECT_EQ(output.events.front().target_id, 22);
+
+  // B leaves on the next failed attempt; C is eligible as well.
+  const auto confirm_b_again = Mission(MissionPhase::kConfirmTarget, 106U, 22);
+  const auto failed_b_again = Mission(MissionPhase::kRecoverPatrol, 107U, 22);
+  const auto patrol_for_c = Mission(MissionPhase::kPatrol, 108U);
+  const std::vector<IdentityObservation> without_b{a, c};
+  transaction.Update({confirm_b_again, patrol_after_b, people, start + 10s, Metadata()});
+  transaction.Update({failed_b_again, confirm_b_again, without_b, start + 15s, Metadata()});
+  output = transaction.Update({patrol_for_c, failed_b_again, without_b, start + 16s, Metadata()});
+  ASSERT_EQ(output.primary.primary_target_id, 33);
+  const auto confirm_c = Mission(MissionPhase::kConfirmTarget, 109U, 33);
+  const auto failed_c = Mission(MissionPhase::kRecoverPatrol, 110U, 33);
+  const auto final_patrol = Mission(MissionPhase::kPatrol, 111U);
+  transaction.Update({confirm_c, patrol_for_c, without_b, start + 17s, Metadata()});
+  transaction.Update({failed_c, confirm_c, without_b, start + 22s, Metadata()});
+  output = transaction.Update({final_patrol, failed_c, people, start + 23s, Metadata()});
+  EXPECT_EQ(output.primary.state, PrimaryState::kLocked);
+  EXPECT_EQ(output.primary.primary_target_id, 22);
+  ASSERT_EQ(output.events.size(), 1U);
+  EXPECT_EQ(output.events.front().target_id, 22);
+  // Without B, the same fresh patrol outcome still permits C.
+  const auto retry_b = Mission(MissionPhase::kConfirmTarget, 112U, 22);
+  const auto recovery_b = Mission(MissionPhase::kRecoverPatrol, 113U, 22);
+  transaction.Update({retry_b, final_patrol, people, start + 24s, Metadata()});
+  transaction.Update({recovery_b, retry_b, without_b, start + 29s, Metadata()});
+  output = transaction.Update({Mission(MissionPhase::kPatrol, 114U), recovery_b,
+                               without_b, start + 30s, Metadata()});
+  EXPECT_EQ(output.primary.primary_target_id, 33);
 }
 
 }  // namespace
