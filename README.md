@@ -70,8 +70,9 @@ ROS 2 package 名称保持 `dog_patrol_` 前缀；上层目录是所有权和代
 
 完整系统由 fast_livo_dog 的 app.py 管理三类生命周期：manager 在 app 启动时常驻；
 2D 导航按钮管理 Nav2/move 和导航协调器；感知任务按钮独立管理 tracking、face、voice
-及感知编排。导航或感知关闭时通过 /mission/reset 清除旧任务会话，manager 只在 app
-退出时关闭。
+及感知编排。导航或感知主动关闭时通过 `/mission/reset` 清除旧任务会话。manager 意外退出时，
+app 会先停止导航和感知再重启 manager，避免旧任务缓存跨越新的 supervisor 会话；随后必须重新
+启动业务模块、准备路线并显式 START。manager 正常情况下只在 app 退出时关闭。
 
 ```bash
 source /opt/ros/humble/setup.bash

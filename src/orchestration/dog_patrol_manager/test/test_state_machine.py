@@ -6,8 +6,15 @@ from dog_patrol_manager.state_machine import (
     EventSource,
     EventType,
     GlobalState,
+    HomePoseData,
     MissionEventData,
     MissionStateMachine,
+    NavigationMode,
+    ParentTaskState,
+    TaskCommand,
+    TaskCommandData,
+    TaskOutcome,
+    WaypointStateData,
 )
 
 
@@ -21,7 +28,27 @@ def event(machine, source, event_type, target_id=0, detail=""):
     )
 
 
-def start_patrol(machine):
+def route(*, count=3, index=0, completed=0, done=False, revision=1):
+    return WaypointStateData(
+        route_revision=revision,
+        waypoint_count=count,
+        current_index=index,
+        completed_count=completed,
+        sequence_done=done,
+        paused=True,
+    )
+
+
+def command(machine, command_type, *, route_state=None, home=None):
+    del machine
+    return TaskCommandData(
+        command=int(command_type),
+        route=route_state,
+        home_pose=home,
+    )
+
+
+def make_ready(machine):
     result = machine.handle_event(
         event(machine, EventSource.PERCEPTION, EventType.READY)
     )
@@ -32,7 +59,22 @@ def start_patrol(machine):
         event(machine, EventSource.NAVIGATION, EventType.READY)
     )
     assert result.changed
+    assert result.snapshot.state == GlobalState.READY
+
+
+def start_patrol(machine):
+    make_ready(machine)
+    result = machine.handle_task_command(
+        command(
+            machine,
+            TaskCommand.START,
+            route_state=route(),
+            home=HomePoseData(pose=(0.0, 0.0, 0.0)),
+        )
+    )
+    assert result.changed
     assert result.snapshot.state == GlobalState.PATROL
+    assert result.snapshot.task_state == ParentTaskState.TASK_RUNNING
 
 
 def advance_to_verify(machine, target_id=87):
@@ -83,7 +125,9 @@ def test_startup_requires_both_ready_events():
         event(machine, EventSource.NAVIGATION, EventType.READY)
     )
     assert result.changed
-    assert machine.snapshot.state == GlobalState.PATROL
+    assert machine.snapshot.state == GlobalState.READY
+    assert machine.snapshot.task_state == ParentTaskState.TASK_NO_TASK
+    assert machine.snapshot.navigation_mode == NavigationMode.NAVIGATION_STOP
     assert machine.snapshot.state_seq == first_seq + 1
 
 

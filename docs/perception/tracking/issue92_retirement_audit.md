@@ -2,12 +2,20 @@
 
 日期：2026-07-31
 
-## Supported contract
+> 本页保存 #92 完成时的接口退役证据；下文把 READY 列在 tracking 输出中是当时范围。
+> 当前 tracking 只发布 `detection_tracking` capability contribution、`TARGET_CONFIRMED`、
+> `TARGET_LOST` 和有效 bbox；感知整体 `SOURCE_PERCEPTION/READY` 由
+> `perception_readiness` 聚合发布。现行父任务契约以
+> [`../../contracts/patrol_task_lifecycle_design.md`](../../contracts/patrol_task_lifecycle_design.md)
+> 为准，双侧 READY 后仍需显式 START。
+
+## Supported contract（截至 2026-07-31 的历史范围）
 
 视觉 runtime 的唯一下游 patrol 集成是 `dog_patrol_interfaces`：
 
 - `/mission/state` 输入；
-- `/mission/event` 上 `SOURCE_PERCEPTION` 的 READY、TARGET_CONFIRMED、TARGET_LOST；
+- `/mission/event` 上 `SOURCE_PERCEPTION` 的 READY、TARGET_CONFIRMED、TARGET_LOST（READY 归属说明
+  见页首历史边界）；
 - `/perception/selected_target_bbox` 上当前帧可信 `TargetBoundingBox`。
 
 `MissionRosAdapter` 是该 ROS transport 的唯一边界。没有 UDP compatibility mode、bearing output

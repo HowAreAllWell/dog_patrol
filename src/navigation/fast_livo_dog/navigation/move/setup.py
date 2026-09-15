@@ -35,7 +35,6 @@ setup(
                 'priest_mppi_adapter_nav_cmd_dwb_smooth_responsive = '
                 'move.priest_mppi_adapter_nav_cmd_dwb_smooth_responsive:main'
             ),
-            'global_path_publisher = move.global_path_publisher:main',
             'global_path_seq_publisher = move.global_path_seq_publisher:main',
             'nav_cmd_domain_bridge = move.nav_cmd_domain_bridge:main',
         ],

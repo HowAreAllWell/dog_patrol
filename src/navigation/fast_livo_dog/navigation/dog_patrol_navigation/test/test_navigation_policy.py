@@ -66,6 +66,18 @@ def test_unknown_state_forces_safe_stop_actions():
     assert not policy.allow_target_motion
 
 
+def test_ready_is_explicit_safe_standby_and_clears_target():
+    policy = navigation_policy(7)
+    assert policy.description == "ready standby"
+    assert policy.safe_stop
+    assert policy.pause_patrol
+    assert policy.clear_navigation_path
+    assert policy.reset_target
+    assert not policy.resume_patrol
+    assert not policy.allow_target_fusion
+    assert not policy.allow_target_motion
+
+
 def test_moving_target_updates_three_meter_standoff_goal():
     first = compute_standoff_decision(0.0, 0.0, 8.0, 0.0, 3.0, 0.25)
     moved = compute_standoff_decision(0.0, 0.0, 9.0, 1.0, 3.0, 0.25)

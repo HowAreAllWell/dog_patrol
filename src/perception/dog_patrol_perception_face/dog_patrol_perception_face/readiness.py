@@ -8,6 +8,14 @@ import threading
 
 from .preflight import ERROR, NOT_READY, READY, FacePreflightOutcome
 
+UINT32_MASK = (1 << 32) - 1
+UINT32_HALF_RANGE = 1 << 31
+
+
+def _is_newer_state_seq(candidate: int, current: int) -> bool:
+    delta = (int(candidate) - int(current)) & UINT32_MASK
+    return 0 < delta < UINT32_HALF_RANGE
+
 
 class FaceReadinessController:
     """Run one preflight at a time and publish only its current STARTUP result."""
@@ -23,7 +31,8 @@ class FaceReadinessController:
         self._publish = publish
         self._startup_state = int(startup_state)
         self._condition = threading.Condition()
-        self._desired: tuple[int, int] | None = None
+        self._desired: tuple[int, int, int, int] | None = None
+        self._observed: tuple[int, int, int, int] | None = None
         self._generation = 0
         self._completed_generation = 0
         self._stopping = False
@@ -34,14 +43,39 @@ class FaceReadinessController:
         )
         self._worker.start()
 
-    def observe(self, state_seq: int, state: int) -> None:
-        normalized = (int(state_seq), int(state))
+    def observe(
+        self,
+        state_seq: int,
+        state: int,
+        target_id: int = 0,
+        handled_target_id: int = 0,
+    ) -> None:
+        normalized = (
+            int(state_seq) & UINT32_MASK,
+            int(state),
+            int(target_id),
+            int(handled_target_id),
+        )
+        if normalized[0] == 0:
+            return
         with self._condition:
-            if normalized == self._desired:
-                return
+            if self._observed is not None:
+                if normalized[0] == self._observed[0]:
+                    if normalized[1] == self._observed[1]:
+                        return
+                    self._observed = (normalized[0], -1, -1, -1)
+                    self._desired = None
+                    self._generation += 1
+                    self._condition.notify_all()
+                    return
+                if not _is_newer_state_seq(normalized[0], self._observed[0]):
+                    return
+            self._observed = normalized
             self._desired = (
                 normalized
-                if normalized[0] > 0 and normalized[1] == self._startup_state
+                if normalized[1] == self._startup_state
+                and normalized[2] == 0
+                and normalized[3] == 0
                 else None
             )
             self._generation += 1
@@ -54,6 +88,14 @@ class FaceReadinessController:
             self._stopping = True
             self._condition.notify_all()
         self._worker.join()
+
+    def expire(self) -> None:
+        """Invalidate an in-flight preflight after MissionState heartbeat loss."""
+        with self._condition:
+            self._observed = None
+            self._desired = None
+            self._generation += 1
+            self._condition.notify_all()
 
     def _run(self) -> None:
         while True:

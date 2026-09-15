@@ -13,6 +13,10 @@ provider 的 worker 与 ROS executor 分离；重复命令不重复建 task，�
 VERIFY 时请求取消并抑制旧 session 的迟到输出。默认不会写入 PCM；回放与
 硬件验收使用测试注入的 `TaskStream` seam，不作为安装后的通用入口。
 
+只有 `TASK_RUNNING + VERIFY_IDENTITY + target_id>0` 才能建立语音会话。READY（包括 PAUSE、RETURN、
+TERMINATE 后的 READY）或其他非 VERIFY 状态会取消会话；取消只产生 `CANCELLED` 技术证据，
+不会产生 `UNAUTHORIZED`。旧 `state_seq`、target、stage 和 provider evidence 均被丢弃。
+
 部署时提供 Vosk 模型目录并启动：
 
 ```bash
@@ -39,6 +43,11 @@ ros2 launch dog_patrol_perception_voice voice.launch.py \
 `state_seq` 只运行一次真实 preflight，并以同一 `observed_startup_state_seq` 发布 transient-local
 `CapabilityStatus`：缺失部署输入或设备不可用为 `NOT_READY`，配置、模型或 helper 校验错误为 `ERROR`，
 全部通过才为 `READY`；旧 STARTUP 的 retained status 不会匹配新的 sequence。
+
+离开 STARTUP 后不会重新运行 preflight；迟到旧 STARTUP 快照和旧 generation 结果都不能发布新的
+readiness 状态。
+provider 和 readiness 默认使用 `state_timeout=0.75 s`；MissionState heartbeat 超时会取消当前
+语音会话并使在途 preflight 结果失效，取消仍只产生技术记录。
 
 preflight 只读取安装后的配置/helper、加载 Vosk 模型、执行 `adb get-state`、查询 FFmpeg 的 flite
 filter 和 ALSA 的 `aplay -L`/`amixer scontrols`。它不创建 voice task，不执行 ADB push/shell，不接管

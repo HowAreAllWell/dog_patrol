@@ -1,7 +1,7 @@
 import os
 
 from launch import LaunchDescription
-from launch.actions import DeclareLaunchArgument
+from launch.actions import DeclareLaunchArgument, Shutdown
 from launch.substitutions import EnvironmentVariable, LaunchConfiguration, PathJoinSubstitution
 from launch_ros.actions import Node
 from launch_ros.substitutions import FindPackageShare
@@ -23,6 +23,7 @@ def generate_launch_description():
     selected_global_path_topic = LaunchConfiguration("selected_global_path_topic")
     pure_pursuit_plan_topic = LaunchConfiguration("pure_pursuit_plan_topic")
     mission_state_topic = LaunchConfiguration("mission_state_topic")
+    task_state_topic = LaunchConfiguration("task_state_topic")
     return LaunchDescription(
         [
             DeclareLaunchArgument(
@@ -36,7 +37,7 @@ def generate_launch_description():
             DeclareLaunchArgument("selected_global_path_topic", default_value="/global_path"),
             DeclareLaunchArgument("pure_pursuit_plan_topic", default_value="/global_path"),
             DeclareLaunchArgument("mission_state_topic", default_value="/mission/state"),
-            DeclareLaunchArgument("resume_topic", default_value="/waypoint_sequence/resume"),
+            DeclareLaunchArgument("task_state_topic", default_value="/patrol_task/state"),
             DeclareLaunchArgument(
                 "device_parameters_file",
                 default_value=PathJoinSubstitution(
@@ -49,13 +50,14 @@ def generate_launch_description():
                 executable="navigation_path_mux",
                 name="navigation_path_mux",
                 output="screen",
+                on_exit=Shutdown(reason="navigation path mux exited"),
                 parameters=[
                     {
                         "waypoint_path_topic": waypoint_path_topic,
                         "mission_path_topic": mission_path_topic,
                         "output_path_topic": selected_global_path_topic,
                         "pure_pursuit_path_topic": pure_pursuit_plan_topic,
-                        "mission_state_topic": mission_state_topic,
+                        "task_state_topic": task_state_topic,
                     }
                 ],
             ),
@@ -64,6 +66,7 @@ def generate_launch_description():
                 executable="navigation_mission_coordinator",
                 name="navigation_mission_coordinator",
                 output="screen",
+                on_exit=Shutdown(reason="navigation mission coordinator exited"),
                 parameters=[
                     LaunchConfiguration("params_file"),
                     {
@@ -72,9 +75,9 @@ def generate_launch_description():
                             "device_parameters_file"
                         ),
                         "topics.mission_state": mission_state_topic,
+                        "topics.task_state": task_state_topic,
                         "topics.global_path": LaunchConfiguration("mission_path_topic"),
                         "topics.selected_global_path": selected_global_path_topic,
-                        "topics.resume_patrol": LaunchConfiguration("resume_topic"),
                     },
                 ],
             ),

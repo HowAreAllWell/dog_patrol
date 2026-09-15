@@ -1,7 +1,8 @@
 from launch import LaunchDescription
-from launch.actions import DeclareLaunchArgument
+from launch.actions import DeclareLaunchArgument, Shutdown
 from launch.substitutions import EnvironmentVariable, LaunchConfiguration
 from launch_ros.actions import Node
+from launch_ros.parameter_descriptions import ParameterValue
 
 
 def generate_launch_description():
@@ -15,6 +16,7 @@ def generate_launch_description():
     evidence_topic = LaunchConfiguration("authorization_evidence_topic")
     command_topic = LaunchConfiguration("authorization_command_topic")
     provider = LaunchConfiguration("provider")
+    state_timeout = LaunchConfiguration("state_timeout")
     python_prefix = [
         EnvironmentVariable("DOG_PATROL_PYTHON", default_value="python3"),
         " ",
@@ -26,6 +28,7 @@ def generate_launch_description():
         name="perception_face_readiness",
         output="screen",
         prefix=python_prefix,
+        on_exit=Shutdown(reason="face readiness exited"),
         parameters=[
             {
                 "mission_state_topic": state_topic,
@@ -35,6 +38,7 @@ def generate_launch_description():
                 "detector_engine": detector_engine,
                 "recognition_engine": recognition_engine,
                 "whitelist_dir": whitelist_dir,
+                "state_timeout": ParameterValue(state_timeout, value_type=float),
             }
         ],
     )
@@ -44,6 +48,7 @@ def generate_launch_description():
         name="perception_face_provider",
         output="screen",
         prefix=python_prefix,
+        on_exit=Shutdown(reason="face provider exited"),
         parameters=[
             {
                 "mission_state_topic": state_topic,
@@ -55,6 +60,7 @@ def generate_launch_description():
                 "detector_engine": detector_engine,
                 "recognition_engine": recognition_engine,
                 "whitelist_dir": whitelist_dir,
+                "state_timeout": ParameterValue(state_timeout, value_type=float),
             }
         ],
     )
@@ -83,6 +89,7 @@ def generate_launch_description():
                 default_value="/perception/authorization_command",
             ),
             DeclareLaunchArgument("provider", default_value="face"),
+            DeclareLaunchArgument("state_timeout", default_value="0.75"),
             readiness,
             evidence,
         ]

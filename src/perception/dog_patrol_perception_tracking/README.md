@@ -23,6 +23,14 @@ Dog patrol 的正式 perception tracking 模块，包含相机接入、检测、
   `MissionState` 输入、感知事件和 best-effort 新鲜 bbox 输出。三个感知 capability 的聚合以及
   公共 `SOURCE_PERCEPTION/READY` 由 `perception_readiness` 节点负责，不由 tracking adapter 代发
 
+父任务启动时，tracking 在双 READY 后的 `MissionState.READY` 下只清理 primary，不选目标、不发
+bbox 或目标事件。只有 supervisor 通过 `/mission/task_command` 接受 START、发布
+`TASK_RUNNING + PATROL` 后，tracking 才恢复目标选择；旧 state_seq、target 和 bbox 不能跨越
+PAUSE、RETURN 或 TERMINATE 边界。
+mission 模式使用 `mission.state_timeout=0.75 s`；MissionState heartbeat 超时或同序号字段冲突时，
+adapter 清空当前业务输入，后续帧不选择 primary、不发 bbox 或目标事件，直到收到更大的合法序号
+或超时后的当前合法 heartbeat。
+
 未接入或未完成：
 - identity 层尚未迁移为完整的新状态机；`IdentityManager` 是公开接口并持有当前 identity runtime state。内部 `IdentityAssignmentEngineAdapter` 只承担 assignment / recovery / update engine 适配，调用已抽取的 policy、cost、solver、birth、binding、store、mutation 和 projection helper，保持既有 debug row、raw-to-semantic mapping 与 public behavior。Phase 5 BirthManager 已固定为唯一运行时 birth / hidden candidate 路径，但 primary/output 仍保持当前公开语义。
 - 距离/2D 相对位置
@@ -181,9 +189,10 @@ source /path/to/dog_patrol/install/setup.bash
 
 - `/mission/state`：reliable、transient-local、keep-last 1。adapter 拒绝未知 enum、无效
   phase/target 组合、同 sequence 冲突消息以及旧的 wraparound-safe `state_seq`。
-- `/mission/event`：reliable、volatile、keep-last 10。发布 aggregate `READY`、
-  `TARGET_CONFIRMED` 和 coordinator 的 `TARGET_LOST`，source 为
-  `SOURCE_PERCEPTION`。
+- `/perception/capability_status`：reliable、transient-local、keep-last 1。tracking 只发布
+  `detection_tracking` contribution；感知整体 READY 由 `perception_readiness` 聚合后发布。
+- `/mission/event`：reliable、volatile、keep-last 10。tracking 发布 `TARGET_CONFIRMED` 和
+  coordinator 的 `TARGET_LOST`，source 为 `SOURCE_PERCEPTION`。
 - `/perception/selected_target_bbox`：best-effort、volatile、keep-last 5。只传当前帧、当前
   semantic `target_id` 的可信框；`Header.stamp` 为相机 source timestamp，`frame_id` 为
   `perception.camera_optical_frame_id`，且 x/y 以原图像素的 clamped half-open 区间表示。
@@ -201,11 +210,13 @@ frame decision 由 `MissionFrameTransaction` 在 adapter 的 mission mutex 下�
 sequence 或旧 target 的 frame action 发到 ROS，亦不会因 state 交错而吞掉新的
 target-confirmed/loss action。
 
-无图形会话可运行独立进程 smoke：启动 `mission_ros_adapter_smoke`，使用另一个 ROS 2
+无图形会话仍可运行独立进程 smoke：启动 `mission_ros_adapter_smoke`，使用另一个 ROS 2
 进程向默认 `/issue84/smoke/mission/state` 发布 `STARTUP(100)`、`PATROL(101)`、
 `CONFIRM_TARGET(102,target_id=42)`；通过外部 `ros2 topic echo` 观察 tracking capability status、
-TARGET_CONFIRMED、当前帧 bbox 和 TARGET_LOST。该 fixture 使用固定的
-可信 synthetic frame，只验收 DDS/adapter transport，不能替代真 Hik 相机中的真实检测验收。
+TARGET_CONFIRMED、当前帧 bbox 和 TARGET_LOST。该 fixture 使用固定的可信 synthetic frame，
+只验收 DDS/adapter transport，明确绕过 mission supervisor 的父任务门控，不能作为生产启动方式，
+也不能替代真 Hik 相机的真实检测验收。生产或 fake integration 必须经过双 READY、合法路线和
+`/mission/task_command` 的显式 START。
 
 当前自动化回归由本包的 core、transport 和 mission transaction 单元测试覆盖，重点验证
 `MissionFrameTransaction`、`MissionRosAdapter` 的 STARTUP readiness、PATROL 首帧确认、
@@ -222,10 +233,11 @@ tracker 资产。命令、资产哈希、帧号和 DDS echo/info/hz 证据见
 
 ## 下游输出
 
-下游 patrol 集成只使用 `dog_patrol_interfaces`：`/mission/event` 上的
-`SOURCE_PERCEPTION` READY、TARGET_CONFIRMED、TARGET_LOST，以及
-`/perception/selected_target_bbox` 的当前帧 `TargetBoundingBox`。UDP JSON、upstream bearing
-和 `vision_msgs/Detection2DArray` 不属于支持的接口。
+下游 patrol 集成只使用共享接口：tracking 在 `/perception/capability_status` 发布
+`detection_tracking` contribution，在 `/mission/event` 发布 `SOURCE_PERCEPTION` 的
+`TARGET_CONFIRMED`、`TARGET_LOST`，并在 `/perception/selected_target_bbox` 发布当前帧
+`TargetBoundingBox`。感知整体 `SOURCE_PERCEPTION/READY` 由 `perception_readiness` 独占发布。
+UDP JSON、upstream bearing 和 `vision_msgs/Detection2DArray` 不属于支持的接口。
 
 ## 主目标绑定策略（当前）
 
@@ -324,7 +336,7 @@ ros2 run dog_patrol_perception_tracking dog_patrol_perception_tracking_node --ro
 
 ROS 图像输出和录制从同一 worker 产生同一 tracking/identity/primary/face overlay canvas。face bbox 来自
 best-effort、keep-last(1) 的 `/perception/face_overlay`，错目标、未来帧和过期结果自动抑制；没有 face
-节点时原有行为不变。`/perception/tracking_overlay` 使用 `bgr8` 编码、源相机时间戳和相机光学
+节点或没有当前合法 MissionState 时清除人脸框。`/perception/tracking_overlay` 使用 `bgr8` 编码、源相机时间戳和相机光学
 坐标系，QoS 为 best-effort、volatile、keep-last(1)，适合 RViz Image 显示。worker 队列有界、队满
 丢弃最新诊断帧而不等待编码、DDS 发布或显示；每秒日志会输出 capture、inference、render、stream/write
 的 FPS、drop 和 p50/p95/p99。`visualization.window=true` 才会额外打开旧 OpenCV 窗口，默认不打开。

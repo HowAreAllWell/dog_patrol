@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 
 import threading
+import time
 from typing import Optional, Sequence
 
 import rclpy
@@ -22,6 +23,7 @@ class PerceptionReadinessNode(Node):
         self.declare_parameter("mission_state_topic", "/mission/state")
         self.declare_parameter("mission_event_topic", "/mission/event")
         self.declare_parameter("capability_status_topic", "/perception/capability_status")
+        self.declare_parameter("state_timeout", 0.75)
 
         state_qos = QoSProfile(
             reliability=ReliabilityPolicy.RELIABLE,
@@ -42,6 +44,11 @@ class PerceptionReadinessNode(Node):
             depth=10,
         )
         self._lock = threading.RLock()
+        self._state_timeout = max(
+            0.1, float(self.get_parameter("state_timeout").value)
+        )
+        self._last_state_monotonic = None
+        self._state_timed_out = False
         self._coordinator = ReadinessCoordinator(
             self.REQUIRED_CAPABILITIES, startup_state=MissionState.STARTUP
         )
@@ -60,13 +67,39 @@ class PerceptionReadinessNode(Node):
             self._on_capability,
             capability_qos,
         )
+        self._state_watchdog = self.create_timer(
+            min(0.1, self._state_timeout / 2.0), self._check_state_timeout
+        )
 
     def _on_mission(self, msg: MissionState) -> None:
         with self._lock:
+            if int(msg.state_seq) <= 0:
+                self._coordinator.expire_mission()
+                return
+            self._last_state_monotonic = time.monotonic()
+            self._state_timed_out = False
             ready_startup_seq = self._coordinator.observe_mission(
-                int(msg.state_seq), int(msg.state)
+                int(msg.state_seq),
+                int(msg.state),
+                int(msg.target_id),
+                int(msg.handled_target_id),
             )
             self._publish_if_ready(ready_startup_seq)
+
+    def _check_state_timeout(self) -> None:
+        with self._lock:
+            if (
+                self._last_state_monotonic is None
+                or self._state_timed_out
+                or time.monotonic() - self._last_state_monotonic
+                <= self._state_timeout
+            ):
+                return
+            self._state_timed_out = True
+            self._coordinator.expire_mission()
+        self.get_logger().warning(
+            "mission state heartbeat timed out; aggregate readiness invalidated"
+        )
 
     def _on_capability(self, msg: CapabilityStatus) -> None:
         with self._lock:

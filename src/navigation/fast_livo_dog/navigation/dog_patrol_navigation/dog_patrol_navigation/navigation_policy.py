@@ -14,6 +14,7 @@ class MissionStateValue(IntEnum):
     VERIFY_IDENTITY = 4
     TRACK_INTRUDER = 5
     RECOVER_PATROL = 6
+    READY = 7
 
 
 @dataclass(frozen=True)
@@ -49,6 +50,12 @@ def navigation_policy(
 
     if state == MissionStateValue.STARTUP:
         return NavigationPolicy(description="initializing")
+    if state == MissionStateValue.READY:
+        return NavigationPolicy(
+            description="ready standby",
+            safe_stop=True,
+            reset_target=True,
+        )
     if state == MissionStateValue.PATROL:
         return NavigationPolicy(
             description="patrolling",

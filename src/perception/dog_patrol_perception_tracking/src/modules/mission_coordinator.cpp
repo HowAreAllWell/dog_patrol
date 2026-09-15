@@ -22,6 +22,7 @@ bool MissionCoordinator::AcceptsFreshTargetBox(const MissionPhase phase) {
     case MissionPhase::kStartup:
     case MissionPhase::kPatrol:
     case MissionPhase::kRecoverPatrol:
+    case MissionPhase::kReady:
       return false;
   }
   return false;
@@ -88,6 +89,7 @@ MissionCoordinator::Output MissionCoordinator::Update(const FrameInput &input) {
   latest_source_time_ = input.source_time;
 
   if (input.mission.phase == MissionPhase::kPatrol || input.mission.phase == MissionPhase::kStartup ||
+      input.mission.phase == MissionPhase::kReady ||
       input.mission.phase == MissionPhase::kRecoverPatrol ||
       input.mission.target_id <= 0) {
     ResetMissionTarget();

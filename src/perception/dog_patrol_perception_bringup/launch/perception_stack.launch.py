@@ -1,7 +1,7 @@
 """Start the complete perception mission stack using the navigation camera."""
 
 from launch import LaunchDescription
-from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription
+from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription, Shutdown
 from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch.substitutions import EnvironmentVariable, LaunchConfiguration, PathJoinSubstitution
 from launch_ros.actions import Node
@@ -35,6 +35,7 @@ def generate_launch_description():
     tracked_target_image_topic = LaunchConfiguration("tracked_target_image_topic")
     authorization_evidence_topic = LaunchConfiguration("authorization_evidence_topic")
     authorization_command_topic = LaunchConfiguration("authorization_command_topic")
+    state_timeout = LaunchConfiguration("state_timeout")
     python_prefix = [
         EnvironmentVariable("DOG_PATROL_PYTHON", default_value="python3"),
         " ",
@@ -61,6 +62,7 @@ def generate_launch_description():
         executable="dog_patrol_perception_tracking_node",
         name="dog_patrol_perception_tracking_node",
         output="screen",
+        on_exit=Shutdown(reason="tracking exited"),
         parameters=[
             tracking_params,
             {
@@ -72,6 +74,7 @@ def generate_launch_description():
                 "detector.runtime_path": tracking_engine,
                 "tracker.config_path": tracker_config,
                 "mission.state_topic": mission_state_topic,
+                "mission.state_timeout": ParameterValue(state_timeout, value_type=float),
                 "mission.event_topic": mission_event_topic,
                 "mission.selected_target_bbox_topic": target_bbox_topic,
                 "perception.capability_status_topic": capability_status_topic,
@@ -98,6 +101,7 @@ def generate_launch_description():
             "authorization_evidence_topic": authorization_evidence_topic,
             "authorization_command_topic": authorization_command_topic,
             "provider": "face",
+            "state_timeout": state_timeout,
         },
     )
     voice = include(
@@ -112,6 +116,7 @@ def generate_launch_description():
             "authorization_evidence_topic": authorization_evidence_topic,
             "authorization_command_topic": authorization_command_topic,
             "provider": "voice",
+            "state_timeout": state_timeout,
         },
     )
     readiness = Node(
@@ -120,12 +125,14 @@ def generate_launch_description():
         name="perception_readiness",
         output="screen",
         prefix=python_prefix,
+        on_exit=Shutdown(reason="aggregate readiness exited"),
         parameters=[
             {
                 "use_sim_time": use_sim_time,
                 "mission_state_topic": mission_state_topic,
                 "mission_event_topic": mission_event_topic,
                 "capability_status_topic": capability_status_topic,
+                "state_timeout": ParameterValue(state_timeout, value_type=float),
             }
         ],
     )
@@ -135,6 +142,7 @@ def generate_launch_description():
         name="perception_authorization",
         output="screen",
         prefix=python_prefix,
+        on_exit=Shutdown(reason="authorization orchestrator exited"),
         parameters=[
             {
                 "use_sim_time": use_sim_time,
@@ -142,6 +150,7 @@ def generate_launch_description():
                 "mission_event_topic": mission_event_topic,
                 "authorization_evidence_topic": authorization_evidence_topic,
                 "authorization_command_topic": authorization_command_topic,
+                "state_timeout": ParameterValue(state_timeout, value_type=float),
             }
         ],
     )
@@ -182,6 +191,7 @@ def generate_launch_description():
                 ),
             ),
             DeclareLaunchArgument("mission_state_topic", default_value="/mission/state"),
+            DeclareLaunchArgument("state_timeout", default_value="0.75"),
             DeclareLaunchArgument("mission_event_topic", default_value="/mission/event"),
             DeclareLaunchArgument(
                 "capability_status_topic",

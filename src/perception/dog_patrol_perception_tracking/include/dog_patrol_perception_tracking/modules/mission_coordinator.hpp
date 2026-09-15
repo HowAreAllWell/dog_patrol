@@ -21,6 +21,7 @@ enum class MissionPhase : std::uint8_t {
   kVerifyIdentity = 4,
   kTrackIntruder = 5,
   kRecoverPatrol = 6,
+  kReady = 7,
 };
 
 struct MissionSnapshot {

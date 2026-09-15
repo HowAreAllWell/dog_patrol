@@ -45,6 +45,7 @@ class AuthorizationHarness:
                 Parameter("mission_event_topic", value=self.event_topic),
                 Parameter("authorization_evidence_topic", value=self.evidence_topic),
                 Parameter("authorization_command_topic", value=self.command_topic),
+                Parameter("state_timeout", value=10.0),
             ]
         )
         self.state_pub = self.source.create_publisher(
@@ -79,12 +80,15 @@ class AuthorizationHarness:
             self.executor.spin_once(timeout_sec=0.05)
         return predicate()
 
-    def publish_state(self, seq, target, *, state=MissionState.VERIFY_IDENTITY):
+    def publish_state(
+        self, seq, target, *, state=MissionState.VERIFY_IDENTITY, handled=0
+    ):
         msg = MissionState()
         msg.header.stamp.sec = seq
         msg.state_seq = seq
         msg.state = state
         msg.target_id = target
+        msg.handled_target_id = handled
         self.state_pub.publish(msg)
         for _ in range(5):
             self.executor.spin_once(timeout_sec=0.05)
@@ -221,13 +225,14 @@ def test_any_expected_pass_authorizes_and_cancels_other_work(
 
 def test_stale_wrong_stage_and_wrong_provider_evidence_are_ignored(harness):
     harness.publish_state(19, 44)
-    for seq, stage, provider in (
-        (18, AuthorizationEvidence.INITIAL_FACE, "face"),
-        (19, AuthorizationEvidence.DUAL_FIRST, "face"),
-        (19, AuthorizationEvidence.INITIAL_FACE, "voice"),
+    for seq, target, stage, provider in (
+        (18, 44, AuthorizationEvidence.INITIAL_FACE, "face"),
+        (19, 45, AuthorizationEvidence.INITIAL_FACE, "face"),
+        (19, 44, AuthorizationEvidence.DUAL_FIRST, "face"),
+        (19, 44, AuthorizationEvidence.INITIAL_FACE, "voice"),
     ):
         harness.publish_evidence(
-            seq, 44, stage, provider, AuthorizationEvidence.PASSED
+            seq, target, stage, provider, AuthorizationEvidence.PASSED
         )
 
     assert not harness.events
@@ -288,3 +293,64 @@ def test_state_replacement_cancels_active_work(harness):
     )
     assert command_keys(harness.commands) == expected_commands
     assert not harness.events
+
+
+def test_ready_cancels_without_unauthorized_event(harness):
+    harness.publish_state(30, 55)
+    harness.publish_state(31, 0, state=MissionState.READY)
+
+    assert command_keys(harness.commands) == [
+        (30, 55, AuthorizationCommand.INITIAL_FACE),
+        (30, 55, AuthorizationCommand.CANCEL),
+    ]
+    assert harness.events == []
+
+    harness.publish_evidence(
+        30,
+        55,
+        AuthorizationEvidence.INITIAL_FACE,
+        "face",
+        AuthorizationEvidence.NOT_PASSED,
+    )
+    assert harness.events == []
+
+
+def test_late_old_verify_state_cannot_reopen_cancelled_session(harness):
+    harness.publish_state(50, 77)
+    harness.publish_state(51, 0, state=MissionState.READY)
+
+    harness.publish_state(50, 77)
+
+    assert command_keys(harness.commands) == [
+        (50, 77, AuthorizationCommand.INITIAL_FACE),
+        (50, 77, AuthorizationCommand.CANCEL),
+    ]
+    assert harness.events == []
+
+
+def test_mission_state_heartbeat_timeout_cancels_without_business_event(harness):
+    harness.publish_state(60, 88)
+    harness.node._state_timeout = 0.01
+    harness.node._last_state_monotonic = time.monotonic() - 1.0
+
+    harness.node._check_state_timeout()
+    assert harness.spin_until(
+        lambda: command_keys(harness.commands)[-1]
+        == (60, 88, AuthorizationCommand.CANCEL)
+    )
+    assert harness.node._state_timed_out
+    assert harness.events == []
+
+
+def test_same_sequence_non_session_field_conflict_stays_cancelled(harness):
+    harness.publish_state(70, 90)
+    harness.publish_state(70, 90, handled=90)
+    harness.publish_state(70, 90)
+    harness.publish_state(71, 91)
+
+    assert command_keys(harness.commands) == [
+        (70, 90, AuthorizationCommand.INITIAL_FACE),
+        (70, 90, AuthorizationCommand.CANCEL),
+        (71, 91, AuthorizationCommand.INITIAL_FACE),
+    ]
+    assert harness.events == []

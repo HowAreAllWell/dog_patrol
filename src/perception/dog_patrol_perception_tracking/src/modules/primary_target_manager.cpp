@@ -77,9 +77,19 @@ std::optional<IdentityObservation> PrimaryTargetManager::SelectLargestValidPerso
 
 void PrimaryTargetManager::ResetForPatrolCycle(const int handled_semantic_id) {
   if (handled_semantic_id > 0) {
-    handled_identity_absence_started_at_.insert_or_assign(handled_semantic_id, std::nullopt);
+    handled_identity_absence_started_at_.try_emplace(handled_semantic_id, std::nullopt);
   }
 
+  ResetCurrentPrimary();
+}
+
+void PrimaryTargetManager::ResetMissionHistory() {
+  handled_identity_absence_started_at_.clear();
+  last_mission_for_primary_.reset();
+  ResetCurrentPrimary();
+}
+
+void PrimaryTargetManager::ResetCurrentPrimary() {
   state_ = PrimaryTargetResult{};
   primary_target_id_ = -1;
   bound_raw_track_id_ = -1;
@@ -228,7 +238,23 @@ PrimaryTargetResult PrimaryTargetManager::UpdateForMission(
     const std::optional<MissionSnapshot> & /*previous_mission*/,
     const TimePoint now) {
   if (!mission.has_value()) {
-    return Update(identities);
+    ResetCurrentPrimary();
+    last_mission_for_primary_.reset();
+    return state_;
+  }
+
+  if (mission->phase == MissionPhase::kStartup) {
+    const bool new_startup =
+        !last_mission_for_primary_.has_value() ||
+        last_mission_for_primary_->state_seq != mission->state_seq ||
+        last_mission_for_primary_->phase != MissionPhase::kStartup;
+    if (new_startup) {
+      ResetMissionHistory();
+    } else {
+      ResetCurrentPrimary();
+    }
+    last_mission_for_primary_ = mission;
+    return state_;
   }
 
   if (mission->phase == MissionPhase::kPatrol &&
@@ -239,6 +265,13 @@ PrimaryTargetResult PrimaryTargetManager::UpdateForMission(
     // errors. Only the supervisor's explicit disposition may exclude a person.
     // Read the current snapshot so skipped intermediate callbacks are harmless.
     ResetForPatrolCycle(mission->handled_target_id);
+  }
+
+  if (mission->phase == MissionPhase::kReady ||
+      mission->phase == MissionPhase::kRecoverPatrol) {
+    ResetCurrentPrimary();
+    last_mission_for_primary_ = mission;
+    return state_;
   }
 
   last_mission_for_primary_ = mission;

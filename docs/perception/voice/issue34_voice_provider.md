@@ -14,6 +14,11 @@ provider 只接受有效的 `VERIFY_IDENTITY` 和正数 `target_id`。`state_seq
 `NOT_PASSED`，任一窗通过发布 `PASSED`。模型、ADB、stream、helper、Prompt 或恢复故障发布
 `ERROR`。
 
+READY、PAUSE、RETURN、TERMINATE 以及任何其他非 `VERIFY_IDENTITY` 状态都会取消当前会话；取消
+只形成 `CANCELLED` 技术 evidence，不转换为 `UNAUTHORIZED`。旧 `state_seq`、`target_id`、stage
+或 provider 的迟到 evidence 在 adapter 发布前丢弃。readiness preflight 只由 `STARTUP` 触发，
+离开 STARTUP 后的迟到 preflight 不能再次发布 voice READY。
+
 ## 取消和并发边界
 
 离开 `VERIFY_IDENTITY`、`state_seq` 变化或 `target_id` 变化会递增内部 generation，

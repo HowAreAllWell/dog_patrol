@@ -36,6 +36,10 @@ class PrimaryTargetManager {
   // the detector, tracker, and identity manager.
   void ResetForPatrolCycle(int handled_semantic_id = -1);
 
+  // Clears all mission-owned primary and handled-target history. This is used
+  // only for STARTUP/reset or a full process session boundary.
+  void ResetMissionHistory();
+
   // Evaluates the mission-specific handled-ID policy only. Person validity,
   // confidence, and tracking continuity remain selection-layer concerns.
   bool IsMissionEligible(const IdentityObservation &identity) const;
@@ -74,6 +78,7 @@ class PrimaryTargetManager {
   PrimaryTargetResult EnterPendingRecovery(const std::string &decision_reason);
   PrimaryTargetResult EnterOccluded(const std::string &decision_reason);
   PrimaryTargetResult EnterLost(const std::string &decision_reason, int missing_frames);
+  void ResetCurrentPrimary();
 
   Config config_;
   PrimaryTargetResult state_{};

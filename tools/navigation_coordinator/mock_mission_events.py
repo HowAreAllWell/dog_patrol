@@ -16,6 +16,14 @@ from rclpy.executors import ExternalShutdownException
 from rclpy.node import Node
 from rclpy.qos import DurabilityPolicy, HistoryPolicy, QoSProfile, ReliabilityPolicy
 
+UINT32_MASK = (1 << 32) - 1
+UINT32_HALF_RANGE = 1 << 31
+
+
+def is_current_or_newer_state_seq(candidate: int, current: int) -> bool:
+    delta = (int(candidate) - int(current)) & UINT32_MASK
+    return delta == 0 or delta < UINT32_HALF_RANGE
+
 
 def state_qos() -> QoSProfile:
     return QoSProfile(
@@ -40,14 +48,30 @@ class MockMissionEvents(Node):
         super().__init__("mock_mission_events")
         self._args = args
         self._state: MissionState | None = None
+        self._state_conflicted = False
+        self._state_signature = None
         self._verification_seq: int | None = None
         self._pub = self.create_publisher(MissionEvent, args.event_topic, event_qos())
         self.create_subscription(MissionState, args.state_topic, self._on_state, state_qos())
         self.create_timer(0.1, self._tick)
 
     def _on_state(self, msg: MissionState) -> None:
-        if self._state is not None and msg.state_seq < self._state.state_seq:
+        seq = int(msg.state_seq) & UINT32_MASK
+        signature = (int(msg.state), int(msg.target_id), int(msg.handled_target_id))
+        if seq == 0:
             return
+        if self._state is not None:
+            previous_seq = int(self._state.state_seq) & UINT32_MASK
+            if seq == previous_seq:
+                if signature == self._state_signature:
+                    return
+                self._state_conflicted = True
+                self._state = None
+                return
+            if not is_current_or_newer_state_seq(seq, previous_seq):
+                return
+        self._state_conflicted = False
+        self._state_signature = signature
         self._state = msg
 
     def _publish(self, event: int, source: int, detail: str) -> None:

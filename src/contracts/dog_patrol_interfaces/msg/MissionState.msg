@@ -5,6 +5,7 @@ uint8 APPROACH_TARGET=3
 uint8 VERIFY_IDENTITY=4
 uint8 TRACK_INTRUDER=5
 uint8 RECOVER_PATROL=6
+uint8 READY=7
 
 std_msgs/Header header
 uint32 state_seq
@@ -14,6 +15,8 @@ string detail
 
 # Business disposition, not the target released by navigation recovery.
 # Nonzero only after AUTHORIZED or final TARGET_LOST in TRACK_INTRUDER.
-# Retained in RECOVER_PATROL and the following PATROL; cleared for a new
-# target task or session. Failures before completion must leave this zero.
+# Retained in RECOVER_PATROL, PAUSED+READY and the following PATROL; cleared
+# for a new target task or session. Failures before completion must leave this
+# zero. In PAUSED+READY and pause-recovery RECOVER_PATROL, target_id is zero
+# and this field may retain the last completed target.
 uint32 handled_target_id

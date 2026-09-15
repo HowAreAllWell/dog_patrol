@@ -7,6 +7,11 @@
 - 机器狗底层控制接口 `/NAV_CMD`；
 - `navigation_mission_coordinator`，负责感知目标框与雷达点云融合、目标接近和跟踪。
 
+当前父任务生命周期由 `mission_supervisor` 唯一维护。双侧 READY 后只形成
+`TASK_NO_TASK + MissionState.READY`，不会自动执行 waypoint；路线准备完成后必须通过
+`/mission/task_command` 的 `PatrolTaskCommand.Request.START` 显式进入
+`TASK_RUNNING + PATROL`。PAUSE、RESUME、RETURN、TERMINATE 也只能通过该 service 发送。
+
 ## 目录结构
 
 ```text
@@ -59,11 +64,22 @@ ros2 launch move navigation.launch.py \
 
 ```text
 /mission/state
+/patrol_task/state
+/waypoint_sequence/state
 /perception/selected_target_bbox
 /livox/lidar
 /odom
-       -> 目标地图位置 -> /compute_path_to_pose -> /global_path
+       -> 目标地图位置 -> /compute_path_to_pose -> /mission_global_path
+waypoint publisher -> /waypoint_global_path
+两路私有路径 -> navigation_path_mux -> /global_path
 ```
+
+`/global_path` 只有 `navigation_path_mux` 发布。mux 只读取
+`PatrolTaskState.navigation_mode`，每个新 `state_seq` 先建立空路径屏障并过滤迟到路径。
+`state_seq=0` 不建立执行许可；同一序号字段冲突时 mux、waypoint publisher 和导航协调器
+都立即停止，并等待更大的合法序号，不能用后续同序号重发解除冲突。
+生产 launch 将 waypoint、mux、coordinator、Nav2 和最终控制链节点设为整组退出；任一关键
+进程退出都会结束导航 launch，由 console 停止旧感知会话并 reset，禁止单节点 respawn 续跑旧任务。
 
 当前坐标约定是：全局 `map`，平面导航 `base_footprint`，机身中心 `base_link`，雷达
 `livox_frame`，目标框相机 `camera_link`。感知目标框默认对应

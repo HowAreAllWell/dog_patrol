@@ -130,6 +130,8 @@ TEST_F(MissionRosAdapterTest, RejectsIncompatibleMissionStates) {
   EXPECT_FALSE(MissionRosAdapter::MissionFromMessage(
       State(1U, MissionStateMessage::CONFIRM_TARGET, 0U))
                    .has_value());
+  EXPECT_FALSE(MissionRosAdapter::MissionFromMessage(
+      State(0U, MissionStateMessage::READY, 0U)).has_value());
   EXPECT_FALSE(MissionRosAdapter::MissionFromMessage(State(1U, 255U)).has_value());
 }
 
@@ -140,6 +142,27 @@ TEST_F(MissionRosAdapterTest, AcceptsRecoveryStateWithTargetCorrelationId) {
   ASSERT_TRUE(snapshot.has_value());
   EXPECT_EQ(snapshot->phase, MissionPhase::kRecoverPatrol);
   EXPECT_EQ(snapshot->target_id, 42);
+}
+
+TEST_F(MissionRosAdapterTest, AcceptsReadyAndPausedRecoveryWithoutTargetId) {
+  auto snapshot = MissionRosAdapter::MissionFromMessage(
+      State(18U, MissionStateMessage::READY, 0U));
+  ASSERT_TRUE(snapshot.has_value());
+  EXPECT_EQ(snapshot->phase, MissionPhase::kReady);
+  EXPECT_EQ(snapshot->target_id, 0);
+
+  snapshot = MissionRosAdapter::MissionFromMessage(
+      State(19U, MissionStateMessage::READY, 0U, 42U));
+  ASSERT_TRUE(snapshot.has_value());
+  EXPECT_EQ(snapshot->phase, MissionPhase::kReady);
+  EXPECT_EQ(snapshot->handled_target_id, 42);
+
+  snapshot = MissionRosAdapter::MissionFromMessage(
+      State(20U, MissionStateMessage::RECOVER_PATROL, 0U, 42U));
+  ASSERT_TRUE(snapshot.has_value());
+  EXPECT_EQ(snapshot->phase, MissionPhase::kRecoverPatrol);
+  EXPECT_EQ(snapshot->target_id, 0);
+  EXPECT_EQ(snapshot->handled_target_id, 42);
 }
 
 TEST_F(MissionRosAdapterTest, ValidatesExplicitDispositionAgainstItsPhaseAndTarget) {
@@ -169,9 +192,41 @@ TEST_F(MissionRosAdapterTest, RejectsConflictingDispositionAtTheSameStateSequenc
   ASSERT_TRUE(adapter.StoreMissionState(State(19U, MissionStateMessage::PATROL, 0U, 42U)));
   EXPECT_FALSE(adapter.StoreMissionState(State(19U, MissionStateMessage::PATROL, 0U, 43U)));
   EXPECT_FALSE(adapter.StoreMissionState(State(19U, MissionStateMessage::PATROL)));
-  EXPECT_TRUE(adapter.StoreMissionState(State(19U, MissionStateMessage::PATROL, 0U, 42U)));
+  EXPECT_FALSE(adapter.StoreMissionState(State(19U, MissionStateMessage::PATROL, 0U, 42U)));
+  EXPECT_FALSE(adapter.CurrentMission().has_value());
+  EXPECT_TRUE(adapter.StoreMissionState(State(20U, MissionStateMessage::PATROL, 0U, 42U)));
   ASSERT_TRUE(adapter.CurrentMission().has_value());
   EXPECT_EQ(adapter.CurrentMission()->handled_target_id, 42);
+}
+
+TEST_F(MissionRosAdapterTest, MissionStateHeartbeatTimeoutFailsClosed) {
+  auto node = std::make_shared<rclcpp::Node>("mission_state_heartbeat_timeout");
+  MissionRosAdapter::Config config;
+  config.state_timeout = std::chrono::milliseconds{5};
+  MissionRosAdapter adapter(*node, config);
+  ASSERT_TRUE(adapter.StoreMissionState(State(30U, MissionStateMessage::PATROL)));
+  ASSERT_TRUE(adapter.CurrentMission().has_value());
+  std::this_thread::sleep_for(std::chrono::milliseconds{20});
+  EXPECT_FALSE(adapter.CurrentMission().has_value());
+
+  const auto output = adapter.ProcessFrame(
+      {TrustedPerson(42, 7)}, MissionCoordinator::Clock::now(),
+      Metadata(1710000000000000000ULL));
+  EXPECT_TRUE(output.events.empty());
+  EXPECT_FALSE(output.target_box.has_value());
+  EXPECT_LE(output.primary.primary_target_id, 0);
+}
+
+TEST_F(MissionRosAdapterTest, InvalidSameSequenceSnapshotLocksOutOriginalSnapshot) {
+  auto node = std::make_shared<rclcpp::Node>("invalid_same_sequence_snapshot");
+  MissionRosAdapter adapter(*node, MissionRosAdapter::Config{});
+  ASSERT_TRUE(adapter.StoreMissionState(State(40U, MissionStateMessage::PATROL)));
+  EXPECT_FALSE(
+      adapter.StoreMissionState(State(40U, MissionStateMessage::VERIFY_IDENTITY, 0U)));
+  EXPECT_FALSE(adapter.CurrentMission().has_value());
+  EXPECT_FALSE(adapter.StoreMissionState(State(40U, MissionStateMessage::PATROL)));
+  EXPECT_TRUE(adapter.StoreMissionState(State(41U, MissionStateMessage::PATROL)));
+  EXPECT_TRUE(adapter.CurrentMission().has_value());
 }
 
 TEST_F(MissionRosAdapterTest, PatrolMessageAlonePreservesHandledTargetAcrossRosTransport) {

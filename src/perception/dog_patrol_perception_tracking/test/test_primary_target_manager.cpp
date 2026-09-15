@@ -237,6 +237,61 @@ TEST(PrimaryTargetManagerTest, PatrolSelectionKeepsMultipleHandledIdentitiesExcl
   EXPECT_EQ(state.primary_track->id, 303);
 }
 
+TEST(PrimaryTargetManagerTest, ReadyClearsPrimaryWithoutSelectingOrDeletingHandledHistory) {
+  using namespace dog_patrol_perception_tracking;
+  PrimaryTargetManager::Config cfg;
+  cfg.min_person_area_px = 100.0F;
+  PrimaryTargetManager mgr(cfg);
+  const auto person = MakeIdentity(11, 101, ClassId::kPerson, cv::Rect2f(0, 0, 80, 80));
+  const auto eligible = MakeIdentity(22, 202, ClassId::kPerson, cv::Rect2f(100, 0, 60, 60));
+  const MissionSnapshot patrol{10U, MissionPhase::kPatrol, 0, 11};
+  const MissionSnapshot ready{11U, MissionPhase::kReady, 0, 11};
+
+  const auto selected = mgr.UpdateForMission({person, eligible}, patrol, std::nullopt,
+                                              PrimaryTargetManager::TimePoint{});
+  ASSERT_EQ(selected.primary_target_id, 22);
+  const auto standby = mgr.UpdateForMission({person, eligible}, ready, patrol,
+                                             PrimaryTargetManager::TimePoint{} + std::chrono::seconds{1});
+  EXPECT_EQ(standby.state, PrimaryState::kIdle);
+  EXPECT_EQ(standby.primary_target_id, -1);
+  EXPECT_FALSE(mgr.IsMissionEligible(person));
+}
+
+TEST(PrimaryTargetManagerTest, ReenteringPatrolDoesNotResetAnExistingHandledAbsenceTimer) {
+  using namespace dog_patrol_perception_tracking;
+  using namespace std::chrono_literals;
+  PrimaryTargetManager::Config cfg;
+  cfg.handled_ignore_absence = 60s;
+  PrimaryTargetManager mgr(cfg);
+  const auto start = PrimaryTargetManager::TimePoint{};
+
+  mgr.ResetForPatrolCycle(11);
+  mgr.UpdateForPatrol({}, start);
+  mgr.ResetForPatrolCycle(11);
+  mgr.UpdateForPatrol({}, start + 59s);
+  EXPECT_FALSE(mgr.IsMissionEligible(MakeLifecycleIdentity(
+      11, IdentityState::kActive, 0, cv::Rect2f{})));
+  mgr.UpdateForPatrol({}, start + 60s);
+  EXPECT_TRUE(mgr.IsMissionEligible(MakeLifecycleIdentity(
+      11, IdentityState::kActive, 0, cv::Rect2f{})));
+}
+
+TEST(PrimaryTargetManagerTest, StartupResetClearsPrimaryAndHandledMissionHistory) {
+  using namespace dog_patrol_perception_tracking;
+  PrimaryTargetManager mgr(PrimaryTargetManager::Config{});
+  const auto person = MakeIdentity(11, 101, ClassId::kPerson, cv::Rect2f(0, 0, 80, 80));
+  const MissionSnapshot patrol{10U, MissionPhase::kPatrol, 0, 11};
+  const MissionSnapshot startup{11U, MissionPhase::kStartup, 0, 0};
+
+  mgr.UpdateForMission({person}, patrol, std::nullopt, PrimaryTargetManager::TimePoint{});
+  EXPECT_FALSE(mgr.IsMissionEligible(person));
+  const auto reset = mgr.UpdateForMission({person}, startup, patrol,
+                                          PrimaryTargetManager::TimePoint{});
+  EXPECT_TRUE(mgr.IsMissionEligible(person));
+  EXPECT_EQ(reset.state, PrimaryState::kIdle);
+  EXPECT_EQ(reset.primary_target_id, -1);
+}
+
 TEST(PrimaryTargetManagerTest, ActivePatrolPrimaryDoesNotSwitchWhenAnotherEligiblePersonBecomesLarger) {
   using namespace std::chrono_literals;
 

@@ -3,7 +3,12 @@
 本文描述感知侧当前代码的行为、它与总状态机的边界，以及目标丢失和核验结果的最终闭环。
 感知内部只负责检测、跟踪、主目标选择和认证结果输出；任务恢复由总状态机和导航协调器完成。
 
-> **当前实现基线（2026-09-05）**：本文以当前工作区代码和消息定义为准。文中
+当前父任务生命周期以 `docs/contracts/patrol_task_lifecycle_design.md` 为权威契约。双侧
+capability READY 后总控只形成 `TASK_NO_TASK + MissionState.READY`，不会自动启动 PATROL；
+路线准备完成后必须通过 `/mission/task_command` 的 START 才进入 `TASK_RUNNING + PATROL`。
+本文中的旧 `STARTUP -> PATROL` 图示均按这个显式 START 前置条件理解。
+
+> **当前实现基线（2026-09-15）**：本文以当前工作区代码和消息定义为准。文中
 > `TARGET_REACQUIRED`、`HANDLING_COMPLETE`、`blocked`、`block_cause` 和人工处置
 > 分支均不属于当前公共协议；如果历史验收文档仍出现这些名称，只能按历史记录阅读。
 > 感知内部的 `OCCLUDED`、`PENDING_RECOVERY` 和 `LOST` 仍然保留，但它们不是公共
@@ -173,7 +178,10 @@ IDLE
 
 ## 5. 当前授权内部状态机
 
-授权协调器只在总状态为 `VERIFY_IDENTITY` 且目标有效时激活。
+授权协调器只在总状态为 `VERIFY_IDENTITY` 且目标有效时激活。收到 READY（包括 PAUSE、
+RETURN、TERMINATE 和父任务终态对应的 READY 快照）或其他非 VERIFY 状态时，face、voice、
+authorization 必须取消当前会话、使旧 generation 失效并拒绝旧 state_seq、target_id、
+stage/provider evidence。取消最多形成 `CANCELLED` 技术记录，不能转换为 `UNAUTHORIZED`。
 
 当前内部阶段为：
 
@@ -231,6 +239,8 @@ DUAL_SECOND
 - `READY`
 - `TARGET_POSITION_READY`
 - `ARRIVED_AND_STOPPED`
+- `RETURN_REACHED`
+- `RETURN_FAILED`
 - 导航规划、TF、点云融合等技术错误对应的 `EXECUTION_ERROR`
 
 当前接口中 `TARGET_LOST` 的发布者是感知。导航虽然也可能发现目标位置无法由点云计算出来，但这不是图像目标丢失，不能直接伪装成感知的 `TARGET_LOST`。如果需要由导航报告“目标仍在相机中、但已经离开有效点云/地图区域”，应单独定义导航侧语义，或者明确允许导航发布一个不同的目标位置失效事件。
@@ -338,7 +348,7 @@ TRACK_INTRUDER
 - 总状态机收到最终丢失或技术故障后进入 `RECOVER_PATROL`，导航取消目标任务并恢复之前巡检任务的断点。
 - 恢复阶段错误不再形成新的业务分支；恢复超时由 supervisor 直接进入 `PATROL`。
 
-“恢复巡检断点”的执行位置已经确定：总状态机发布 `RECOVER_PATROL`，导航在进入目标接近前保存当前 `map -> base_footprint` 位姿，同时保留 waypoint 当前索引；恢复时先返回这个位姿，再恢复 waypoint。路径恢复成功时发布 `PATROL_RECOVERY_COMPLETE`，恢复超时时由 supervisor 直接进入 `PATROL`。
+“恢复巡检断点”的执行位置已经确定：总状态机发布 `RECOVER_PATROL`，导航在进入目标接近前保存当前 `map -> base_footprint` 位姿，同时保留 waypoint 当前索引；恢复时先返回这个位姿，再由新的 `PatrolTaskState.navigation_mode` 允许 waypoint publisher 重新规划。路径恢复成功时发布 `PATROL_RECOVERY_COMPLETE`，恢复超时时由 supervisor 直接进入 `PATROL`。生产流程不发送 waypoint pause/resume Empty。
 
 ## 10. 已确认设计：目标位置确认超时后的重新尝试
 
@@ -451,7 +461,9 @@ PATROL -> CONFIRM_TARGET -> timeout -> PATROL -> CONFIRM_TARGET -> ...
 ```text
 STARTUP
   感知 READY + 导航 READY
-  -> PATROL
+  -> READY（TASK_NO_TASK）
+  -> 显式 START 且路线/home 合法
+  -> PATROL（TASK_RUNNING）
 
 PATROL
   感知 TARGET_CONFIRMED
@@ -505,7 +517,8 @@ RECOVER_PATROL
 - 导航确认点云、TF、定位和 planner/control 链已经可用。
 
 单独一个模块 READY 不能让总状态机进入巡检。启动阶段不应接受旧目标事件，也不应
-使用上一次任务遗留的 bbox 或目标位置。
+使用上一次任务遗留的 bbox 或目标位置。两侧 READY 后只形成 `TASK_NO_TASK + READY`；
+路线准备完成后必须由 `/mission/task_command` 的 START 才能进入 `TASK_RUNNING + PATROL`。
 
 ### 12.2 PATROL
 
@@ -586,8 +599,8 @@ CONFIRM_TARGET(seq=N, target=T)
 策略函数：
 
 ```text
-收到 /mission/state
-  -> 校验 state_seq 和 target_id
+收到 /mission/state 和同序号 /patrol_task/state
+  -> 校验 state_seq、父任务状态和 target_id
   -> 选择当前执行策略
   -> 执行巡检、目标融合、目标规划、停止或恢复
   -> 通过 /mission/event 回报结果
@@ -598,11 +611,13 @@ CONFIRM_TARGET(seq=N, target=T)
 | 总状态 | 导航策略 | 是否继续巡检 | 是否融合 bbox | 是否生成目标路径 |
 |---|---|---:|---:|---:|
 | `STARTUP` | 等待导航依赖就绪 | 否 | 否 | 否 |
+| `READY` | 安全待命，等待父任务 START | 否 | 否 | 否 |
 | `PATROL` | 执行/恢复巡检路径 | 是 | 否 | 否 |
 | `CONFIRM_TARGET` | 后台确认目标空间位置 | 是 | 是 | 否 |
 | `APPROACH_TARGET` | 生成 3 m standoff 路径并接近 | 否 | 是 | 是 |
 | `VERIFY_IDENTITY` | 停车保持 | 否 | 可继续 | 否 |
 | `TRACK_INTRUDER` | 按最新目标位置持续跟踪 | 否 | 是 | 是 |
+| `RECOVER_PATROL` | 返回巡检中断位姿并等待收口 | 否 | 否 | 返回路径 |
 
 “继续巡检”只适用于 `CONFIRM_TARGET` 中目标位置尚未确认的阶段。一旦
 `TARGET_POSITION_READY` 被总状态机接受并转入 `APPROACH_TARGET`，导航才暂停巡检。
@@ -759,6 +774,11 @@ PATROL
 - 事件发布者是否有权发布该事件；
 - 状态已经变化后，旧目标的异步 action、bbox、核验结果是否被丢弃。
 
+`state_seq=0` 不能建立业务上下文。权威 MissionState 的同序号周期重发只刷新 heartbeat；
+同一序号字段冲突后，tracking、face、voice、authorization 和 aggregate readiness 必须保持
+停止或取消状态，直到收到更大的合法序号。STARTUP 内 capability 从 NOT_READY/ERROR 逐步变为
+READY 属于同一 readiness 会话的正常进展，不作为权威 MissionState 冲突处理。
+
 状态切换的安全顺序是：
 
 ```text
@@ -800,12 +820,12 @@ event 来自不同的异步执行链。
 
 ## 18. 事件类型最终约定
 
-按当前简化方案，任务流程不新增业务 `MissionEvent` 类型。现有事件的使用方式固定
-如下：
+目标处置流程沿用原有业务 `MissionEvent`；父任务返航在原枚举末尾追加
+`RETURN_REACHED=9` 和 `RETURN_FAILED=10`。当前事件的使用方式如下：
 
 | 场景 | 使用的现有事件 | 说明 |
 |---|---|---|
-| 感知和导航就绪 | `READY` | 两边都就绪后，`STARTUP -> PATROL` |
+| 感知和导航就绪 | `READY` | 两边都就绪后，`STARTUP -> TASK_NO_TASK + READY`；显式 START 后才进入 PATROL |
 | 感知选中候选目标 | `TARGET_CONFIRMED` | 当前巡检状态序号内发送一次 |
 | 导航得到稳定地图位置 | `TARGET_POSITION_READY` | 总控据此进入 `APPROACH_TARGET` |
 | 到达目标前约 3 m 并稳定停车 | `ARRIVED_AND_STOPPED` | 总控进入 `VERIFY_IDENTITY` |
@@ -813,6 +833,9 @@ event 来自不同的异步执行链。
 | 两轮核验均失败 | `UNAUTHORIZED` | `detail` 标明 `verification_timeout`，进入跟踪 |
 | 目标连续丢失超过 10 秒 | `TARGET_LOST` | `detail` 标明阶段和 `target_lost_timeout_10s`，总控进入 `RECOVER_PATROL`，再恢复巡检 |
 | 导航或感知技术故障 | `EXECUTION_ERROR` | `detail` 携带具体技术原因，由总控执行恢复 |
+| 巡检恢复到中断点 | `PATROL_RECOVERY_COMPLETE` | 仅导航在当前 RECOVER 状态发布一次 |
+| 父任务返航成功 | `RETURN_REACHED` | 仅导航在同序号 `TASK_RETURNING + READY` 下发布一次 |
+| 父任务返航失败 | `RETURN_FAILED` | 仅导航在同序号 `TASK_RETURNING + READY` 下发布一次；与 supervisor watchdog 只收口一次 FAILED |
 
 以下规则同时生效：
 

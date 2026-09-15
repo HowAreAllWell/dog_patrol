@@ -9,6 +9,7 @@
 
   <exec_depend>ament_index_python</exec_depend>
   <exec_depend>geometry_msgs</exec_depend>
+  <exec_depend>dog_patrol_interfaces</exec_depend>
   <exec_depend>nav_msgs</exec_depend>
   <exec_depend>python3-pyqt5</exec_depend>
   <exec_depend>python3-yaml</exec_depend>

@@ -12,9 +12,7 @@ navigation_mission_coordinator:
       # the only node that publishes the selected path on /global_path.
       global_path: /mission_global_path
       selected_global_path: /global_path
-      pause_patrol: /waypoint_sequence/pause
-      resume_patrol: /waypoint_sequence/resume
-      resume_patrol_from_current: /waypoint_sequence/resume_from_current
+      task_state: /patrol_task/state
       nav_cmd: /NAV_CMD
       target_point: /navigation/target_point
       target_goal: /navigation/target_goal
@@ -109,3 +107,4 @@ navigation_mission_coordinator:
       ready_event_period: 1.0
       technical_error_timeout: 3.0
       tf_timeout: 0.05
+      state_timeout: 0.75

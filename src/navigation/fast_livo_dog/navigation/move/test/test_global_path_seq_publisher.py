@@ -1,6 +1,8 @@
 from types import SimpleNamespace
+import time
 
 import numpy as np
+from dog_patrol_interfaces.msg import PatrolTaskState
 
 from move.global_path_seq_publisher import GlobalPathSequencePublisher
 
@@ -196,3 +198,59 @@ def test_editing_completed_or_future_waypoint_does_not_affect_active_goal():
         sequence_done=False,
         edited_index=2,
     )
+
+
+def test_parent_state_heartbeat_timeout_stops_waypoint_execution():
+    calls = []
+    node = SimpleNamespace(
+        _last_parent_state_monotonic=time.monotonic() - 2.0,
+        _parent_state_timed_out=False,
+        task_state_timeout=0.5,
+        paused=False,
+        sequence_version=4,
+        _invalidate_planning_request=lambda reason: calls.append(("invalidate", reason)),
+        _publish_empty_paths=lambda: calls.append(("empty", None)),
+        _publish_waypoint_state=lambda: calls.append(("state", None)),
+        get_logger=lambda: SimpleNamespace(warning=lambda message: calls.append(("warn", message))),
+    )
+
+    GlobalPathSequencePublisher._check_parent_state_timeout(node)
+
+    assert node._parent_state_timed_out
+    assert node.paused
+    assert node.sequence_version == 5
+    assert ("empty", None) in calls
+    assert ("state", None) in calls
+
+
+def test_waypoint_execution_requires_current_home_and_healthy_parent_heartbeat():
+    node = SimpleNamespace(
+        _parent_state_seen=True,
+        _parent_state_conflicted=False,
+        _parent_state_timed_out=False,
+        _parent_snapshot_valid=True,
+        _parent_task_state=PatrolTaskState.TASK_RUNNING,
+        _parent_navigation_mode=PatrolTaskState.NAVIGATION_WAYPOINT,
+        _parent_home_pose_valid=True,
+    )
+    assert GlobalPathSequencePublisher._can_execute_parent(node)
+    node._parent_home_pose_valid = False
+    assert not GlobalPathSequencePublisher._can_execute_parent(node)
+    node._parent_home_pose_valid = True
+    node._parent_state_timed_out = True
+    assert not GlobalPathSequencePublisher._can_execute_parent(node)
+
+
+def test_invalid_parent_outcome_or_home_combination_fails_closed():
+    valid = SimpleNamespace(
+        task_state=PatrolTaskState.TASK_RUNNING,
+        last_task_outcome=PatrolTaskState.TASK_OUTCOME_NONE,
+        navigation_mode=PatrolTaskState.NAVIGATION_WAYPOINT,
+        home_pose_valid=True,
+    )
+    assert GlobalPathSequencePublisher._parent_snapshot_is_valid(valid)
+    valid.last_task_outcome = PatrolTaskState.TASK_OUTCOME_COMPLETED
+    assert not GlobalPathSequencePublisher._parent_snapshot_is_valid(valid)
+    valid.last_task_outcome = PatrolTaskState.TASK_OUTCOME_NONE
+    valid.home_pose_valid = False
+    assert not GlobalPathSequencePublisher._parent_snapshot_is_valid(valid)

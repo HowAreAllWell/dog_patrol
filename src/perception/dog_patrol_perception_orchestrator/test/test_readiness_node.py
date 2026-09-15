@@ -74,6 +74,7 @@ def test_late_orchestrator_applies_retained_adapter_error_and_not_ready_before_r
             Parameter("mission_state_topic", value=state_topic),
             Parameter("mission_event_topic", value=event_topic),
             Parameter("capability_status_topic", value=status_topic),
+            Parameter("state_timeout", value=10.0),
         ]
     )
     executor = SingleThreadedExecutor()
@@ -119,3 +120,70 @@ def test_late_orchestrator_applies_retained_adapter_error_and_not_ready_before_r
         if rclpy.ok():
             rclpy.shutdown()
         del event_sub
+
+
+def test_ready_state_blocks_late_startup_capabilities_and_old_startup_snapshot():
+    rclpy.init()
+    suffix = f"t{time.monotonic_ns()}"
+    state_topic = f"/readiness/{suffix}/mission/state"
+    event_topic = f"/readiness/{suffix}/mission/event"
+    status_topic = f"/readiness/{suffix}/capability_status"
+    source = Node(f"readiness_late_source_{suffix}")
+    probe = Node(f"readiness_late_probe_{suffix}")
+    node = PerceptionReadinessNode(
+        parameter_overrides=[
+            Parameter("mission_state_topic", value=state_topic),
+            Parameter("mission_event_topic", value=event_topic),
+            Parameter("capability_status_topic", value=status_topic),
+            Parameter("state_timeout", value=10.0),
+        ]
+    )
+    state_pub = source.create_publisher(MissionState, state_topic, transient_qos())
+    status_pub = source.create_publisher(
+        CapabilityStatus, status_topic, transient_qos(depth=16)
+    )
+    events = []
+    event_sub = probe.create_subscription(
+        MissionEvent, event_topic, events.append, volatile_qos()
+    )
+    executor = SingleThreadedExecutor()
+    for current in (source, probe, node):
+        executor.add_node(current)
+    try:
+        startup = MissionState()
+        startup.state_seq = 80
+        startup.state = MissionState.STARTUP
+        state_pub.publish(startup)
+        for capability in ("detection_tracking", "face"):
+            status = CapabilityStatus()
+            status.capability = capability
+            status.status = CapabilityStatus.READY
+            status.observed_startup_state_seq = 80
+            status_pub.publish(status)
+        for _ in range(10):
+            executor.spin_once(timeout_sec=0.03)
+
+        ready = MissionState()
+        ready.state_seq = 81
+        ready.state = MissionState.READY
+        state_pub.publish(ready)
+        for _ in range(5):
+            executor.spin_once(timeout_sec=0.03)
+
+        late_voice = CapabilityStatus()
+        late_voice.capability = "voice"
+        late_voice.status = CapabilityStatus.READY
+        late_voice.observed_startup_state_seq = 80
+        status_pub.publish(late_voice)
+        state_pub.publish(startup)
+        for _ in range(10):
+            executor.spin_once(timeout_sec=0.03)
+
+        assert events == []
+    finally:
+        executor.shutdown()
+        for current in (node, probe, source):
+            current.destroy_node()
+        del state_pub, status_pub, event_sub
+        if rclpy.ok():
+            rclpy.shutdown()

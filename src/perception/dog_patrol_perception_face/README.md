@@ -11,9 +11,18 @@ MissionState 只建立、替换或取消授权会话；`perception_face_provider
 发布到 `/perception/authorization_evidence`（`provider=face`）。输入队列始终丢旧保新，推理结束时还会
 拒绝过期、被新 crop 替代或来自旧命令的结果。
 
+只有 `TASK_RUNNING + VERIFY_IDENTITY + target_id>0` 才能建立人脸会话。READY（包括 PAUSE、
+RETURN、TERMINATE 后的 READY）或其他非 VERIFY 状态会取消会话；取消可记录 `CANCELLED`，
+不会发布 `UNAUTHORIZED`。旧 `state_seq`、target、stage 和 provider evidence 会被丢弃。
+
 `perception_face_readiness` 从与 provider 相同的 YAML 读取 engine 和白名单路径；它实际加载两个
 TensorRT engine、分别执行一次最小推理并读取白名单后才发布 `face=READY`。显式 ROS 参数可覆盖
 YAML 中的 `detector_engine`、`recognition_engine` 和 `whitelist_dir`。
+
+readiness 只由当前 `MissionState.STARTUP` 触发。离开 STARTUP 后，迟到 preflight 或旧 STARTUP
+快照不能再次发布 `face=READY`；新的 readiness 必须等待 supervisor reset 后的新序号。
+provider 和 readiness 默认使用 `state_timeout=0.75 s`；MissionState heartbeat 超时会取消当前
+人脸会话并使在途 preflight 结果失效。
 
 人脸 bbox 通过 best-effort、keep-last(1) 的 `FaceOverlay` 发布，消息保留原 crop 的 source stamp、
 frame number 和 target id。tracking 只在这些来源元数据仍与当前 canvas 匹配且不超过 0.5 秒时，在

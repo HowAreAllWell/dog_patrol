@@ -64,7 +64,7 @@ CameraIngest
 配置入口：
 
 ```text
-src/dog_patrol_perception_tracking/config/bot_sort.yaml
+src/perception/dog_patrol_perception_tracking/config/bot_sort.yaml
 ```
 
 核心思想：

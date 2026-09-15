@@ -69,3 +69,51 @@ def test_required_capabilities_are_fixed_and_validated():
     assert coordinator.required_capabilities == REQUIRED
     with pytest.raises(ValueError):
         ReadinessCoordinator(("face", "face"), startup_state=STARTUP)
+
+
+def test_zero_state_sequence_cannot_form_readiness():
+    coordinator = ReadinessCoordinator(REQUIRED, startup_state=STARTUP)
+    assert coordinator.observe_mission(0, STARTUP) is None
+    for capability in REQUIRED:
+        assert coordinator.observe_capability(sample(capability, READY, 0)) is None
+
+
+def test_same_sequence_capability_status_progression_is_allowed():
+    coordinator = ReadinessCoordinator(REQUIRED, startup_state=STARTUP)
+    coordinator.observe_mission(41, STARTUP)
+    coordinator.observe_capability(sample("detection_tracking", READY, 41))
+    coordinator.observe_capability(sample("face", READY, 41))
+    coordinator.observe_capability(sample("voice", NOT_READY, 41))
+    assert coordinator.observe_capability(sample("voice", READY, 41)) == 41
+
+
+def test_same_sequence_mission_conflict_fails_closed_until_new_sequence():
+    coordinator = ReadinessCoordinator(REQUIRED, startup_state=STARTUP)
+    coordinator.observe_mission(41, STARTUP)
+    for capability in REQUIRED:
+        coordinator.observe_capability(sample(capability, READY, 41))
+    assert coordinator.observe_mission(41, PATROL) is None
+    assert coordinator.observe_mission(41, STARTUP) is None
+    for capability in REQUIRED:
+        coordinator.observe_capability(sample(capability, READY, 42))
+    assert coordinator.observe_mission(42, STARTUP) == 42
+
+
+def test_mission_heartbeat_expiry_blocks_late_capability_until_state_recovers():
+    coordinator = ReadinessCoordinator(REQUIRED, startup_state=STARTUP)
+    coordinator.observe_mission(50, STARTUP)
+    coordinator.observe_capability(sample("detection_tracking", READY, 50))
+    coordinator.observe_capability(sample("face", READY, 50))
+    coordinator.expire_mission()
+
+    assert coordinator.observe_capability(sample("voice", READY, 50)) is None
+    assert coordinator.observe_mission(50, STARTUP) == 50
+
+
+def test_same_sequence_startup_target_conflict_cannot_emit_ready():
+    coordinator = ReadinessCoordinator(REQUIRED, startup_state=STARTUP)
+    coordinator.observe_mission(60, STARTUP, 0, 0)
+    coordinator.observe_mission(60, STARTUP, 1, 0)
+    for capability in REQUIRED:
+        coordinator.observe_capability(sample(capability, READY, 60))
+    assert coordinator.observe_mission(60, STARTUP, 0, 0) is None

@@ -1,5 +1,11 @@
 # Issue #3 detection/tracking 接入整体验收
 
+> 本页记录 2026-08-04 的 tracking 迁入验收范围。文中的 `not-integrated`、`integrating` 和
+> “导航尚未迁入”是当时结论，不是当前系统状态。当前 face、voice、authorization、navigation 和
+> 父任务生命周期已经接入；运行契约以
+> [`../../contracts/patrol_task_lifecycle_design.md`](../../contracts/patrol_task_lifecycle_design.md)
+> 为准，双侧 READY 后仍需显式 START。
+
 ## 结论
 
 2026-08-04 对父 Spec #3 及子票 #4–#15 完成独立整体验收。父 Spec 的交付重点——将
@@ -24,7 +30,7 @@ face/voice provider 后续通过 `AuthorizationEvidence` 接入，不得用测�
 | mission 公共合同 | `mission_contract_integration.md` 和真实 `mission_supervisor` 集成测试；PR #19 | 通过；覆盖确认、fresh bbox、丢失/重获和错误输入门禁，tracking 不发布授权结论 |
 | standalone 与 observation | `PrimaryTargetObservation`、standalone launch 和 runtime strategy；PR #21 | 通过；不创建 mission adapter，不要求导航/激光雷达，不伪造公共任务状态 |
 | crop transport | `TargetImageRosAdapter` 和 `TrackedTargetImage` transport/smoke；PR #22 | 通过；同帧、自持有、可配置、有界异步丢旧，失效后停发，慢消费者不反压 |
-| capability readiness | tracking capability publisher、orchestrator readiness node 和 test-only provider；PR #20 | 通过；tracking/face/voice 全部匹配当前 STARTUP 才至多发布一次整体 READY |
+| capability readiness（截至该次验收） | tracking capability publisher、orchestrator readiness node 和 test-only provider；PR #20 | 通过；tracking/face/voice 全部匹配当时的 STARTUP 才至多发布一次整体 READY |
 | 部署 requirements | `src/perception/requirements.md`、统一环境检查器；PR #23 | 通过；模块状态、精确平台/SDK、资产、参数、full-runtime 和 PASS/FAIL 入口单一且可执行 |
 | 当前感知 Orin/Hik | `issue14_tracking_hardware_acceptance.md`；PR #24 | 通过；full-runtime、真实 1280×1024@30 FPS、真人 semantic primary、crop、离场停发、资源与慢消费者均有现场证据 |
 | 权威入口与旧仓治理 | `issue15_authoritative_entry_archive.md`；PR #25–#27 | 通过；主仓为正式实现唯一入口；旧仓后续改为非生产研究空间，仅部署基线由 active ruleset 冻结 |
@@ -69,7 +75,7 @@ active ruleset 禁止更新、强推和删除；`main`、`dev` 和按需创建�
 - 仓库扫描未发现 submodule、被提交的模型/engine/录像/rosbag，活动代码与正式运行面未发现
   `vision_demo_host`、`vision_demo_node`、Fake provider 或 authorization placeholder。
 
-## 明确保留的后续状态
+## 明确保留的后续状态（截至 2026-08-04）
 
 - face：`not-integrated`；真实识别、模型、白名单、阈值策略和 evidence producer 待后续问题。
 - voice：`not-integrated`；真实识别、音频设备、口令流程、模型和 evidence producer 待后续问题。

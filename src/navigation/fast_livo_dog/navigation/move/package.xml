@@ -8,6 +8,7 @@
   <license>TODO: License declaration</license>
 
   <depend>rclpy</depend>
+  <depend>dog_patrol_interfaces</depend>
   <depend>geometry_msgs</depend>
   <depend>interactive_markers</depend>
   <depend>nav2_msgs</depend>

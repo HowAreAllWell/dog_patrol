@@ -13,7 +13,7 @@ control chain. The task-navigation launch starts the path mux:
 import sys
 import os
 from launch import LaunchDescription
-from launch.actions import DeclareLaunchArgument, ExecuteProcess
+from launch.actions import DeclareLaunchArgument, ExecuteProcess, Shutdown
 from launch.conditions import IfCondition
 from launch.substitutions import EnvironmentVariable, LaunchConfiguration, PathJoinSubstitution
 from launch_ros.actions import Node
@@ -41,8 +41,6 @@ def generate_launch_description():
     waypoint_delete_topic = LaunchConfiguration("waypoint_delete_topic")
     waypoint_replace_topic = LaunchConfiguration("waypoint_replace_topic")
     waypoint_status_topic = LaunchConfiguration("waypoint_status_topic")
-    waypoint_resume_topic = LaunchConfiguration("waypoint_resume_topic")
-    waypoint_resume_from_current_topic = LaunchConfiguration("waypoint_resume_from_current_topic")
     waypoints_topic = LaunchConfiguration("waypoints_topic")
     waypoints_pose_topic = LaunchConfiguration("waypoints_pose_topic")
     waypoint_replan_period = LaunchConfiguration("waypoint_replan_period")
@@ -50,6 +48,9 @@ def generate_launch_description():
     waypoint_edit_radius = LaunchConfiguration("waypoint_edit_radius")
     waypoint_enable_interactive_markers = LaunchConfiguration("waypoint_enable_interactive_markers")
     waypoint_interactive_marker_ns = LaunchConfiguration("waypoint_interactive_marker_ns")
+    task_state_topic = LaunchConfiguration("task_state_topic")
+    mission_state_topic = LaunchConfiguration("mission_state_topic")
+    waypoint_state_topic = LaunchConfiguration("waypoint_state_topic")
 
     global_frame = LaunchConfiguration("global_frame")
     robot_frame = LaunchConfiguration("robot_frame")
@@ -77,8 +78,8 @@ def generate_launch_description():
         executable="global_path_seq_publisher",
         name="global_path_sequence_publisher",
         output="screen",
-        respawn=True,
-        respawn_delay=2.0,
+        respawn=False,
+        on_exit=Shutdown(reason="waypoint publisher exited"),
         parameters=[
             {
                 "use_static_goals": False,
@@ -86,8 +87,8 @@ def generate_launch_description():
                 "delete_clicked_point_topic": waypoint_delete_topic,
                 "replace_clicked_point_topic": waypoint_replace_topic,
                 "status_topic": waypoint_status_topic,
-                "resume_topic": waypoint_resume_topic,
-                "resume_from_current_topic": waypoint_resume_from_current_topic,
+                "enable_debug_control_topics": False,
+                "auto_start_on_click": False,
                 "path_topic": waypoint_path_topic,
                 "publish_pure_pursuit_plan": False,
                 "pure_pursuit_plan_topic": waypoint_path_topic,
@@ -100,6 +101,10 @@ def generate_launch_description():
                 "edit_radius": waypoint_edit_radius,
                 "enable_interactive_markers": waypoint_enable_interactive_markers,
                 "interactive_marker_namespace": waypoint_interactive_marker_ns,
+                "task_state_topic": task_state_topic,
+                "task_state_timeout": 0.75,
+                "mission_state_topic": mission_state_topic,
+                "waypoint_state_topic": waypoint_state_topic,
             }
         ],
     )
@@ -130,6 +135,7 @@ def generate_launch_description():
         ],
         output="screen",
         additional_env=common_env,
+        on_exit=Shutdown(reason="pure pursuit exited"),
     )
 
     rl_local_path = ExecuteProcess(
@@ -168,6 +174,7 @@ def generate_launch_description():
         ],
         output="screen",
         additional_env=common_env,
+        on_exit=Shutdown(reason="RL local planner exited"),
     )
 
     adapter = ExecuteProcess(
@@ -196,6 +203,7 @@ def generate_launch_description():
         ],
         output="screen",
         additional_env=common_env,
+        on_exit=Shutdown(reason="navigation command adapter exited"),
     )
 
     domain_bridge = ExecuteProcess(
@@ -207,12 +215,14 @@ def generate_launch_description():
         ],
         output="screen",
         additional_env=common_env,
+        on_exit=Shutdown(reason="NAV_CMD domain bridge exited"),
     )
 
     pointcloud_to_laserscan_node = Node(
         package='pointcloud_to_laserscan',
         executable='pointcloud_to_laserscan_node',
         name='pointcloud_to_laserscan',
+        on_exit=Shutdown(reason="pointcloud to laser scan exited"),
         remappings=[
             ('cloud_in', '/cloud_registered'),
             ('scan', '/scan')
@@ -259,11 +269,6 @@ def generate_launch_description():
             DeclareLaunchArgument("waypoint_delete_topic", default_value="/waypoint_sequence/delete_nearest"),
             DeclareLaunchArgument("waypoint_replace_topic", default_value="/waypoint_sequence/replace_nearest"),
             DeclareLaunchArgument("waypoint_status_topic", default_value="/waypoint_sequence/status"),
-            DeclareLaunchArgument("waypoint_resume_topic", default_value="/waypoint_sequence/resume"),
-            DeclareLaunchArgument(
-                "waypoint_resume_from_current_topic",
-                default_value="/waypoint_sequence/resume_from_current",
-            ),
             DeclareLaunchArgument("waypoints_topic", default_value="waypoints"),
             DeclareLaunchArgument("waypoints_pose_topic", default_value="waypoints_pose_array"),
             DeclareLaunchArgument("waypoint_replan_period", default_value="1.0"),
@@ -271,6 +276,9 @@ def generate_launch_description():
             DeclareLaunchArgument("waypoint_edit_radius", default_value="1.5"),
             DeclareLaunchArgument("waypoint_enable_interactive_markers", default_value="true"),
             DeclareLaunchArgument("waypoint_interactive_marker_ns", default_value="waypoint_editor"),
+            DeclareLaunchArgument("task_state_topic", default_value="/patrol_task/state"),
+            DeclareLaunchArgument("mission_state_topic", default_value="/mission/state"),
+            DeclareLaunchArgument("waypoint_state_topic", default_value="/waypoint_sequence/state"),
             DeclareLaunchArgument("global_frame", default_value="map"),
             DeclareLaunchArgument("robot_frame", default_value="base_footprint"),
             DeclareLaunchArgument("odom_frame", default_value="camera_init_footprint"),

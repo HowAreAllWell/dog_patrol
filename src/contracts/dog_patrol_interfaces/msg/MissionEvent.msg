@@ -10,6 +10,8 @@ uint8 UNAUTHORIZED=5
 uint8 TARGET_LOST=6
 uint8 EXECUTION_ERROR=7
 uint8 PATROL_RECOVERY_COMPLETE=8
+uint8 RETURN_REACHED=9
+uint8 RETURN_FAILED=10
 
 std_msgs/Header header
 uint32 observed_state_seq

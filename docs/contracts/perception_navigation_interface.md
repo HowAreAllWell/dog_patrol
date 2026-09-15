@@ -36,9 +36,16 @@ mission_supervisor
 
 本文档不规定检测模型、人脸识别、雷达投影、路径规划和底盘控制算法的内部实现。
 
-> **当前实现基线（2026-09-05）**：本协议以当前消息定义和工作区代码为准。公共协议
+> 当前父任务生命周期以 `docs/contracts/patrol_task_lifecycle_design.md` 为权威契约。
+> 双侧 READY 后只形成 `TASK_NO_TASK + READY`，不会自动开始 PATROL；路线准备完成后必须
+> 通过 `/mission/task_command` 的 `PatrolTaskCommand.Request.START` 显式启动。本文以下
+> 保留的旧 `STARTUP -> PATROL` 图示只表示业务阶段关系，实际运行还必须经过该父任务 START。
+
+> **当前实现基线（2026-09-15）**：本协议以当前消息定义和工作区代码为准。公共业务状态协议
 > 只包含 `STARTUP`、`PATROL`、`CONFIRM_TARGET`、`APPROACH_TARGET`、
-> `VERIFY_IDENTITY`、`TRACK_INTRUDER`、`RECOVER_PATROL` 以及现有事件枚举；
+> `VERIFY_IDENTITY`、`TRACK_INTRUDER`、`RECOVER_PATROL`、`READY` 以及现有事件枚举；
+> 父任务生命周期通过 `PatrolTaskState`、`WaypointSequenceState` 和
+> `PatrolTaskCommand.srv` 表达；
 > `blocked`、`block_cause`、`TARGET_REACQUIRED`、`HANDLING_COMPLETE` 和操作员完成
 > 事件均已不再使用。导航内部名称只表示执行策略，不是第二套业务状态机。
 
@@ -51,10 +58,12 @@ mission_supervisor
 它只负责：
 
 - 发布当前权威全局状态；
+- 发布与全局状态同一 `state_seq` 的父任务状态；
 - 接收模块事件；
+- 接收 `/mission/task_command` 的父任务命令；
 - 检查事件是否合法；
 - 执行状态转换；
-- 保存当前目标 ID；
+- 保存当前目标 ID、父任务结果和 START 时的 home pose；
 
 ### 2.2 只有状态机可以修改全局状态
 
@@ -73,21 +82,24 @@ TARGET_POSITION_READY
 ARRIVED_AND_STOPPED
 ```
 
-状态机收到事件后，根据当前状态和事件来源决定是否接受。
+上位任务系统或 `robot_console` 不能发布状态或伪造事件，只能通过
+`/mission/task_command` 请求 `START`、`PAUSE`、`RESUME`、`RETURN` 或 `TERMINATE`；状态机
+仍根据当前状态、路线快照、命令和事件来源决定是否接受。
 
 ### 2.3 状态、事件和连续数据分开
 
 | 类型 | 含义 | 示例 |
 |---|---|---|
-| 状态 | 系统当前正在执行什么任务 | `PATROL`、`APPROACH_TARGET` |
+| 状态 | 系统当前正在执行什么任务 | `READY`、`PATROL`、`APPROACH_TARGET` |
 | 事件 | 某件业务结果已经发生 | `TARGET_CONFIRMED`、`AUTHORIZED` |
 | 连续数据 | 算法持续更新的数据 | bbox、目标距离 |
 
 交互方向：
 
 ```text
-状态机 -> 感知、导航：全局状态
-感知、导航、上位机 -> 状态机：统一事件
+状态机 -> 感知、导航：全局状态和父任务快照
+感知、导航 -> 状态机：统一事件
+上位任务系统、robot_console -> 状态机：/mission/task_command
 感知 -> 导航：目标 bbox
 导航 -> 状态机、调试端：目标距离和执行状态
 ```
@@ -100,7 +112,11 @@ ARRIVED_AND_STOPPED
 
 - `state_seq`：区分不同的全局状态版本；
 - `target_id`：区分不同目标；
+- `handled_target_id`：记录已形成最终业务结果、供感知建立排除表的目标；
 - `header.stamp`：判断连续数据是否过期。
+
+父任务控制使用 `PatrolTaskState` 和 `PatrolTaskCommand`，不通过状态 Topic 或 waypoint
+pause/resume Empty 控制父任务。
 
 ### 2.5 统一异常恢复策略
 
@@ -111,7 +127,8 @@ ARRIVED_AND_STOPPED
 - 感知确认当前语义目标跟踪丢失时发布 `TARGET_LOST`；
 - 感知或导航遇到自身技术故障时发布 `EXECUTION_ERROR`；
 - 状态机收到目标任务期间的 `TARGET_LOST` 或 `EXECUTION_ERROR` 后进入
-  `RECOVER_PATROL`，保留 `target_id` 作为恢复相关 ID，并递增 `state_seq`；
+  `RECOVER_PATROL`；普通目标恢复保留 `target_id`，暂停恢复型 RECOVER 使用 0，并递增
+  `state_seq`；
 - 导航在 `RECOVER_PATROL` 中停车、清理目标路径，先返回目标任务开始前保存的
   `map -> base_footprint` 位姿，再恢复 waypoint 并等待新的巡检路径；
 - 导航返回巡检中断位姿并稳定停车后发布 `PATROL_RECOVERY_COMPLETE`，状态机才进入
@@ -136,8 +153,12 @@ ARRIVED_AND_STOPPED
 职责：
 
 - 发布 `/mission/state`；
+- 发布 `/patrol_task/state`，与 `/mission/state` 使用同一个 `state_seq`；
 - 订阅 `/mission/event`；
+- 提供 `/mission/task_command`，串行处理父任务命令；
 - 保存当前 `state`、`state_seq` 和 `target_id`；
+- 在 START 接受时捕获并保存 `map -> base_footprint` 的 home pose；
+- 订阅 `/waypoint_sequence/state`，校验路线 revision、进度和完成事实；
 - 记录感知和导航 Ready 状态；
 - 检查事件来源、状态版本和目标 ID；
 - 根据状态转移表执行转换；
@@ -196,8 +217,9 @@ PATROL
 CONFIRM_TARGET
 APPROACH_TARGET
 VERIFY_IDENTITY
-    TRACK_INTRUDER
-    RECOVER_PATROL
+TRACK_INTRUDER
+RECOVER_PATROL
+READY
 ```
 
 状态关系：
@@ -207,7 +229,11 @@ STARTUP
    |
    | 感知和导航均 READY
    v
-PATROL
+READY（TASK_NO_TASK）
+   |
+   | 外部显式 START 且路线/home 合法
+   v
+PATROL（TASK_RUNNING）
    |
    | 感知 TARGET_CONFIRMED
    v
@@ -238,7 +264,8 @@ RECOVER_PATROL   TRACK_INTRUDER
 
 | 当前状态 | 事件来源 | 事件 | 下一状态 |
 |---|---|---|---|
-| `STARTUP` | 感知和导航 | 两边均 `READY` | `PATROL` |
+| `STARTUP` | 感知和导航 | 两边均 `READY` | `READY`（TASK_NO_TASK，等待显式 START） |
+| `READY`（TASK_NO_TASK） | 外部命令 | `START` | `PATROL`（TASK_RUNNING） |
 | `PATROL` | 感知 | `TARGET_CONFIRMED` | `CONFIRM_TARGET` |
 | `CONFIRM_TARGET` | 导航 | `TARGET_POSITION_READY` | `APPROACH_TARGET` |
 | `APPROACH_TARGET` | 导航 | `ARRIVED_AND_STOPPED` | `VERIFY_IDENTITY` |
@@ -256,16 +283,24 @@ RECOVER_PATROL   TRACK_INTRUDER
 
 | Topic | 消息类型 | 发布方 | 订阅方 | 用途 |
 |---|---|---|---|---|
-| `/mission/state` | `MissionState` | 状态机 | 感知、导航、上位机 | 当前权威全局状态 |
-| `/mission/event` | `MissionEvent` | 感知、导航、上位机 | 状态机 | 离散业务事件 |
+| `/mission/state` | `MissionState` | mission supervisor | 感知、导航、上位机 | 当前权威业务状态 |
+| `/patrol_task/state` | `PatrolTaskState` | mission supervisor | waypoint、mux、coordinator、上位机 | 父任务、导航模式、home 和结果 |
+| `/mission/task_command` | `PatrolTaskCommand` service | 上位任务系统/console | mission supervisor | 唯一父任务命令入口 |
+| `/waypoint_sequence/state` | `WaypointSequenceState` | waypoint publisher | mission supervisor、上位机 | 路线内容、进度和完成事实 |
+| `/mission/event` | `MissionEvent` | 感知、导航 | mission supervisor | 离散业务事件 |
 | `/perception/selected_target_bbox` | `TargetBoundingBox` | 感知 | 导航 | 当前目标 bbox |
 | `/perception/tracking_overlay` | `sensor_msgs/msg/Image` | 感知 | RViz、UI、调试工具 | 带检测、身份、主目标和人脸框的监视画面，仅用于观测 |
 | `/navigation/target_status` | `TargetNavigationStatus` | 导航 | 上位机、RViz、调试工具 | 导航内部状态和当前目标距离，仅用于观测 |
 
 导航控制路径的实现约定如下：waypoint 发布器写入 `/waypoint_global_path`，导航协调器
-写入 `/mission_global_path`，两者由 `navigation_path_mux` 根据 `/mission/state` 选择，
+写入 `/mission_global_path`，两者由 `navigation_path_mux` 根据
+`PatrolTaskState.navigation_mode` 选择，
 只有 mux 向 Pure Pursuit、RL 和 DWB 链发布 `/global_path`。协调器和 waypoint 发布器
 不得直接同时写 `/global_path`。
+
+路径来源映射固定为：`NAVIGATION_STOP -> NO_SOURCE`、`NAVIGATION_WAYPOINT ->
+WAYPOINT_SOURCE`、`NAVIGATION_MISSION -> MISSION_SOURCE`。mux 在每个新 `state_seq` 后先
+发布空路径屏障，只接受屏障之后、当前来源的非空路径。
 
 `/perception/tracking_overlay` 使用 `bgr8`，保留对应源图像的 `header.stamp` 和相机光学
 `frame_id`，QoS 为 best-effort、volatile、keep-last 1。它不参与状态机转换，也不能代替
@@ -284,8 +319,12 @@ dog_patrol_interfaces/
 ├── msg/
 │   ├── MissionState.msg
 │   ├── MissionEvent.msg
+│   ├── PatrolTaskState.msg
+│   ├── WaypointSequenceState.msg
 │   ├── TargetBoundingBox.msg
 │   └── TargetNavigationStatus.msg
+├── srv/
+│   └── PatrolTaskCommand.srv
 ├── CMakeLists.txt
 └── package.xml
 ```
@@ -302,6 +341,7 @@ uint8 APPROACH_TARGET=3
 uint8 VERIFY_IDENTITY=4
 uint8 TRACK_INTRUDER=5
 uint8 RECOVER_PATROL=6
+uint8 READY=7
 
 std_msgs/Header header
 uint32 state_seq
@@ -330,7 +370,8 @@ uint32 handled_target_id
 感知仅在首次处理新的 `PATROL state_seq` 时消费当前快照的 `handled_target_id`，
 不依赖是否收到了中间的核验/恢复状态。重复状态不能重新加入已过期的排除项或重置
 连续离场计时。`STARTUP` 和活动目标阶段的该字段必须为 `0`；恢复阶段非零时必须
-等于 `target_id`。同一序号下的该字段也必须一致。
+等于 `target_id`；暂停恢复型 RECOVER 和 `PAUSED + READY` 可以保留暂停前已经成立的正值。
+同一序号下的该字段也必须一致。
 
 本字段扩展了 ROS 消息定义。部署时须统一重新构建 `dog_patrol_interfaces` 及所有
 使用 `MissionState` 的节点，不能混用旧接口生成物和新接口节点。
@@ -342,6 +383,9 @@ uint32 handled_target_id
 - `handled_target_id` 改变；
 
 周期性重复发布同一个状态时，`state_seq` 不变。
+
+`state_seq=0` 表示尚未观察到有效状态，不能驱动业务。所有消费者使用 uint32 半区间比较
+判断新旧，不能直接使用普通整数 `<`。
 
 推荐 QoS：
 
@@ -366,6 +410,8 @@ uint8 UNAUTHORIZED=5
 uint8 TARGET_LOST=6
 uint8 EXECUTION_ERROR=7
 uint8 PATROL_RECOVERY_COMPLETE=8
+uint8 RETURN_REACHED=9
+uint8 RETURN_FAILED=10
 
 std_msgs/Header header
 uint32 observed_state_seq
@@ -384,8 +430,10 @@ string detail
 - `event`：事件类型；
 - `detail`：诊断信息。
 
-`TARGET_LOST` 只能由感知发布。`PATROL_RECOVERY_COMPLETE` 只能由导航发布，并且必须
-携带恢复状态中的 `observed_state_seq` 和同一个 `target_id`。
+`TARGET_LOST` 只能由感知发布。`PATROL_RECOVERY_COMPLETE`、`RETURN_REACHED` 和
+`RETURN_FAILED` 只能由导航发布，并且必须携带当前 `observed_state_seq`；返航事件的
+`target_id` 必须为 0。`PATROL_RECOVERY_COMPLETE` 的 target_id 必须匹配普通恢复目标，
+暂停恢复型 RECOVER 使用 0。
 
 推荐 QoS：
 
@@ -470,11 +518,57 @@ string detail
 `HOLDING` 并在 `detail` 中说明原因。这个消息只用于导航观测，不直接驱动 `MissionState`；
 需要业务状态转移时仍必须通过 `/mission/event` 发布正式事件。
 
+### 6.5 父任务接口
+
+父任务状态、路线状态和命令使用以下新增接口：
+
+~~~text
+PatrolTaskState.msg
+  TASK_NO_TASK=0, TASK_RUNNING=1, TASK_PAUSED=2, TASK_RETURNING=3
+  TASK_OUTCOME_NONE=0, COMPLETED=1, RETURNED=2, TERMINATED=3, FAILED=4
+  NAVIGATION_STOP=0, NAVIGATION_WAYPOINT=1, NAVIGATION_MISSION=2
+  Header header
+  uint32 state_seq
+  uint8 task_state
+  uint8 last_task_outcome
+  uint8 navigation_mode
+  bool home_pose_valid
+  geometry_msgs/PoseStamped home_pose
+  string detail
+
+WaypointSequenceState.msg
+  Header header
+  uint32 route_revision
+  uint32 waypoint_count
+  uint32 current_index
+  uint32 completed_count
+  bool sequence_done
+  bool paused
+
+PatrolTaskCommand.srv
+  START=0, PAUSE=1, RESUME=2, RETURN=3, TERMINATE=4
+  uint8 command
+  ---
+  bool accepted
+  bool changed
+  uint32 state_seq
+  uint8 task_state
+  uint8 mission_state
+  uint8 last_task_outcome
+  string error_code
+  string message
+~~~
+
+`/mission/state` 和 `/patrol_task/state` 必须由同一个 supervisor 使用同一个 `state_seq`
+发布。`/mission/task_command` 是唯一父任务生产命令入口；发布 waypoint、点击地图或发送
+调试 pause/resume 都不能直接开始、暂停、返航或终止父任务。
+
 ## 7. ID 和状态版本
 
 ### 7.1 state_seq
 
-`state_seq` 用于拒绝迟到事件。
+`state_seq` 用于拒绝迟到事件和异步结果。0 保留为“尚未观察到状态”，有效值从 1 到
+`0xFFFFFFFF` 后回绕到 1；消费者必须使用 uint32 半区间比较，不得直接使用普通整数 `<`。
 
 示例：
 
@@ -491,6 +585,15 @@ event.observed_state_seq == current_state.state_seq
 ```
 
 不相等时，状态机直接忽略该事件并输出限频日志。
+
+同一个序号重复发布只刷新 heartbeat，不重复触发业务副作用；同一个序号的字段冲突必须
+保持停止并等待更大的序号。旧 bbox、face/voice evidence、planner 结果和认证会话不能
+跨越新的状态边界。
+
+生产默认状态超时为 `0.75 s`。mux、waypoint、导航 coordinator、tracking、face、voice、
+authorization、aggregate readiness 和 console 均使用单调时钟检测 heartbeat；超时只关闭本地
+执行门或取消会话，不改变 supervisor 权威状态。两条状态 Topic 的消费者必须等同序号快照都
+恢复后再开放动作。
 
 ### 7.2 target_id
 
@@ -542,8 +645,7 @@ eligible 的判定由感知模块负责。
 - 定位结果有效；
 - `map -> base_footprint` TF 可用；
 - `/compute_path_to_pose` action server 已就绪；
-- 严格检查打开时，`/global_path`、waypoint pause/resume 有下游订阅者，且 `/NAV_CMD`
-  有发布者。
+- 严格检查打开时，`/global_path`、waypoint path 有下游订阅者，且 `/NAV_CMD` 有发布者。
 
 这里的 `/global_path` 指 mux 的最终输出，不是协调器的私有 `/mission_global_path`。
 
@@ -552,7 +654,11 @@ eligible 的判定由感知模块负责。
 
 两个模块在进入新的 `STARTUP state_seq` 后分别发送一次 `READY`。
 
-状态机只有在同一个 `STARTUP state_seq` 中同时收到感知和导航 Ready，才进入 `PATROL`。
+状态机只有在同一个 `STARTUP state_seq` 中同时收到感知和导航 Ready，才进入
+`TASK_NO_TASK + READY`；随后只有显式 START 才进入 `TASK_RUNNING + PATROL`。
+
+READY、PAUSE、RETURN、TERMINATE 或父任务终态期间，face、voice、authorization 取消当前
+会话并拒绝旧 state_seq、target_id、stage 和 provider evidence；取消不能产生 UNAUTHORIZED。
 
 ### 8.2 TARGET_CONFIRMED
 
@@ -702,7 +808,8 @@ bbox。当前实现使用 `target.lost_event_timeout_sec=10.0` 秒的 source-tim
 状态机：
 
 - 分别记录两个模块的 Ready；
-- 两边都 Ready 后进入 `PATROL`。
+- 两边都 Ready 后进入 `TASK_NO_TASK + READY`；路线准备完成后只有显式 START 才进入
+  `TASK_RUNNING + PATROL`。
 
 ### 9.2 PATROL
 
@@ -812,7 +919,7 @@ bbox。当前实现使用 `target.lost_event_timeout_sec=10.0` 秒的 source-tim
 
 状态机：
 
-- 保留原 `target_id`，用于校验恢复完成事件；
+- 普通目标恢复保留原 `target_id` 用于校验完成事件；暂停恢复型 RECOVER 使用 `target_id=0`；
 - 屏蔽 `TARGET_CONFIRMED`、目标位置、认证和跟踪事件；
 - 等待导航发布 `PATROL_RECOVERY_COMPLETE`；
 - 恢复完成后进入 `PATROL`，清空 `target_id`。
@@ -824,7 +931,8 @@ bbox。当前实现使用 `target.lost_event_timeout_sec=10.0` 秒的 source-tim
 - 返回进入 `APPROACH_TARGET` 前保存的巡检中断位姿；
 - 恢复路径发布到 `/mission_global_path` 后，在到达中断位姿前按周期重发，确保下游不会因
   一次性消息丢失而只看到全局显示却没有局部路径；
-- 到达位置容差并稳定停车后发布 waypoint resume；
+- 到达位置容差并稳定停车后只发布 `PATROL_RECOVERY_COMPLETE`；supervisor 随后发布新的
+  `PatrolTaskState.navigation_mode=NAVIGATION_WAYPOINT`，由 waypoint publisher 重新规划；
 - 不等待 waypoint active 或新的非空巡检路径，直接发布 `PATROL_RECOVERY_COMPLETE`。
 
 如果没有保存的巡检中断位姿，导航不伪造恢复目标，而是清理目标任务并直接发布
@@ -844,7 +952,7 @@ bbox。当前实现使用 `target.lost_event_timeout_sec=10.0` 秒的 source-tim
 
 状态机发布 `STARTUP`。感知和导航分别完成初始化并发送 `READY`。
 
-状态机确认两边均就绪后进入 `PATROL`。
+状态机确认两边均就绪后进入 `TASK_NO_TASK + READY`，等待路线准备和显式 START。
 
 ### 10.2 巡逻并检测
 
@@ -982,12 +1090,15 @@ transitions = {
 }
 ```
 
-Ready 使用单独的两个布尔标志：
+STARTUP readiness 的内部记录仍使用两个能力标志，但它们只用于判断是否生成 READY 事件：
 
 ```text
 perception_ready
 navigation_ready
 ```
+
+两侧 READY 成立后，公共状态只变为 `TASK_NO_TASK + READY`；是否进入 PATROL 由
+`/mission/task_command` 的 START 决定，不由这两个布尔标志直接开启运动。
 
 错误事件使用单独处理逻辑：
 
@@ -1024,7 +1135,7 @@ navigation_ready
 ### 13.1 STARTUP
 
 - 感知和导航能够分别发送 `READY`；
-- 只有两边都 Ready 后才进入 `PATROL`；
+- 两边都 Ready 后只进入 `TASK_NO_TASK + READY`；显式 START 后才进入 `TASK_RUNNING + PATROL`；
 - 重复 Ready 不重复转换；
 - 启动期间机器人保持停车。
 
@@ -1038,11 +1149,11 @@ navigation_ready
 
 ### 13.3 CONFIRM_TARGET
 
-- 导航保持 waypoint 链运行但不因目标框直接移动；
-- 机器人保持停车；
+- 导航保持 waypoint 链运行，但不因目标框直接移动；
+- 机器人继续执行当前巡检路径，直到总状态进入 `APPROACH_TARGET`；
 - 感知 bbox 的目标 ID 正确；
 - 导航拒绝过期 bbox 和错误目标；
-- 目标位置稳定后只报告一次 Ready。
+- 目标位置稳定后只报告一次 `TARGET_POSITION_READY`。
 
 ### 13.4 APPROACH_TARGET
 
@@ -1073,8 +1184,8 @@ navigation_ready
 - 状态机清空 `target_id`；
 - 感知停止旧目标 bbox；
 - 导航清理目标缓存；
-- mux 切回 waypoint 路径后，只接受 `PATROL` 状态切换之后到达的 waypoint 路径；正常恢复
-  可由 waypoint 节点重发有效缓存路径，超时恢复则从当前位置重新规划；
+- mux 切回 waypoint 路径后，只接受新 `PatrolTaskState.state_seq` 屏障之后到达的 waypoint
+  路径；waypoint publisher 必须在屏障后重新规划或重新发布，不能重放屏障前缓存路径；
 - 旧状态版本的事件不会再次生效。
 
 ## 14. 联调参数
@@ -1097,20 +1208,25 @@ navigation_ready
 
 ## 15. 最终接口结论
 
-当前系统使用四个跨模块消息接口：
+当前系统使用四个跨模块消息接口和三个父任务生命周期接口：
 
 ```text
 MissionState
 MissionEvent
 TargetBoundingBox
 TargetNavigationStatus
+PatrolTaskState
+WaypointSequenceState
+PatrolTaskCommand.srv
 ```
 
 核心流程：
 
 ```text
 感知和导航 READY
-    -> 状态机开始 PATROL
+    -> 状态机进入 TASK_NO_TASK + READY
+    -> 路线准备完成后显式 /mission/task_command START
+    -> 状态机进入 TASK_RUNNING + PATROL
 
 感知确认目标
     -> TARGET_CONFIRMED

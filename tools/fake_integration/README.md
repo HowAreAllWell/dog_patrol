@@ -28,8 +28,8 @@ python3 tools/fake_integration/run_fake_integration.py \
 ### 测试 B：接入真实 tracking
 
 真实 tracking 在 `runtime.mode:=mission` 下不会无条件发布 bbox：它需要订阅有效的
-`/mission/state`，在 `PATROL` 先发布 `TARGET_CONFIRMED`，进入 `CONFIRM_TARGET` 后才发布
-当前目标 bbox。因此只启动 tracking 进程而没有 supervisor，通常看不到
+`/mission/state`，并且只有父任务已经显式 START、进入 `TASK_RUNNING + PATROL` 后才会在
+`PATROL` 先发布 `TARGET_CONFIRMED`，进入 `CONFIRM_TARGET` 后才发布当前目标 bbox。因此只启动 tracking 进程而没有 supervisor，通常看不到
 `/perception/selected_target_bbox`，这是状态门禁，不是 tracking 一定失效：
 
 ```bash
@@ -51,9 +51,12 @@ ros2 run dog_patrol_perception_tracking dog_patrol_perception_tracking_node \
 运行前还必须有：
 
 - `/left_camera/image_raw` 正在发布 1280x1024 图像；
-- 唯一的 `mission_supervisor` 正在发布 `/mission/state`；
+- 唯一的 `mission_supervisor` 正在发布同序号的 `/mission/state` 和 `/patrol_task/state`，并提供
+  `/mission/task_command`；
 - 导航协调器已经发布 navigation `READY`；
-- 感知 readiness 满足后，supervisor 已进入 `PATROL`；
+- 感知 readiness 满足后，supervisor 已进入 `TASK_NO_TASK + READY`；
+- 已准备至少一个 waypoint，并通过 `/mission/task_command` 显式发送 START，进入
+  `TASK_RUNNING + PATROL`；
 - 画面中有可跟踪人员。
 
 验证 tracking 是否发布候选和 bbox：
@@ -105,6 +108,16 @@ python3 tools/navigation_coordinator/mock_mission_events.py \
   --result unauthorized
 ```
 
+双侧 READY 后先在 RViz 发布至少一个 waypoint，等待
+`/waypoint_sequence/state.waypoint_count>0`，再显式启动父任务：
+
+```bash
+ros2 service call /mission/task_command \
+  dog_patrol_interfaces/srv/PatrolTaskCommand "{command: 0}"
+```
+
+仅发布 waypoint 不会让机器人运动；服务返回 `accepted: true` 后才允许执行路线。
+
 终端 6 的行为是：真实导航到达 3 m 并使 supervisor 进入 `VERIFY_IDENTITY` 后，发布
 `UNAUTHORIZED`，触发 `TRACK_INTRUDER`。之后需要让真实目标离开画面并持续超过
 `target.lost_event_timeout_sec`（默认 10 秒），由 tracking 发布 `TARGET_LOST`，导航协调器再恢复巡检。
@@ -122,8 +135,10 @@ ros2 topic hz /global_path
 期望状态序列：
 
 ```text
-STARTUP
-  -> PATROL
+STARTUP + TASK_NO_TASK
+  -> READY + TASK_NO_TASK
+  -> (显式 START)
+  -> PATROL + TASK_RUNNING
   -> CONFIRM_TARGET
   -> APPROACH_TARGET
   -> VERIFY_IDENTITY

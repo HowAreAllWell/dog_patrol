@@ -18,7 +18,14 @@ import time
 import re
 
 import rclpy
-from dog_patrol_interfaces.msg import MissionEvent, MissionState
+from dog_patrol_interfaces.msg import (
+    MissionEvent,
+    MissionState,
+    PatrolTaskState,
+    WaypointSequenceState,
+)
+from dog_patrol_interfaces.srv import PatrolTaskCommand
+from geometry_msgs.msg import TransformStamped
 from dog_patrol_perception_interfaces.msg import AuthorizationEvidence
 from dog_patrol_perception_orchestrator.acceptance import (
     AcceptanceEvidence,
@@ -31,6 +38,7 @@ from dog_patrol_perception_orchestrator.authorization import (
 )
 from rclpy.node import Node
 from rclpy.qos import DurabilityPolicy, HistoryPolicy, QoSProfile, ReliabilityPolicy
+from tf2_ros.transform_broadcaster import TransformBroadcaster
 
 
 def qos() -> QoSProfile:
@@ -51,6 +59,33 @@ def volatile_qos() -> QoSProfile:
     )
 
 
+UINT32_MASK = (1 << 32) - 1
+UINT32_HALF_RANGE = 1 << 31
+
+
+def _is_current_or_newer_state_seq(candidate: int, current: int) -> bool:
+    delta = (int(candidate) - int(current)) & UINT32_MASK
+    return delta == 0 or delta < UINT32_HALF_RANGE
+
+
+def parent_ready_for_start(
+    mission_state: dict | None,
+    task_state: dict | None,
+) -> bool:
+    """Return true only for one synchronized NO_TASK + READY snapshot."""
+    if mission_state is None or task_state is None:
+        return False
+    return (
+        int(mission_state["state_seq"]) > 0
+        and int(mission_state["state_seq"]) == int(task_state["state_seq"])
+        and int(mission_state["state"]) == MissionState.READY
+        and int(mission_state.get("target_id", 0)) == 0
+        and int(task_state["task_state"]) == PatrolTaskState.TASK_NO_TASK
+        and int(task_state.get("navigation_mode", PatrolTaskState.NAVIGATION_STOP))
+        == PatrolTaskState.NAVIGATION_STOP
+    )
+
+
 class Observer(Node):
     def __init__(self, prefix: str) -> None:
         super().__init__("fake_integration_observer")
@@ -60,9 +95,38 @@ class Observer(Node):
         self.saw_verify = False
         self.final_state: int | None = None
         self.loss_seen = False
+        self.task_states: list[dict] = []
+        self._start_requested = False
+        self._start_future = None
+        self._start_retry_after = 0.0
+        self.start_accepted = False
+        self.start_error = ""
+        self._state_seq: int | None = None
+        self._state_signature = None
+        self._state_conflicted = False
+        self._task_state_seq: int | None = None
+        self._task_state_signature = None
+        self._task_state_conflicted = False
         self.create_subscription(
             MissionState, f"{prefix}/mission/state", self.on_state, qos()
         )
+        self.create_subscription(
+            PatrolTaskState,
+            f"{prefix}/patrol_task/state",
+            self.on_task_state,
+            qos(),
+        )
+        self._waypoint_state_pub = self.create_publisher(
+            WaypointSequenceState,
+            f"{prefix}/waypoint_sequence/state",
+            qos(),
+        )
+        self._task_command = self.create_client(
+            PatrolTaskCommand,
+            f"{prefix}/mission/task_command",
+        )
+        self._tf = TransformBroadcaster(self)
+        self._control_timer = self.create_timer(0.2, self._drive_parent_task_start)
         self.create_subscription(
             MissionEvent,
             f"{prefix}/mission/event",
@@ -77,9 +141,28 @@ class Observer(Node):
         )
 
     def on_state(self, msg: MissionState) -> None:
+        state_seq = int(msg.state_seq) & UINT32_MASK
+        if state_seq == 0:
+            return
+        signature = (
+            int(msg.state),
+            int(msg.target_id),
+            int(msg.handled_target_id),
+        )
+        if self._state_seq is not None:
+            if state_seq == self._state_seq:
+                if signature == self._state_signature:
+                    return
+                self._state_conflicted = True
+                return
+            if not _is_current_or_newer_state_seq(state_seq, self._state_seq):
+                return
+        self._state_seq = state_seq
+        self._state_signature = signature
+        self._state_conflicted = False
         item = {
-            "state_seq": int(msg.state_seq),
-            "state": int(msg.state),
+            "state_seq": state_seq,
+            "state": signature[0],
             "target_id": int(msg.target_id),
             "stamp": self.get_clock().now().nanoseconds,
         }
@@ -88,6 +171,83 @@ class Observer(Node):
             self.saw_verify = True
         if self.saw_verify and msg.state in (MissionState.PATROL, MissionState.TRACK_INTRUDER):
             self.final_state = int(msg.state)
+
+    def on_task_state(self, msg: PatrolTaskState) -> None:
+        state_seq = int(msg.state_seq) & UINT32_MASK
+        if state_seq == 0:
+            return
+        signature = (
+            int(msg.task_state),
+            int(msg.last_task_outcome),
+            int(msg.navigation_mode),
+        )
+        if self._task_state_seq is not None:
+            if state_seq == self._task_state_seq:
+                if signature == self._task_state_signature:
+                    return
+                self._task_state_conflicted = True
+                return
+            if not _is_current_or_newer_state_seq(state_seq, self._task_state_seq):
+                return
+        self._task_state_seq = state_seq
+        self._task_state_signature = signature
+        self._task_state_conflicted = False
+        self.task_states.append(
+            {
+                "state_seq": state_seq,
+                "task_state": signature[0],
+                "outcome": signature[1],
+                "navigation_mode": signature[2],
+            }
+        )
+
+    def _drive_parent_task_start(self) -> None:
+        transform = TransformStamped()
+        transform.header.stamp = self.get_clock().now().to_msg()
+        transform.header.frame_id = "map"
+        transform.child_frame_id = "base_footprint"
+        transform.transform.rotation.w = 1.0
+        self._tf.sendTransform(transform)
+        route = WaypointSequenceState()
+        route.header.stamp = self.get_clock().now().to_msg()
+        route.route_revision = 1
+        route.waypoint_count = 1
+        route.current_index = 0
+        route.completed_count = 0
+        route.sequence_done = False
+        route.paused = True
+        self._waypoint_state_pub.publish(route)
+        if (
+            self._start_requested
+            or time.monotonic() < self._start_retry_after
+            or not parent_ready_for_start(
+                self.states[-1] if self.states else None,
+                self.task_states[-1] if self.task_states else None,
+            )
+        ):
+            return
+        if not self._task_command.service_is_ready():
+            return
+        request = PatrolTaskCommand.Request()
+        request.command = PatrolTaskCommand.Request.START
+        self._start_requested = True
+        self._start_future = self._task_command.call_async(request)
+        self._start_future.add_done_callback(self._on_start_result)
+
+    def _on_start_result(self, future) -> None:
+        try:
+            response = future.result()
+            self.start_accepted = bool(response.accepted)
+            if response.accepted:
+                self.start_error = ""
+            else:
+                self.start_error = f"{response.error_code}: {response.message}"
+                self._start_requested = False
+                self._start_retry_after = time.monotonic() + 1.0
+        except Exception as exc:
+            self.start_error = str(exc)
+            self._start_requested = False
+            self._start_retry_after = time.monotonic() + 1.0
 
     def on_event(self, msg: MissionEvent) -> None:
         self.events.append({
@@ -118,6 +278,9 @@ def remaps(prefix: str) -> list[str]:
         "--ros-args",
         "-r", f"/mission/state:={prefix}/mission/state",
         "-r", f"/mission/event:={prefix}/mission/event",
+        "-r", f"/patrol_task/state:={prefix}/patrol_task/state",
+        "-r", f"/waypoint_sequence/state:={prefix}/waypoint_sequence/state",
+        "-r", f"/mission/task_command:={prefix}/mission/task_command",
         "-r", f"/perception/capability_status:={prefix}/perception/capability_status",
         "-r", f"/perception/authorization_evidence:={prefix}/perception/authorization_evidence",
         "-r", f"/perception/authorization_command:={prefix}/perception/authorization_command",
@@ -582,6 +745,12 @@ def main() -> int:
         functional_pass = (
             observer.final_state is not None
             and observer.saw_verify
+            and observer.start_accepted
+            and any(item["state"] == MissionState.READY for item in observer.states)
+            and any(
+                item["task_state"] == PatrolTaskState.TASK_RUNNING
+                for item in observer.task_states
+            )
             and required_states.issubset(visited_states)
             and any(
                 item["result"] != AuthorizationEvidence.CANCELLED
@@ -598,13 +767,14 @@ def main() -> int:
             "return_observed": return_observed_wall_time is not None,
         }
         if args.scenario == "tracking_loss_timeout":
-            functional_pass = observer.loss_seen
+            functional_pass = observer.start_accepted and observer.loss_seen
         elif args.scenario == "startup_visible":
             target_confirmed = any(
                 item["event"] == MissionEvent.TARGET_CONFIRMED for item in observer.events
             )
             functional_pass = (
-                target_confirmed
+                observer.start_accepted
+                and target_confirmed
                 and MissionState.PATROL in visited_states
                 and bool(
                     {MissionState.APPROACH_TARGET, MissionState.VERIFY_IDENTITY}
@@ -614,7 +784,8 @@ def main() -> int:
         elif args.scenario == "authorized_reencounter":
             post_authorization_states = observer.states[state_count_at_authorization or 0:]
             functional_pass = (
-                authorized_at is not None
+                observer.start_accepted
+                and authorized_at is not None
                 and reencounter_observe_deadline is not None
                 and any(
                     item["result"] == AuthorizationEvidence.PASSED
@@ -652,6 +823,8 @@ def main() -> int:
                 "evidence_count_at_authorization": evidence_count_at_authorization,
                 "post_authorization_states": post_authorization_states,
                 "reencounter_observation": reencounter_observation,
+                "start_accepted": observer.start_accepted,
+                "start_error": observer.start_error,
             },
             "performance": {
                 "status": "OBSERVED",
@@ -662,6 +835,7 @@ def main() -> int:
                 "flow_timings": flow_timings(observer.states, observer.evidence),
             },
             "states": observer.states,
+            "task_states": observer.task_states,
             "events": observer.events,
             "evidence": observer.evidence,
         }

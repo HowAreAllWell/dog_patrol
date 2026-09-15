@@ -1,5 +1,10 @@
 import math
+import threading
+import time
+from collections import deque
 import rclpy
+from dog_patrol_interfaces.msg import MissionState, PatrolTaskState, WaypointSequenceState
+from dog_patrol_interfaces.srv import PatrolTaskCommand
 from rclpy.node import Node
 from PyQt5.QtCore import QThread, pyqtSignal, QObject
 from nav_msgs.msg import Odometry, Path, OccupancyGrid
@@ -8,16 +13,51 @@ from std_msgs.msg import Bool, Header
 from sensor_msgs.msg import PointCloud2
 from rclpy.qos import QoSProfile, ReliabilityPolicy, HistoryPolicy, DurabilityPolicy
 
+UINT32_MASK = (1 << 32) - 1
+UINT32_HALF_RANGE = 1 << 31
+
+
+def _is_newer_state_seq(candidate, current):
+    delta = (int(candidate) - int(current)) & UINT32_MASK
+    return 0 < delta < UINT32_HALF_RANGE
+
+
+def _home_pose_signature(message):
+    if not bool(getattr(message, "home_pose_valid", False)):
+        return None
+    pose = getattr(message, "home_pose", None)
+    if pose is None:
+        return None
+    body = getattr(pose, "pose", pose)
+    header = getattr(pose, "header", None)
+    stamp = getattr(header, "stamp", None)
+    return (
+        str(getattr(header, "frame_id", "")),
+        int(getattr(stamp, "sec", 0)),
+        int(getattr(stamp, "nanosec", 0)),
+        float(body.position.x),
+        float(body.position.y),
+        float(body.position.z),
+        float(body.orientation.x),
+        float(body.orientation.y),
+        float(body.orientation.z),
+        float(body.orientation.w),
+    )
+
+
 class RobotSignals(QObject):
     pose_updated = pyqtSignal(float, float, float, float, float, float)
     log_msg = pyqtSignal(str)
     status_updated = pyqtSignal(bool) 
     odom_distance_updated = pyqtSignal(float)
     ui_clear = pyqtSignal(bool)
+    task_state_updated = pyqtSignal(int, int, int, int, int, bool)
+    task_command_result = pyqtSignal(bool, str)
 
 class RobotBackendNode(Node):
     def __init__(self, signals):
         super().__init__('robot_ui_backend') 
+        self.declare_parameter('task_state_timeout', 0.75)
         self.signals = signals
         
         self.is_localized = False
@@ -29,6 +69,22 @@ class RobotBackendNode(Node):
         self.last_gui_y = None
         self.last_gui_z = None
         self.last_gui_yaw = None
+        self._task_commands = deque()
+        self._task_command_lock = threading.Lock()
+        self._task_command_in_flight = None
+        self._task_state_seq = None
+        self._task_state_signature = None
+        self._task_state_conflicted = False
+        self._task_state_timeout = max(
+            0.1, float(self.get_parameter('task_state_timeout').value)
+        )
+        self._last_task_state_monotonic = None
+        self._task_state_timed_out = False
+        self._mission_state_seq = None
+        self._mission_state_signature = None
+        self._mission_state_conflicted = False
+        self._last_mission_state_monotonic = None
+        self._route_valid = False
 
         # 主动清空 RViz 可视化的发布者（停止时发送空消息）
         self.pub_clear_path_ = self.create_publisher(Path, '/global_localization/path', 10)
@@ -83,8 +139,262 @@ class RobotBackendNode(Node):
         # 线程安全保护：创建 GuardCondition 用于跨线程（GUI -> ROS）安全地清除与重置
         self.nav_clear_guard = self.create_guard_condition(self.clear_nav_visualization)
         self.tf_clear_guard = self.create_guard_condition(self.clear_tf_buffer)
+        self.task_command_guard = self.create_guard_condition(self._dispatch_task_command)
+        self.task_command_client = self.create_client(
+            PatrolTaskCommand, '/mission/task_command'
+        )
+        task_qos = QoSProfile(
+            depth=1,
+            durability=DurabilityPolicy.TRANSIENT_LOCAL,
+            reliability=ReliabilityPolicy.RELIABLE,
+            history=HistoryPolicy.KEEP_LAST,
+        )
+        self.task_state_sub = self.create_subscription(
+            PatrolTaskState,
+            '/patrol_task/state',
+            self.task_state_callback,
+            task_qos,
+        )
+        self.mission_state_sub = self.create_subscription(
+            MissionState,
+            '/mission/state',
+            self.mission_state_callback,
+            task_qos,
+        )
+        self.waypoint_state_sub = self.create_subscription(
+            WaypointSequenceState,
+            '/waypoint_sequence/state',
+            self.waypoint_state_callback,
+            task_qos,
+        )
+        self.task_state_watchdog = self.create_timer(
+            min(0.1, self._task_state_timeout / 2.0),
+            self._check_task_state_timeout,
+        )
         
         self.signals.log_msg.emit("[SYS] ROS 2 话题订阅器已激活。等待数据流接入...")
+
+    def task_state_callback(self, msg):
+        state_seq = int(msg.state_seq) & UINT32_MASK
+        if state_seq == 0:
+            return
+        signature = (
+            int(msg.task_state),
+            int(msg.last_task_outcome),
+            int(msg.navigation_mode),
+            bool(getattr(msg, "home_pose_valid", False)),
+            _home_pose_signature(msg),
+        )
+        if self._task_state_seq is not None:
+            if state_seq == self._task_state_seq:
+                self._last_task_state_monotonic = time.monotonic()
+                if signature == self._task_state_signature:
+                    if self._task_state_timed_out:
+                        self._task_state_timed_out = not self._states_fresh()
+                        self._emit_combined_task_state()
+                    return
+                self._task_state_conflicted = True
+                self._emit_invalid_task_state(state_seq)
+                self.signals.log_msg.emit(
+                    f"[ERROR] 父任务状态 seq={state_seq} 字段冲突，已禁用全部任务命令。"
+                )
+                return
+            if not _is_newer_state_seq(state_seq, self._task_state_seq):
+                return
+        self._task_state_seq = state_seq
+        self._task_state_signature = signature
+        self._task_state_conflicted = False
+        self._task_state_timed_out = False
+        self._last_task_state_monotonic = time.monotonic()
+        self._emit_combined_task_state()
+
+    def mission_state_callback(self, msg):
+        state_seq = int(msg.state_seq) & UINT32_MASK
+        if state_seq == 0:
+            return
+        signature = (
+            int(msg.state),
+            int(msg.target_id),
+            int(msg.handled_target_id),
+        )
+        if self._mission_state_seq is not None:
+            if state_seq == self._mission_state_seq:
+                self._last_mission_state_monotonic = time.monotonic()
+                if self._mission_state_conflicted:
+                    return
+                if signature == self._mission_state_signature:
+                    if self._task_state_timed_out:
+                        self._task_state_timed_out = not self._states_fresh()
+                        self._emit_combined_task_state()
+                    return
+                if signature != self._mission_state_signature:
+                    self._mission_state_conflicted = True
+                    self._emit_invalid_task_state(state_seq)
+                    self.signals.log_msg.emit(
+                        f"[ERROR] 业务状态 seq={state_seq} 字段冲突，已禁用全部任务命令。"
+                    )
+                return
+            if not _is_newer_state_seq(state_seq, self._mission_state_seq):
+                return
+        self._mission_state_seq = state_seq
+        self._mission_state_signature = signature
+        self._mission_state_conflicted = False
+        self._last_mission_state_monotonic = time.monotonic()
+        self._emit_combined_task_state()
+
+    def waypoint_state_callback(self, msg):
+        count = int(msg.waypoint_count)
+        index = int(msg.current_index)
+        completed = int(msg.completed_count)
+        done = bool(msg.sequence_done)
+        progress_valid = (
+            count > 0
+            and (
+                (not done and 0 <= index < count and completed == index)
+                or (done and index == count - 1 and completed == count)
+            )
+        )
+        self._route_valid = bool(progress_valid and not done)
+        self._emit_combined_task_state()
+
+    def _emit_combined_task_state(self):
+        if (
+            self._task_state_seq is None
+            or self._mission_state_seq is None
+            or self._task_state_seq != self._mission_state_seq
+            or self._task_state_conflicted
+            or self._mission_state_conflicted
+            or self._task_state_timed_out
+            or not self._states_fresh()
+        ):
+            self._emit_invalid_task_state(
+                int(self._task_state_seq or self._mission_state_seq or 0)
+            )
+            return
+        task, outcome, navigation, home_valid = self._task_state_signature[:4]
+        mission = self._mission_state_signature[0]
+        if not self._combined_snapshot_is_valid(
+            task, outcome, navigation, home_valid, mission
+        ):
+            self._emit_invalid_task_state(self._task_state_seq)
+            return
+        self.signals.task_state_updated.emit(
+            self._task_state_seq,
+            task,
+            outcome,
+            navigation,
+            mission,
+            self._route_valid,
+        )
+
+    @staticmethod
+    def _combined_snapshot_is_valid(task, outcome, navigation, home_valid, mission):
+        if task not in (0, 1, 2, 3) or outcome not in (0, 1, 2, 3, 4):
+            return False
+        if navigation not in (0, 1, 2) or mission not in (0, 1, 2, 3, 4, 5, 6, 7):
+            return False
+        if task == PatrolTaskState.TASK_NO_TASK:
+            return (
+                navigation == PatrolTaskState.NAVIGATION_STOP
+                and not home_valid
+                and ((mission == MissionState.STARTUP and outcome == 0) or mission == MissionState.READY)
+            )
+        if outcome != PatrolTaskState.TASK_OUTCOME_NONE or not home_valid:
+            return False
+        if task == PatrolTaskState.TASK_PAUSED:
+            return mission == MissionState.READY and navigation == PatrolTaskState.NAVIGATION_STOP
+        if task == PatrolTaskState.TASK_RETURNING:
+            return mission == MissionState.READY and navigation == PatrolTaskState.NAVIGATION_MISSION
+        if mission in (MissionState.PATROL, MissionState.CONFIRM_TARGET):
+            return navigation == PatrolTaskState.NAVIGATION_WAYPOINT
+        return (
+            mission in (
+                MissionState.APPROACH_TARGET,
+                MissionState.VERIFY_IDENTITY,
+                MissionState.TRACK_INTRUDER,
+                MissionState.RECOVER_PATROL,
+            )
+            and navigation == PatrolTaskState.NAVIGATION_MISSION
+        )
+
+    def _emit_invalid_task_state(self, state_seq):
+        self.signals.task_state_updated.emit(int(state_seq), -1, -1, -1, -1, False)
+
+    def _states_fresh(self):
+        if (
+            self._last_task_state_monotonic is None
+            or self._last_mission_state_monotonic is None
+        ):
+            return False
+        now = time.monotonic()
+        return (
+            now - self._last_task_state_monotonic <= self._task_state_timeout
+            and now - self._last_mission_state_monotonic <= self._task_state_timeout
+        )
+
+    def _check_task_state_timeout(self):
+        if (
+            self._last_task_state_monotonic is None
+            or self._last_mission_state_monotonic is None
+            or self._task_state_timed_out
+            or self._task_state_conflicted
+            or self._mission_state_conflicted
+            or self._states_fresh()
+        ):
+            return
+        self._task_state_timed_out = True
+        seq = int(self._task_state_seq or 0)
+        self._emit_invalid_task_state(seq)
+        self.signals.log_msg.emit(
+            "[ERROR] 父任务状态 heartbeat 超时，已禁用全部任务命令。"
+        )
+
+    def enqueue_task_command(self, command):
+        with self._task_command_lock:
+            self._task_commands.append(int(command))
+        self.task_command_guard.trigger()
+
+    def _dispatch_task_command(self):
+        with self._task_command_lock:
+            if self._task_command_in_flight is not None or not self._task_commands:
+                return
+            command = self._task_commands.popleft()
+        valid_commands = {
+            PatrolTaskCommand.Request.START,
+            PatrolTaskCommand.Request.PAUSE,
+            PatrolTaskCommand.Request.RESUME,
+            PatrolTaskCommand.Request.RETURN,
+            PatrolTaskCommand.Request.TERMINATE,
+        }
+        if command not in valid_commands:
+            self.signals.task_command_result.emit(False, "未知父任务命令")
+            self.task_command_guard.trigger()
+            return
+        if not self.task_command_client.service_is_ready():
+            self.signals.task_command_result.emit(False, "任务命令服务尚未就绪")
+            self.task_command_guard.trigger()
+            return
+        request = PatrolTaskCommand.Request()
+        request.command = command
+        future = self.task_command_client.call_async(request)
+        with self._task_command_lock:
+            self._task_command_in_flight = future
+        future.add_done_callback(self._on_task_command_result)
+
+    def _on_task_command_result(self, future):
+        try:
+            response = future.result()
+            message = str(response.message)
+            if not response.accepted and response.error_code:
+                message = f"{response.error_code}: {message}"
+            self.signals.task_command_result.emit(bool(response.accepted), message)
+        except Exception as exc:
+            self.signals.task_command_result.emit(False, f"任务命令调用失败：{exc}")
+        finally:
+            with self._task_command_lock:
+                if self._task_command_in_flight is future:
+                    self._task_command_in_flight = None
+            self.task_command_guard.trigger()
 
     def clear_tf_buffer(self):
         # 兼容 UI 的重置清空按钮
@@ -284,6 +594,10 @@ class Ros2BackendThread(QThread):
         if self.node:
             # 跨线程安全触发 GuardCondition，使 clear_nav_visualization 在 ROS 2 线程中安全执行
             self.node.nav_clear_guard.trigger()
+
+    def send_task_command(self, command):
+        if self.node:
+            self.node.enqueue_task_command(command)
 
     def stop(self):
         if self.node: self.node.destroy_node(); self.node = None

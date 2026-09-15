@@ -136,7 +136,10 @@ ros2 launch dog_patrol_perception_tracking \
 运行后以 production 节点的 `runtime_monitor` 日志、`ros2 topic hz /perception/tracked_target_image` 和
 `ros2 topic bw /perception/tracked_target_image` 核验相机、推理、tracking FPS 和 crop transport。
 需要 mission 模式时改为运行 `dog_patrol_perception_tracking_node`，并同时启动主仓内的 supervisor、
-orchestrator、`perception_voice_readiness` 和 `perception_voice_provider`；在 face provider、voice
+orchestrator、`perception_face_readiness`、`perception_face_provider`、`perception_voice_readiness`
+和 `perception_voice_provider`；感知三项 capability 都必须针对当前 STARTUP 序号报告 READY，
+supervisor 才会形成 `TASK_NO_TASK + MissionState.READY`。准备合法 waypoint 后，还必须通过
+`/mission/task_command` 显式发送 START 才能进入 `TASK_RUNNING + PATROL`。在 face provider、voice
 现场部署输入和现场验收均未完成前，感知整体 READY 仍应保持未就绪。
 
 ## Tracking verified baseline
