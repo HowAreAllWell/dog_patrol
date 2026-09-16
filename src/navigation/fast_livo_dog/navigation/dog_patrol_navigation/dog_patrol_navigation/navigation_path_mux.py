@@ -258,6 +258,7 @@ class NavigationPathMux(Node):
     def _publish_empty(self) -> None:
         empty = Path()
         empty.header.stamp = self.get_clock().now().to_msg()
+        empty.header.frame_id = "map"
         self._publish(empty)
 
 

@@ -1,5 +1,7 @@
 from types import SimpleNamespace
 
+import pytest
+from builtin_interfaces.msg import Time
 from dog_patrol_interfaces.msg import PatrolTaskState
 from geometry_msgs.msg import PoseStamped
 from nav_msgs.msg import Path
@@ -232,3 +234,47 @@ def test_same_sequence_conflict_stops_and_waits_for_newer_sequence():
     )
     assert not instance._state_conflicted
     assert instance._active_source == WAYPOINT_SOURCE
+
+
+@pytest.mark.parametrize(
+    "initial_task,initial_mode",
+    [
+        (PatrolTaskState.TASK_RUNNING, PatrolTaskState.NAVIGATION_WAYPOINT),
+        (PatrolTaskState.TASK_RUNNING, PatrolTaskState.NAVIGATION_MISSION),
+        (PatrolTaskState.TASK_PAUSED, PatrolTaskState.NAVIGATION_STOP),
+        (PatrolTaskState.TASK_RETURNING, PatrolTaskState.NAVIGATION_MISSION),
+    ],
+)
+def test_terminate_publishes_transformable_empty_path_and_rejects_late_paths(
+    initial_task, initial_mode
+):
+    instance, published = node()
+    instance.get_clock = lambda: SimpleNamespace(
+        now=lambda: SimpleNamespace(to_msg=lambda: Time(sec=30))
+    )
+    instance._publish_empty = lambda: NavigationPathMux._publish_empty(instance)
+    NavigationPathMux._on_task_state(
+        instance, task_state(10, initial_task, initial_mode, stamp=10)
+    )
+    NavigationPathMux._on_waypoint_path(instance, path(11))
+    NavigationPathMux._on_mission_path(instance, path(11))
+    published.clear()
+
+    terminated = task_state(
+        11,
+        PatrolTaskState.TASK_NO_TASK,
+        PatrolTaskState.NAVIGATION_STOP,
+        stamp=20,
+        outcome=PatrolTaskState.TASK_OUTCOME_TERMINATED,
+    )
+    NavigationPathMux._on_task_state(instance, terminated)
+    assert instance._active_source == NO_SOURCE
+    assert len(published) == 1
+    assert published[0].header.frame_id == "map"
+    assert published[0].header.stamp.sec == 30
+    assert not published[0].poses
+
+    NavigationPathMux._on_waypoint_path(instance, path(21))
+    NavigationPathMux._on_mission_path(instance, path(21))
+    NavigationPathMux._on_task_state(instance, terminated)
+    assert len(published) == 1

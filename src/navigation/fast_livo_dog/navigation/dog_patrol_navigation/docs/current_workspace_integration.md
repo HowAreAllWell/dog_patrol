@@ -171,6 +171,10 @@ FAST-LIVO-DOG README 中的启动命令可作为底层模块参考，但不要�
 `selected_global_path_topic` 会同时传给 mux 和协调器的 Ready 检查，避免自定义 topic
 后两者观察不同的路径链路。
 
+mux 在每个新 `state_seq`、STOP、状态冲突或 heartbeat 超时时发布的空 `/global_path` 都使用
+当前 ROS 时间戳和 `header.frame_id=map`。这保证 RViz、Pure Pursuit 和局部规划链能够接受清空消息；
+TERMINATE 与正常完成必须同样清除旧路径显示，不能留下空 frame_id 的无效清空消息。
+
 协调器本身也可以单独启动，但生产运行应由 `navigation.launch.py` 统一启动，避免
 重复创建同名节点、重复发布控制路径或重复启动控制链：
 

@@ -837,6 +837,11 @@ waypoint 和 navigation coordinator 每次发布非空路径时都必须用同�
 
 空路径必须继续向下游形成完整停止链：
 
+mux 自行生成的空路径必须保留有效的全局坐标系 `header.frame_id=map` 和当前 ROS 时间戳，
+不能只发送 `poses=[]` 而把 frame_id 留空。否则 RViz 可能因坐标变换失败保留旧路径显示，
+导致 TERMINATE、PAUSE 或 heartbeat 超时后的停止状态与画面不一致；正常完成和立即终止
+都必须发送可被下游接收的空路径。
+
 ~~~text
 mux 发布空 /global_path
   -> RL/PRIEST 清除全局路径缓存、subgoal 和旧 /local_path
