@@ -12,9 +12,7 @@ navigation_mission_coordinator:
       # the only node that publishes the selected path on /global_path.
       global_path: /mission_global_path
       selected_global_path: /global_path
-      pause_patrol: /waypoint_sequence/pause
-      resume_patrol: /waypoint_sequence/resume
-      resume_patrol_from_current: /waypoint_sequence/resume_from_current
+      task_state: /patrol_task/state
       nav_cmd: /NAV_CMD
       target_point: /navigation/target_point
       target_goal: /navigation/target_goal
@@ -94,10 +92,16 @@ navigation_mission_coordinator:
       # RECOVER_PATROL returns to the map pose saved when APPROACH_TARGET
       # started, then resumes the paused waypoint task.
       recovery_position_tolerance: 0.25
+      # Parent-task RETURN accepts home arrival within 0.50 m, independently
+      # of the tighter patrol-interruption recovery tolerance above.
+      return_position_tolerance: 0.50
       # APPROACH_TARGET also tracks a moving target. Replan periodically even
       # when each individual bbox update is below target_replan_distance.
       approach_replan_period: 0.50
       tracking_replan_period: 0.50
+      # While RETURNING, recompute the path from the robot's current map pose
+      # to the fixed START-time home pose at 2 Hz.
+      return_replan_period: 0.50
       target_replan_distance: 0.25
       stop_republish_period: 0.20
 
@@ -109,3 +113,4 @@ navigation_mission_coordinator:
       ready_event_period: 1.0
       technical_error_timeout: 3.0
       tf_timeout: 0.05
+      state_timeout: 0.75

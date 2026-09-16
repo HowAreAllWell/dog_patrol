@@ -245,9 +245,13 @@ class PerceptionTrackingNode : public rclcpp::Node {
             return;
           }
           const auto mission = runtime_ != nullptr ? runtime_->CurrentMission() : std::nullopt;
-          if (mission.has_value() &&
-              (msg->observed_state_seq != mission->state_seq ||
-               (mission->target_id > 0 && msg->target_id != static_cast<std::uint32_t>(mission->target_id)))) {
+          if (!mission.has_value()) {
+            visualizer_->ClearFaceOverlay();
+            return;
+          }
+          if (msg->observed_state_seq != mission->state_seq ||
+              mission->target_id <= 0 ||
+              msg->target_id != static_cast<std::uint32_t>(mission->target_id)) {
             visualizer_->ClearFaceOverlay();
             return;
           }
@@ -341,6 +345,7 @@ class PerceptionTrackingNode : public rclcpp::Node {
     this->declare_parameter<double>("target.handled_ignore_absence_sec", 60.0);
 
     this->declare_parameter<std::string>("mission.state_topic", "/mission/state");
+    this->declare_parameter<double>("mission.state_timeout", 0.75);
     this->declare_parameter<std::string>("mission.event_topic", "/mission/event");
     this->declare_parameter<std::string>("mission.selected_target_bbox_topic",
                                          "/perception/selected_target_bbox");
@@ -486,6 +491,14 @@ class PerceptionTrackingNode : public rclcpp::Node {
         this->get_parameter("mission.selected_target_bbox_topic").as_string();
     mission_config.capability_status_topic =
         this->get_parameter("perception.capability_status_topic").as_string();
+    const double state_timeout_sec =
+        this->get_parameter("mission.state_timeout").as_double();
+    if (!std::isfinite(state_timeout_sec) || state_timeout_sec <= 0.0) {
+      throw std::runtime_error("mission.state_timeout must be positive");
+    }
+    mission_config.state_timeout = std::chrono::duration_cast<
+        std::chrono::steady_clock::duration>(
+        std::chrono::duration<double>(state_timeout_sec));
     mission_state_callback_group_ = this->create_callback_group(
         rclcpp::CallbackGroupType::MutuallyExclusive);
     mission_config.mission_state_callback_group = mission_state_callback_group_;

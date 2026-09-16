@@ -108,6 +108,7 @@ class ProviderHarness:
                 Parameter("mission_state_topic", value=self.state_topic),
                 Parameter("authorization_command_topic", value=self.command_topic),
                 Parameter("authorization_evidence_topic", value=self.evidence_topic),
+                Parameter("state_timeout", value=10.0),
             ],
             adapter_factory=adapter_factory,
         )
@@ -148,11 +149,13 @@ class ProviderHarness:
         target,
         *,
         state=MissionState.VERIFY_IDENTITY,
+        handled=0,
     ):
         msg = MissionState()
         msg.state_seq = seq
         msg.state = state
         msg.target_id = target
+        msg.handled_target_id = handled
         self.state_pub.publish(msg)
         for _ in range(5):
             self.executor.spin_once(timeout_sec=0.03)
@@ -314,4 +317,53 @@ def test_cancel_command_stops_active_stage():
         ]
     finally:
         task.release.set()
+        harness.close()
+
+
+def test_late_old_verify_snapshot_cannot_resurrect_ready_session():
+    task = FakeTask([VoiceWindowResult(accepted=True, decision_time_seconds=0.1)])
+    factory = FakeAdapterFactory([task])
+    harness = ProviderHarness(factory)
+    try:
+        harness.publish_state(31, 56)
+        harness.publish_state(32, 0, state=MissionState.READY)
+
+        harness.publish_state(31, 56)
+        harness.publish_command(31, 56, AuthorizationCommand.DUAL_FIRST)
+
+        assert not harness.wait(lambda: bool(factory.created), timeout=0.25)
+        assert harness.evidence == []
+    finally:
+        harness.close()
+
+
+def test_mission_state_heartbeat_timeout_invalidates_voice_session():
+    harness = ProviderHarness(FakeAdapterFactory([]))
+    try:
+        harness.publish_state(60, 88)
+        harness.provider._state_timeout = 0.01
+        harness.provider._last_state_monotonic = time.monotonic() - 1.0
+
+        harness.provider._check_state_timeout()
+
+        assert harness.provider._state_timed_out
+        assert harness.provider._controller._mission_session is None
+        assert harness.evidence == []
+    finally:
+        harness.close()
+
+
+def test_same_sequence_non_session_field_conflict_locks_voice_provider():
+    task = FakeTask([VoiceWindowResult(accepted=True, decision_time_seconds=0.1)])
+    factory = FakeAdapterFactory([task])
+    harness = ProviderHarness(factory)
+    try:
+        harness.publish_state(70, 90)
+        harness.publish_state(70, 90, handled=90)
+        harness.publish_state(70, 90)
+        harness.publish_command(70, 90, AuthorizationCommand.DUAL_FIRST)
+
+        assert not harness.wait(lambda: bool(factory.created), timeout=0.25)
+        assert harness.evidence == []
+    finally:
         harness.close()

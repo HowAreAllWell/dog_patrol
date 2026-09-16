@@ -1,7 +1,7 @@
 """Launch only the Nav2 services used by the external M20 navigation chain."""
 
 from launch import LaunchDescription
-from launch.actions import DeclareLaunchArgument, SetEnvironmentVariable
+from launch.actions import DeclareLaunchArgument, SetEnvironmentVariable, Shutdown
 from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
 from launch_ros.descriptions import ParameterFile
@@ -50,6 +50,7 @@ def generate_launch_description():
                 output="screen",
                 respawn=use_respawn,
                 respawn_delay=2.0,
+                on_exit=Shutdown(reason="Nav2 controller server exited"),
                 parameters=[configured_params],
                 arguments=["--ros-args", "--log-level", log_level],
                 remappings=remappings + [("cmd_vel", "cmd_vel_nav")],
@@ -61,6 +62,7 @@ def generate_launch_description():
                 output="screen",
                 respawn=use_respawn,
                 respawn_delay=2.0,
+                on_exit=Shutdown(reason="Nav2 planner server exited"),
                 parameters=[configured_params],
                 arguments=["--ros-args", "--log-level", log_level],
                 remappings=remappings,
@@ -72,6 +74,7 @@ def generate_launch_description():
                 output="screen",
                 respawn=use_respawn,
                 respawn_delay=2.0,
+                on_exit=Shutdown(reason="Nav2 velocity smoother exited"),
                 parameters=[configured_params],
                 arguments=["--ros-args", "--log-level", log_level],
                 remappings=remappings
@@ -82,6 +85,7 @@ def generate_launch_description():
                 executable="lifecycle_manager",
                 name="lifecycle_manager_navigation",
                 output="screen",
+                on_exit=Shutdown(reason="Nav2 lifecycle manager exited"),
                 arguments=["--ros-args", "--log-level", log_level],
                 parameters=[
                     {"use_sim_time": use_sim_time},

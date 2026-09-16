@@ -129,6 +129,63 @@ TEST(MissionFrameTransactionTest, TreatsUnrepresentableTargetBoxAsMissing) {
   EXPECT_EQ(lost.events.front().observed_state_seq, 17U);
 }
 
+TEST(MissionFrameTransactionTest, ActiveMissionUsesAuthoritativeTargetInsteadOfLargestPerson) {
+  auto transaction = ConfiguredTransaction();
+  const auto approach = Mission(MissionPhase::kApproachTarget, 18U, 42);
+  const auto source_time = MissionCoordinator::TimePoint{};
+  const std::vector<IdentityObservation> identities{
+      TrustedPerson(42, 7, cv::Rect2f{10.0F, 20.0F, 30.0F, 60.0F}),
+      TrustedPerson(99, 8, cv::Rect2f{100.0F, 20.0F, 100.0F, 200.0F})};
+
+  const auto output = transaction.Update(
+      {approach, std::nullopt, identities, source_time, Metadata()});
+
+  ASSERT_EQ(output.primary.state, PrimaryState::kLocked);
+  EXPECT_EQ(output.primary.primary_target_id, 42);
+  ASSERT_TRUE(output.target_box.has_value());
+  EXPECT_EQ(output.target_box->target_id, 42);
+  EXPECT_TRUE(output.events.empty());
+}
+
+TEST(MissionFrameTransactionTest, ApproachingSameTrackRecoversTrustedBoxBeforeTargetLost) {
+  using namespace std::chrono_literals;
+  auto transaction = ConfiguredTransaction();
+  const auto approach = Mission(MissionPhase::kApproachTarget, 19U, 42);
+  const auto start = MissionCoordinator::TimePoint{};
+  const auto first = transaction.Update(
+      {approach, std::nullopt,
+       {TrustedPerson(42, 7, cv::Rect2f{10.0F, 20.0F, 50.0F, 50.0F})},
+       start, Metadata()});
+  ASSERT_TRUE(first.target_box.has_value());
+
+  for (int frame = 1; frame <= 2; ++frame) {
+    const auto pending = transaction.Update(
+        {approach, approach,
+         {TrustedPerson(42, 7, cv::Rect2f{10.0F, 20.0F,
+                                           120.0F + frame, 120.0F + frame})},
+         start + 100ms * frame, Metadata()});
+    EXPECT_EQ(pending.primary.state, PrimaryState::kPendingRecovery);
+    EXPECT_FALSE(pending.target_box.has_value());
+    EXPECT_TRUE(pending.events.empty());
+  }
+
+  const auto recovered = transaction.Update(
+      {approach, approach,
+       {TrustedPerson(42, 7, cv::Rect2f{10.0F, 20.0F, 123.0F, 123.0F})},
+       start + 300ms, Metadata()});
+  EXPECT_EQ(recovered.primary.state, PrimaryState::kLocked);
+  ASSERT_TRUE(recovered.target_box.has_value());
+  EXPECT_EQ(recovered.target_box->target_id, 42);
+  EXPECT_TRUE(recovered.events.empty());
+
+  const auto later = transaction.Update(
+      {approach, approach,
+       {TrustedPerson(42, 7, cv::Rect2f{10.0F, 20.0F, 125.0F, 125.0F})},
+       start + 10100ms, Metadata()});
+  EXPECT_TRUE(later.target_box.has_value());
+  EXPECT_TRUE(later.events.empty());
+}
+
 TEST(MissionFrameTransactionTest, SkipsHandledTargetWhenMissionReturnsToPatrol) {
   auto transaction = ConfiguredTransaction();
   const auto verify = Mission(MissionPhase::kVerifyIdentity, 200U, 42);

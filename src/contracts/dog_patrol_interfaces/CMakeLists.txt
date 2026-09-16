@@ -4,13 +4,17 @@ project(dog_patrol_interfaces)
 find_package(ament_cmake REQUIRED)
 find_package(rosidl_default_generators REQUIRED)
 find_package(std_msgs REQUIRED)
+find_package(geometry_msgs REQUIRED)
 
 rosidl_generate_interfaces(${PROJECT_NAME}
   "msg/MissionState.msg"
   "msg/MissionEvent.msg"
   "msg/TargetBoundingBox.msg"
   "msg/TargetNavigationStatus.msg"
-  DEPENDENCIES std_msgs
+  "msg/PatrolTaskState.msg"
+  "msg/WaypointSequenceState.msg"
+  "srv/PatrolTaskCommand.srv"
+  DEPENDENCIES std_msgs geometry_msgs
 )
 
 ament_export_dependencies(rosidl_default_runtime)

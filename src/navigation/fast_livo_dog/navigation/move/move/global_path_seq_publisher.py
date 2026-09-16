@@ -21,12 +21,14 @@ from __future__ import annotations
 
 import math
 import re
+import time
 from dataclasses import dataclass
 from typing import List, Optional
 import copy
 
 import numpy as np
 import rclpy
+from dog_patrol_interfaces.msg import MissionState, PatrolTaskState, WaypointSequenceState
 from geometry_msgs.msg import PointStamped, PoseArray, PoseStamped
 from nav2_msgs.action import ComputePathToPose
 from nav_msgs.msg import Path
@@ -34,6 +36,7 @@ from rclpy.action import ActionClient
 from rclpy.duration import Duration
 from rclpy.executors import ExternalShutdownException
 from rclpy.node import Node
+from rclpy.qos import DurabilityPolicy, HistoryPolicy, QoSProfile, ReliabilityPolicy
 from rclpy.time import Time
 from std_msgs.msg import Empty, String
 from visualization_msgs.msg import Marker, MarkerArray
@@ -62,6 +65,29 @@ class Waypoint:
     yaw: float = 0.0  # radians
 
 
+def _home_pose_signature(message: PatrolTaskState):
+    if not bool(getattr(message, "home_pose_valid", False)):
+        return None
+    pose = getattr(message, "home_pose", None)
+    if pose is None:
+        return None
+    body = getattr(pose, "pose", pose)
+    header = getattr(pose, "header", None)
+    stamp = getattr(header, "stamp", None)
+    return (
+        str(getattr(header, "frame_id", "")),
+        int(getattr(stamp, "sec", 0)),
+        int(getattr(stamp, "nanosec", 0)),
+        float(body.position.x),
+        float(body.position.y),
+        float(body.position.z),
+        float(body.orientation.x),
+        float(body.orientation.y),
+        float(body.orientation.z),
+        float(body.orientation.w),
+    )
+
+
 class GlobalPathSequencePublisher(Node):
     def __init__(self):
         super().__init__("global_path_sequence_publisher")
@@ -77,6 +103,8 @@ class GlobalPathSequencePublisher(Node):
         self.declare_parameter("auto_advance", True)
         self.declare_parameter("start_index", 0)
         self.declare_parameter("auto_start_on_click", True)
+        self.declare_parameter("enable_debug_control_topics", False)
+        self.declare_parameter("task_state_timeout", 0.75)
         self.declare_parameter("min_clicked_spacing", 0.25)
 
         # Frames/topics.
@@ -92,6 +120,9 @@ class GlobalPathSequencePublisher(Node):
         self.declare_parameter("delete_clicked_point_topic", "waypoint_sequence/delete_nearest")
         self.declare_parameter("replace_clicked_point_topic", "waypoint_sequence/replace_nearest")
         self.declare_parameter("status_topic", "waypoint_sequence/status")
+        self.declare_parameter("task_state_topic", "/patrol_task/state")
+        self.declare_parameter("mission_state_topic", "/mission/state")
+        self.declare_parameter("waypoint_state_topic", "/waypoint_sequence/state")
         self.declare_parameter("clear_topic", "waypoint_sequence/clear")
         self.declare_parameter("undo_topic", "waypoint_sequence/undo")
         self.declare_parameter("pause_topic", "waypoint_sequence/pause")
@@ -121,6 +152,9 @@ class GlobalPathSequencePublisher(Node):
         self.delete_clicked_point_topic = str(self.get_parameter("delete_clicked_point_topic").value)
         self.replace_clicked_point_topic = str(self.get_parameter("replace_clicked_point_topic").value)
         self.status_topic = str(self.get_parameter("status_topic").value)
+        self.task_state_topic = str(self.get_parameter("task_state_topic").value)
+        self.mission_state_topic = str(self.get_parameter("mission_state_topic").value)
+        self.waypoint_state_topic = str(self.get_parameter("waypoint_state_topic").value)
         self.clear_topic = str(self.get_parameter("clear_topic").value)
         self.undo_topic = str(self.get_parameter("undo_topic").value)
         self.pause_topic = str(self.get_parameter("pause_topic").value)
@@ -142,6 +176,12 @@ class GlobalPathSequencePublisher(Node):
         self.loop = bool(self.get_parameter("loop").value)
         self.auto_advance = bool(self.get_parameter("auto_advance").value)
         self.auto_start_on_click = bool(self.get_parameter("auto_start_on_click").value)
+        self.enable_debug_control_topics = bool(
+            self.get_parameter("enable_debug_control_topics").value
+        )
+        self.task_state_timeout = max(
+            0.1, float(self.get_parameter("task_state_timeout").value)
+        )
         self.min_clicked_spacing = max(0.0, float(self.get_parameter("min_clicked_spacing").value))
 
         self.waypoints = self._load_waypoints()
@@ -149,7 +189,22 @@ class GlobalPathSequencePublisher(Node):
         if self.waypoints:
             self.current_index = int(np.clip(self.current_index, 0, len(self.waypoints) - 1))
         self.sequence_done = False
-        self.paused = False
+        self.paused = True
+        self._parent_task_state = None
+        self._parent_task_outcome = PatrolTaskState.TASK_OUTCOME_NONE
+        self._parent_navigation_mode = PatrolTaskState.NAVIGATION_STOP
+        self._parent_state_seq = 0
+        self._parent_state_seen = False
+        self._parent_state_signature = None
+        self._parent_state_conflicted = False
+        self._parent_home_pose_valid = False
+        self._parent_snapshot_valid = False
+        self._last_parent_state_monotonic = None
+        self._parent_state_timed_out = False
+        self._mission_state = None
+        self._mission_startup_baseline = None
+        self._mission_state_conflicted = False
+        self.route_revision = 1
         self.request_in_flight = False
         self.sequence_version = 0
         self.request_version = -1
@@ -171,6 +226,17 @@ class GlobalPathSequencePublisher(Node):
         self.waypoint_marker_pub = self.create_publisher(MarkerArray, self.waypoints_topic, 10)
         self.waypoints_pose_pub = self.create_publisher(PoseArray, self.waypoints_pose_topic, 10)
         self.status_pub = self.create_publisher(String, self.status_topic, 10)
+        task_state_qos = QoSProfile(
+            reliability=ReliabilityPolicy.RELIABLE,
+            durability=DurabilityPolicy.TRANSIENT_LOCAL,
+            history=HistoryPolicy.KEEP_LAST,
+            depth=1,
+        )
+        self.waypoint_state_pub = self.create_publisher(
+            WaypointSequenceState,
+            self.waypoint_state_topic,
+            task_state_qos,
+        )
 
         self.clicked_point_sub = None
         if self.clicked_point_topic:
@@ -189,13 +255,33 @@ class GlobalPathSequencePublisher(Node):
             )
         self.clear_sub = self.create_subscription(Empty, self.clear_topic, self._on_clear, 10)
         self.undo_sub = self.create_subscription(Empty, self.undo_topic, self._on_undo, 10)
-        self.pause_sub = self.create_subscription(Empty, self.pause_topic, self._on_pause, 10)
-        self.resume_sub = self.create_subscription(Empty, self.resume_topic, self._on_resume, 10)
-        self.resume_from_current_sub = self.create_subscription(
-            Empty,
-            self.resume_from_current_topic,
-            self._on_resume_from_current,
-            10,
+        self.pause_sub = None
+        self.resume_sub = None
+        self.resume_from_current_sub = None
+        if self.enable_debug_control_topics:
+            self.pause_sub = self.create_subscription(
+                Empty, self.pause_topic, self._on_pause, 10
+            )
+            self.resume_sub = self.create_subscription(
+                Empty, self.resume_topic, self._on_resume, 10
+            )
+            self.resume_from_current_sub = self.create_subscription(
+                Empty,
+                self.resume_from_current_topic,
+                self._on_resume_from_current,
+                10,
+            )
+        self.task_state_sub = self.create_subscription(
+            PatrolTaskState,
+            self.task_state_topic,
+            self._on_parent_task_state,
+            task_state_qos,
+        )
+        self.mission_state_sub = self.create_subscription(
+            MissionState,
+            self.mission_state_topic,
+            self._on_mission_state,
+            task_state_qos,
         )
 
         self.tf_buffer = tf2_ros.Buffer(cache_time=Duration(seconds=10.0))
@@ -227,6 +313,10 @@ class GlobalPathSequencePublisher(Node):
         self.timer = self.create_timer(self.replan_period, self._on_timer)
         self.marker_timer = self.create_timer(0.1, self._publish_waypoints)
         self.status_timer = self.create_timer(1.0, self._publish_status)
+        self.task_state_watchdog_timer = self.create_timer(
+            min(0.1, self.task_state_timeout / 2.0),
+            self._check_parent_state_timeout,
+        )
 
         self.get_logger().debug(
 
@@ -241,6 +331,7 @@ class GlobalPathSequencePublisher(Node):
             f"loop={self.loop}, auto_advance={self.auto_advance}"
         )
         self._publish_empty_paths()
+        self._publish_waypoint_state()
 
     def _load_waypoints(self) -> List[Waypoint]:
         if not self.use_static_goals:
@@ -286,7 +377,212 @@ class GlobalPathSequencePublisher(Node):
             waypoints.append(Waypoint(x, y, yaw))
         return waypoints
 
+    @staticmethod
+    def _seq_newer(candidate: int, current: int) -> bool:
+        delta = (int(candidate) - int(current)) & 0xFFFFFFFF
+        return 0 < delta < 0x80000000
+
+    def _can_execute_parent(self) -> bool:
+        return bool(
+            self._parent_state_seen
+            and not self._parent_state_conflicted
+            and not self._parent_state_timed_out
+            and self._parent_snapshot_valid
+            and self._parent_task_state == PatrolTaskState.TASK_RUNNING
+            and self._parent_navigation_mode == PatrolTaskState.NAVIGATION_WAYPOINT
+            and bool(getattr(self, "_parent_home_pose_valid", False))
+        )
+
+    def _can_edit_route(self) -> bool:
+        return (
+            not self._parent_state_seen
+            or (
+                self._parent_snapshot_valid
+                and not self._parent_state_conflicted
+                and not self._parent_state_timed_out
+                and self._parent_task_state == PatrolTaskState.TASK_NO_TASK
+            )
+        )
+
+    @staticmethod
+    def _parent_snapshot_is_valid(msg: PatrolTaskState) -> bool:
+        task = int(msg.task_state)
+        outcome = int(msg.last_task_outcome)
+        mode = int(msg.navigation_mode)
+        home_valid = bool(getattr(msg, "home_pose_valid", False))
+        if task not in (
+            PatrolTaskState.TASK_NO_TASK,
+            PatrolTaskState.TASK_RUNNING,
+            PatrolTaskState.TASK_PAUSED,
+            PatrolTaskState.TASK_RETURNING,
+        ) or outcome not in (
+            PatrolTaskState.TASK_OUTCOME_NONE,
+            PatrolTaskState.TASK_OUTCOME_COMPLETED,
+            PatrolTaskState.TASK_OUTCOME_RETURNED,
+            PatrolTaskState.TASK_OUTCOME_TERMINATED,
+            PatrolTaskState.TASK_OUTCOME_FAILED,
+        ):
+            return False
+        if task == PatrolTaskState.TASK_NO_TASK:
+            return mode == PatrolTaskState.NAVIGATION_STOP and not home_valid
+        if outcome != PatrolTaskState.TASK_OUTCOME_NONE or not home_valid:
+            return False
+        if task == PatrolTaskState.TASK_PAUSED:
+            return mode == PatrolTaskState.NAVIGATION_STOP
+        if task == PatrolTaskState.TASK_RETURNING:
+            return mode == PatrolTaskState.NAVIGATION_MISSION
+        return mode in (
+            PatrolTaskState.NAVIGATION_WAYPOINT,
+            PatrolTaskState.NAVIGATION_MISSION,
+        )
+
+    def _on_parent_task_state(self, msg: PatrolTaskState):
+        seq = int(msg.state_seq)
+        if seq == 0:
+            self.get_logger().warning("ignoring patrol task state seq=0")
+            return
+        signature = (
+            int(msg.task_state),
+            int(msg.last_task_outcome),
+            int(msg.navigation_mode),
+            bool(msg.home_pose_valid),
+            _home_pose_signature(msg),
+        )
+        if self._parent_state_seen and seq != self._parent_state_seq and not self._seq_newer(seq, self._parent_state_seq):
+            return
+        same = self._parent_state_seen and seq == self._parent_state_seq
+        self._last_parent_state_monotonic = time.monotonic()
+        if same:
+            if self._parent_state_conflicted:
+                return
+            if self._parent_state_signature is not None and signature != self._parent_state_signature:
+                self._parent_state_conflicted = True
+                self.paused = True
+                self.sequence_version += 1
+                self._invalidate_planning_request("conflicting parent task state")
+                self._publish_empty_paths()
+                self._publish_waypoint_state()
+                self.get_logger().error(
+                    f"conflicting parent task state fields at seq={seq}; stopping"
+                )
+                return
+            if not self._parent_state_timed_out:
+                return
+        self._parent_state_seen = True
+        self._parent_state_seq = seq
+        self._parent_state_signature = signature
+        self._parent_state_conflicted = False
+        self._parent_state_timed_out = False
+        self._parent_task_state = int(msg.task_state)
+        self._parent_task_outcome = int(msg.last_task_outcome)
+        self._parent_navigation_mode = int(msg.navigation_mode)
+        self._parent_home_pose_valid = bool(getattr(msg, "home_pose_valid", False))
+        self._parent_snapshot_valid = self._parent_snapshot_is_valid(msg)
+        self.sequence_version += 1
+        self._invalidate_planning_request("parent task state changed")
+        terminal = (
+            self._parent_task_state == PatrolTaskState.TASK_NO_TASK
+            and self._parent_task_outcome != PatrolTaskState.TASK_OUTCOME_NONE
+        )
+        if self._parent_task_state == PatrolTaskState.TASK_RETURNING or terminal:
+            self._clear_waypoints("parent task ended")
+            self.paused = True
+        elif self._can_execute_parent():
+            self.paused = False
+            self._last_path = None
+            self._publish_empty_paths()
+            self._on_timer()
+        else:
+            self.paused = True
+            self._publish_empty_paths()
+        self._publish_waypoints()
+        self._publish_waypoint_state()
+
+    def _check_parent_state_timeout(self):
+        if (
+            self._last_parent_state_monotonic is None
+            or self._parent_state_timed_out
+            or time.monotonic() - self._last_parent_state_monotonic
+            <= self.task_state_timeout
+        ):
+            return
+        self._parent_state_timed_out = True
+        self.paused = True
+        self.sequence_version += 1
+        self._invalidate_planning_request("parent task state heartbeat timed out")
+        self._publish_empty_paths()
+        self._publish_waypoint_state()
+        self.get_logger().warning(
+            "parent task state heartbeat timed out; waypoint execution stopped"
+        )
+
+    def _on_mission_state(self, msg: MissionState):
+        seq = int(msg.state_seq)
+        if seq == 0:
+            self.get_logger().warning("ignoring mission state seq=0")
+            return
+        previous = self._mission_state
+        if previous is not None and seq != int(previous.state_seq) and not self._seq_newer(seq, int(previous.state_seq)):
+            return
+        if previous is not None and seq == int(previous.state_seq):
+            signature = (int(msg.state), int(msg.target_id), int(msg.handled_target_id))
+            previous_signature = (
+                int(previous.state),
+                int(previous.target_id),
+                int(previous.handled_target_id),
+            )
+            if self._mission_state_conflicted or signature != previous_signature:
+                self._mission_state_conflicted = True
+                self.get_logger().error(
+                    f"conflicting mission state fields at seq={seq}; stopping waypoint execution"
+                )
+                self.paused = True
+                self._invalidate_planning_request("conflicting mission state")
+                self._publish_empty_paths()
+                self._publish_waypoint_state()
+                return
+            return
+        self._mission_state = msg
+        self._mission_state_conflicted = False
+        if msg.state != MissionState.STARTUP:
+            return
+        if self._mission_startup_baseline is None:
+            self._mission_startup_baseline = seq
+            return
+        if seq != self._mission_startup_baseline and self._seq_newer(seq, self._mission_startup_baseline):
+            self._mission_startup_baseline = seq
+            self._clear_waypoints("mission reset")
+            self.paused = True
+            self._publish_waypoint_state()
+
+    def _publish_waypoint_state(self):
+        if not hasattr(self, "waypoint_state_pub"):
+            return
+        msg = WaypointSequenceState()
+        msg.header.stamp = self.get_clock().now().to_msg()
+        msg.header.frame_id = self.global_frame
+        msg.route_revision = int(self.route_revision)
+        msg.waypoint_count = int(len(self.waypoints))
+        msg.current_index = int(self.current_index if self.waypoints else 0)
+        msg.completed_count = int(
+            len(self.waypoints) if self.sequence_done else (self.current_index if self.waypoints else 0)
+        )
+        msg.sequence_done = bool(self.sequence_done)
+        msg.paused = bool(self.paused or not self._can_execute_parent())
+        self.waypoint_state_pub.publish(msg)
+
+    def _mark_route_changed(self):
+        self.route_revision = (int(self.route_revision) + 1) & 0xFFFFFFFF
+        if self.route_revision == 0:
+            self.route_revision = 1
+
     def _on_timer(self):
+        if not self._can_execute_parent():
+            self.paused = True
+            self._publish_empty_paths()
+            self._publish_waypoint_state()
+            self._publish_status()
+            return
         if not self.waypoints:
             self.get_logger().debug("No waypoints configured.")
             self._publish_waypoints()
@@ -517,6 +813,9 @@ class GlobalPathSequencePublisher(Node):
         self._cancel_active_planner_goal(reason)
 
     def _on_clicked_point(self, msg: PointStamped):
+        if not self._can_edit_route():
+            self._publish_status("edit rejected: parent task is active")
+            return
         waypoint = self._point_to_waypoint(msg)
         if waypoint is None:
             return
@@ -530,6 +829,7 @@ class GlobalPathSequencePublisher(Node):
                 return
 
         self.waypoints.append(waypoint)
+        self._mark_route_changed()
         self.sequence_version += 1
         self._invalidate_planning_request("waypoint list changed")
         self._interactive_markers_dirty = True
@@ -545,6 +845,9 @@ class GlobalPathSequencePublisher(Node):
             self._on_timer()
 
     def _on_delete_clicked_point(self, msg: PointStamped):
+        if not self._can_edit_route():
+            self._publish_status("delete rejected: parent task is active")
+            return
         waypoint = self._point_to_waypoint(msg)
         if waypoint is None:
             return
@@ -601,12 +904,16 @@ class GlobalPathSequencePublisher(Node):
         return not sequence_done and edited_index == current_index
 
     def _delete_waypoint(self, idx: int, detail: str):
+        if not self._can_edit_route():
+            self._publish_status("delete rejected: parent task is active")
+            return
         if idx < 0 or idx >= len(self.waypoints):
             return
 
         previous_index = self.current_index
         previous_sequence_done = self.sequence_done
         removed = self.waypoints.pop(idx)
+        self._mark_route_changed()
         (
             self.current_index,
             self.sequence_done,
@@ -630,6 +937,9 @@ class GlobalPathSequencePublisher(Node):
         self._publish_status(f"{detail}: ({removed.x:.2f}, {removed.y:.2f})")
 
     def _on_replace_clicked_point(self, msg: PointStamped):
+        if not self._can_edit_route():
+            self._publish_status("replace rejected: parent task is active")
+            return
         waypoint = self._point_to_waypoint(msg)
         if waypoint is None:
             return
@@ -644,6 +954,7 @@ class GlobalPathSequencePublisher(Node):
 
         old = self.waypoints[idx]
         self.waypoints[idx] = Waypoint(waypoint.x, waypoint.y, old.yaw)
+        self._mark_route_changed()
         self._interactive_markers_dirty = True
 
         if self._waypoint_edit_affects_active_goal(
@@ -794,6 +1105,7 @@ class GlobalPathSequencePublisher(Node):
         self._refresh_interactive_distance_label()
         self._sync_interactive_markers(arr.header)
         self._publish_current_goal()
+        self._publish_waypoint_state()
         self._publish_status()
 
     def _build_waypoint_markers(self, header) -> MarkerArray:
@@ -988,6 +1300,9 @@ class GlobalPathSequencePublisher(Node):
         idx = self._interactive_waypoint_index(feedback.marker_name)
         if idx is None or idx < 0 or idx >= len(self.waypoints):
             return
+        if not self._can_edit_route():
+            self._publish_status("edit rejected: parent task is active")
+            return
 
         if feedback.event_type == InteractiveMarkerFeedback.MENU_SELECT:
             self._on_interactive_menu(feedback)
@@ -1006,6 +1321,8 @@ class GlobalPathSequencePublisher(Node):
             old.yaw,
         )
         self.waypoints[idx] = new_wp
+        if feedback.event_type == InteractiveMarkerFeedback.MOUSE_UP:
+            self._mark_route_changed()
 
         if feedback.event_type != InteractiveMarkerFeedback.MOUSE_UP:
             return
@@ -1028,6 +1345,9 @@ class GlobalPathSequencePublisher(Node):
         )
 
     def _on_interactive_menu(self, feedback):
+        if not self._can_edit_route():
+            self._publish_status("edit rejected: parent task is active")
+            return
         idx = self._interactive_waypoint_index(feedback.marker_name)
         if idx is None:
             return
@@ -1038,9 +1358,14 @@ class GlobalPathSequencePublisher(Node):
             self._clear_waypoints("cleared all waypoints from RViz menu")
 
     def _on_clear(self, _msg: Empty):
+        if not self._can_edit_route():
+            self._publish_status("clear rejected: parent task is active")
+            return
         self._clear_waypoints("cleared all waypoints")
 
     def _clear_waypoints(self, detail: str):
+        if self.waypoints or not self.sequence_done:
+            self._mark_route_changed()
         self.waypoints.clear()
         self.sequence_version += 1
         self.current_index = 0
@@ -1053,12 +1378,16 @@ class GlobalPathSequencePublisher(Node):
         self._publish_status(detail)
 
     def _on_undo(self, _msg: Empty):
+        if not self._can_edit_route():
+            self._publish_status("undo rejected: parent task is active")
+            return
         if not self.waypoints:
             return
         removed_index = len(self.waypoints) - 1
         previous_index = self.current_index
         previous_sequence_done = self.sequence_done
         removed = self.waypoints.pop()
+        self._mark_route_changed()
         (
             self.current_index,
             self.sequence_done,
@@ -1084,6 +1413,9 @@ class GlobalPathSequencePublisher(Node):
         )
 
     def _on_pause(self, _msg: Empty):
+        if getattr(self, "_parent_state_seen", False):
+            self._publish_status("debug pause rejected: PatrolTaskState is authoritative")
+            return
         self.paused = True
         self.sequence_version += 1
         self._invalidate_planning_request("waypoint sequence paused")
@@ -1095,6 +1427,9 @@ class GlobalPathSequencePublisher(Node):
         self._publish_status("paused")
 
     def _on_resume(self, _msg: Empty):
+        if getattr(self, "_parent_state_seen", False):
+            self._publish_status("debug resume rejected: PatrolTaskState is authoritative")
+            return
         if self.waypoints:
             self.paused = False
             self.sequence_version += 1
@@ -1119,6 +1454,9 @@ class GlobalPathSequencePublisher(Node):
 
     def _on_resume_from_current(self, _msg: Empty):
         """Resume patrol without replaying the path cached before interruption."""
+        if getattr(self, "_parent_state_seen", False):
+            self._publish_status("debug resume rejected: PatrolTaskState is authoritative")
+            return
         if not self.waypoints:
             return
 

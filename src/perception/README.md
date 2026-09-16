@@ -20,6 +20,12 @@ mission ROS 2 adapter，以及录制和离线评估工具。普通开发和 CI �
 [`../../docs/perception/voice/issue34_voice_provider.md`](../../docs/perception/voice/issue34_voice_provider.md)
 以及 [`../../docs/perception/voice/issue33_voice_import.md`](../../docs/perception/voice/issue33_voice_import.md)。
 
+父任务启动遵循固定顺序：双侧 capability READY 后 supervisor 只形成
+`TASK_NO_TASK + MissionState.READY`，不会自动开始巡检；路线准备完成后必须由上位控制端显式调用
+`/mission/task_command` 的 `PatrolTaskCommand.Request.START`，才进入
+`TASK_RUNNING + MissionState.PATROL`。在 READY、PAUSE、RETURN、TERMINATE 和其他非
+`VERIFY_IDENTITY` 状态下，face、voice、authorization 都保持安全待命并取消当前认证会话。
+
 `dog_patrol_perception_face` 包含 YOLO/TensorRT 检测、sface 识别、白名单匹配、生产 provider、
 readiness 和 launch。它只消费 tracking 的 latest-only `TrackedTargetImage`；MissionState 负责会话门禁，
 `AuthorizationCommand` 决定当前算法窗口。bbox 通过 `FaceOverlay` 返回并叠加到 tracking 的既有
@@ -54,6 +60,15 @@ provider 保留的当前状态。授权证据是离散、reliable、volatile 事
 - `ReadinessCoordinator`：将 `detection_tracking`、`face`、`voice` 固定为 required capability；
 - `perception_readiness` 节点：只在三者状态都匹配当前 STARTUP sequence 时发布一次
   `SOURCE_PERCEPTION/READY`。
+
+感知节点均使用 uint32 `state_seq` 的半区间比较。旧状态、同序号冲突快照、旧 target/stage evidence
+和离开 STARTUP 后迟到的 preflight 结果都会被丢弃；取消只产生 `CANCELLED` 技术记录，不转换为
+`UNAUTHORIZED`。这些规则由 face、voice、aggregate readiness 和 authorization 的 ROS 节点级测试覆盖。
+生产 launch 显式设置 `state_timeout=0.75 s`；MissionState heartbeat 超时后 tracking 清空 primary，
+face/voice/authorization 取消会话，readiness 使在途 preflight 失效，恢复 heartbeat 后只按当前合法
+快照重新建立处理门。
+感知 production launch 对 tracking、face、voice、aggregate readiness 和 authorization 使用整组
+退出语义；任一关键节点结束都会关闭该 launch，console 随后停止旧导航链并 reset 会话。
 
 tracking 只发布自身 `detection_tracking` 状态，不再聚合或发布整体 READY。face/voice provider 只发布
 各自 evidence，readiness 节点只发布各自 capability，因此整体 READY 仍由现有 required capability

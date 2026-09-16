@@ -1,5 +1,6 @@
 #pragma once
 
+#include <chrono>
 #include <cstdint>
 #include <mutex>
 #include <optional>
@@ -33,6 +34,7 @@ class MissionRosAdapter {
     // camera/inference so state reception remains responsive while a frame is
     // being processed. A null group uses the node default (unit-test default).
     rclcpp::CallbackGroup::SharedPtr mission_state_callback_group;
+    std::chrono::steady_clock::duration state_timeout{std::chrono::milliseconds{750}};
     PrimaryTargetManager::Config primary;
     MissionCoordinator::Config coordinator;
   };
@@ -85,6 +87,7 @@ class MissionRosAdapter {
   static dog_patrol_interfaces::msg::MissionEvent EventMessage(
       PerceptionMissionEvent event, int target_id, std::uint32_t observed_state_seq,
       std::uint64_t source_timestamp_ns);
+  bool MissionStateAvailableLocked() const;
 
   rclcpp::Node &node_;
   Config config_;
@@ -98,6 +101,8 @@ class MissionRosAdapter {
   MissionStateSequenceCursor state_sequence_;
   std::optional<MissionSnapshot> latest_mission_;
   std::optional<MissionSnapshot> previous_mission_;
+  std::optional<std::chrono::steady_clock::time_point> last_state_received_;
+  bool mission_state_conflicted_{false};
 
   MissionFrameTransaction frame_transaction_;
   DetectionTrackingReadiness detection_tracking_readiness_;

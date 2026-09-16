@@ -14,7 +14,7 @@ def pose(x, y):
     return result
 
 
-def make_recovery(now):
+def make_recovery(now, replan_period=None):
     return PatrolRecoveryController(
         RecoveryConfig(
             position_tolerance=0.25,
@@ -24,6 +24,7 @@ def make_recovery(now):
             hold_time=0.5,
             republish_period=0.2,
             request_retry_period=0.5,
+            replan_period=replan_period,
         ),
         lambda: now[0],
     )
@@ -103,6 +104,30 @@ def test_recovery_throttles_path_retries_after_a_failed_request():
 
     now[0] = 0.5
     assert recovery.tick(pose(0.0, 0.0), 0.0, 0.0, 0.1, False).request_path
+
+
+def test_return_replans_cached_path_from_current_pose_at_configured_period():
+    now = [0.0]
+    recovery = make_recovery(now, replan_period=0.5)
+    recovery.begin(pose(5.0, 2.0))
+
+    first = recovery.tick(pose(0.0, 0.0), 0.0, 0.0, 0.1, False)
+    assert first.request_path
+    recovery.set_path_requested(True)
+    path = Path()
+    path.poses.append(pose(1.0, 0.0))
+    recovery.set_path_result(path)
+
+    now[0] = 0.49
+    assert not recovery.tick(
+        pose(1.0, 0.0), 0.2, 0.0, 0.1, False
+    ).request_path
+
+    now[0] = 0.50
+    command = recovery.tick(pose(1.0, 0.0), 0.2, 0.0, 0.1, False)
+    assert command.request_path
+    assert recovery.path is path
+    assert recovery.path_ready
 
 
 def test_recovery_does_not_republish_cached_motion_path_without_robot_pose():

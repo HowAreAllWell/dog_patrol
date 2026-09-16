@@ -54,6 +54,7 @@ dog_patrol_perception_tracking_node:
 
     mission:
       state_topic: "/mission/state"
+      state_timeout: 0.75
       event_topic: "/mission/event"
       selected_target_bbox_topic: "/perception/selected_target_bbox"
 

@@ -1,12 +1,17 @@
 # 当前 tracking identity 实现状态
 
-日期：2026-07-05
+原始记录日期：2026-07-05；父任务契约校订：2026-09-15
 
-本文记录当前代码的真实实现状态，用于接手和排查 identity 相关问题。它不是新的架构设计文档；`orin_hik_h264_MOT` 中 01/02 已修问题和后续架构风险见 `docs/orin_hik_h264_MOT_01_02_issue_resolution.md`。Phase 5 birth / hidden candidate readiness 证据见 `docs/phase5_birth_hidden_candidate_readiness.md`。
+本文主要记录 tracking identity 算法层的实现状态，用于接手和排查 identity 问题，不定义父任务
+生命周期。当前 START/PAUSE/RESUME/RETURN/TERMINATE、READY、state_seq 和 fail-closed 行为以
+[`../../contracts/patrol_task_lifecycle_design.md`](../../contracts/patrol_task_lifecycle_design.md)
+为准。原文提到的迁移前 `orin_hik_h264_MOT` 与 Phase 5 独立说明文件未随当前仓库保留；对应的
+现行代码和测试位于 tracking package 的 modules/test 目录。
 
 ## 1. 当前主链路
 
-当前运行主链路在 `src/dog_patrol_perception_tracking/src/perception_tracking_node.cpp` 中组织，大致为：
+当前运行主链路在
+`src/perception/dog_patrol_perception_tracking/src/perception_tracking_node.cpp` 中组织，大致为：
 
 ```text
 camera_ingest
@@ -131,6 +136,8 @@ VisualizerRecorder::Render(frame, tracks, primary, identity_result)
 当前行为要点：
 
 - 主目标绑定 semantic id，而不是裸 raw track id；
+- `CONFIRM_TARGET`、`APPROACH_TARGET`、`VERIFY_IDENTITY`、`TRACK_INTRUDER` 只绑定权威
+  `MissionState.target_id`，不在活动任务中改选其他人员；
 - 可见主目标会经过 sanity check；
 - 可拒绝明显异常的可见主目标，例如：
   - 非 person；
@@ -143,19 +150,30 @@ VisualizerRecorder::Render(frame, tracks, primary, identity_result)
   - 中心跳变过大；
   - 面积比例异常；
 - 被拒绝的可见主目标会转为 `PENDING_RECOVERY`，保留当前 `primary_target_id`，但不输出 `primary_track`；
+- 相同 semantic ID 的强证据仅因中心或面积跳变被拒绝时，会要求同一候选 raw track 在新几何位置
+  连续稳定达到 `target.pending_recovery_frames`，再更新基线并恢复 `LOCKED`；配置为 `0` 时关闭该恢复；
 - 当前 primary identity 处于 `MERGED` 或 `SPLIT_RECOVERY` 时也会转为 `PENDING_RECOVERY`；
 - 普通缺失仍转为 `OCCLUDED`，而不是立即释放 primary；
 - identity 进入 lost / inactive 后会释放 primary。
 
-注意：`PENDING_RECOVERY` 已是公开 `PrimaryState`，当前只覆盖可见 primary sanity rejection 以及 identity `MERGED` / `SPLIT_RECOVERY` 的窄范围语义，不表示完整 pending recovery 状态机已经迁移完成。
+注意：`PENDING_RECOVERY` 已是公开 `PrimaryState`，当前覆盖可见 primary sanity rejection、几何候选
+连续稳定恢复，以及 identity `MERGED` / `SPLIT_RECOVERY` 的窄范围语义，不表示所有 identity 恢复
+路径都由 PrimaryTargetManager 处理。
 
 ### 2.5 输出与可视化
 
 mission ROS output 当前包括：
 
-- `/mission/event` 的 `SOURCE_PERCEPTION` READY、TARGET_CONFIRMED、TARGET_LOST；
+- `/perception/capability_status` 的 `detection_tracking` readiness；感知整体
+  `SOURCE_PERCEPTION/READY` 只能由 `perception_readiness` 聚合发布；
+- `/mission/event` 的 `TARGET_CONFIRMED`、`TARGET_LOST`；
 - `/perception/selected_target_bbox` 的当前帧 semantic target bbox；
 - overlay 中的 semantic id、identity state、supporting raw id 和 primary 状态。
+
+双侧 READY 后 supervisor 只形成 `TASK_NO_TASK + MissionState.READY`。tracking 在 READY 下不选
+primary、不发 bbox 或目标事件；路线准备后必须显式调用 `/mission/task_command` START，进入
+`TASK_RUNNING + PATROL` 后才允许选目标。MissionState heartbeat 超时或同序号字段冲突时，
+tracking fail closed，等待合法状态恢复。
 
 `VisualizerRecorder` 当前叠加显示：
 
@@ -243,7 +261,7 @@ mission ROS output 当前包括：
 
 在继续改算法前，建议先完成：
 
-1. 确认当前分支是 `dev`，并保留本轮修改前的导出结果或 commit 作为对比依据。
+1. 确认当前工作树和目标分支正确，并保留本轮修改前的导出结果或 commit 作为对比依据。
 2. 明确下一阶段只改哪一层：MOT、IdentityManager、IdentityAssignmentEngineAdapter 迁移，还是 Primary。
 3. 固定离线评估数据集和关键帧段。
 4. 对典型失败片段做帧级复盘，区分错误来源：

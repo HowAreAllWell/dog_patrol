@@ -18,14 +18,6 @@ bool IsTargetPhase(const MissionPhase phase) {
          phase == MissionPhase::kVerifyIdentity || phase == MissionPhase::kTrackIntruder;
 }
 
-bool IsRecoveryPhase(const MissionPhase phase) {
-  return phase == MissionPhase::kRecoverPatrol;
-}
-
-bool HasActiveTarget(const MissionPhase phase) {
-  return IsTargetPhase(phase) || IsRecoveryPhase(phase);
-}
-
 bool IsFinite(const float value) { return std::isfinite(value); }
 
 }  // namespace
@@ -37,6 +29,9 @@ MissionRosAdapter::MissionRosAdapter(rclcpp::Node &node, Config config)
   if (config_.mission_state_topic.empty() || config_.mission_event_topic.empty() ||
       config_.target_bbox_topic.empty() || config_.capability_status_topic.empty()) {
     throw std::invalid_argument("mission ROS topic names must not be empty");
+  }
+  if (config_.state_timeout <= std::chrono::steady_clock::duration::zero()) {
+    throw std::invalid_argument("mission state timeout must be positive");
   }
 
   mission_event_publisher_ = node_.create_publisher<MissionEventMessage>(
@@ -86,6 +81,8 @@ std::optional<MissionPhase> MissionRosAdapter::MissionPhaseFromMessage(const std
       return MissionPhase::kTrackIntruder;
     case MissionStateMessage::RECOVER_PATROL:
       return MissionPhase::kRecoverPatrol;
+    case MissionStateMessage::READY:
+      return MissionPhase::kReady;
     default:
       return std::nullopt;
   }
@@ -94,24 +91,30 @@ std::optional<MissionPhase> MissionRosAdapter::MissionPhaseFromMessage(const std
 std::optional<MissionSnapshot> MissionRosAdapter::MissionFromMessage(
     const MissionStateMessage &message) {
   const auto phase = MissionPhaseFromMessage(message.state);
-  if (!phase.has_value() ||
+  if (!phase.has_value() || message.state_seq == 0U ||
       message.target_id > static_cast<std::uint32_t>(std::numeric_limits<int>::max()) ||
       message.handled_target_id > static_cast<std::uint32_t>(std::numeric_limits<int>::max())) {
     return std::nullopt;
   }
 
   const int target_id = static_cast<int>(message.target_id);
-  if ((phase.value() == MissionPhase::kStartup || phase.value() == MissionPhase::kPatrol) &&
+  if ((phase.value() == MissionPhase::kStartup || phase.value() == MissionPhase::kReady ||
+       phase.value() == MissionPhase::kPatrol) &&
       target_id != 0) {
     return std::nullopt;
   }
-  if (HasActiveTarget(phase.value()) && target_id <= 0) {
+  if (IsTargetPhase(phase.value()) && target_id <= 0) {
     return std::nullopt;
   }
   const int handled_target_id = static_cast<int>(message.handled_target_id);
-  if (handled_target_id > 0 &&
-      phase.value() != MissionPhase::kPatrol &&
-      !(phase.value() == MissionPhase::kRecoverPatrol && handled_target_id == target_id)) {
+  if (phase.value() == MissionPhase::kStartup && handled_target_id != 0) {
+    return std::nullopt;
+  }
+  if (IsTargetPhase(phase.value()) && handled_target_id != 0) {
+    return std::nullopt;
+  }
+  if (phase.value() == MissionPhase::kRecoverPatrol && target_id > 0 &&
+      handled_target_id != 0 && handled_target_id != target_id) {
     return std::nullopt;
   }
   return MissionSnapshot{message.state_seq, phase.value(), target_id, handled_target_id};
@@ -173,14 +176,27 @@ std::optional<dog_patrol_interfaces::msg::TargetBoundingBox> MissionRosAdapter::
 bool MissionRosAdapter::StoreMissionState(const MissionStateMessage &message) {
   const auto mission = MissionFromMessage(message);
   if (!mission.has_value()) {
+    std::lock_guard<std::mutex> lock(mission_mutex_);
+    if (message.state_seq != 0U && latest_mission_.has_value() &&
+        latest_mission_->state_seq == message.state_seq) {
+      mission_state_conflicted_ = true;
+      last_state_received_ = std::chrono::steady_clock::now();
+    }
     return false;
   }
   std::lock_guard<std::mutex> lock(mission_mutex_);
-  if (latest_mission_.has_value() && latest_mission_->state_seq == mission->state_seq &&
-      (latest_mission_->phase != mission->phase ||
-       latest_mission_->target_id != mission->target_id ||
-       latest_mission_->handled_target_id != mission->handled_target_id)) {
-    return false;
+  if (latest_mission_.has_value() && latest_mission_->state_seq == mission->state_seq) {
+    last_state_received_ = std::chrono::steady_clock::now();
+    if (mission_state_conflicted_) {
+      return false;
+    }
+    if (latest_mission_->phase != mission->phase ||
+        latest_mission_->target_id != mission->target_id ||
+        latest_mission_->handled_target_id != mission->handled_target_id) {
+      mission_state_conflicted_ = true;
+      return false;
+    }
+    return true;
   }
   if (!state_sequence_.AcceptsCurrentOrNewer(mission->state_seq)) {
     return false;
@@ -189,12 +205,14 @@ bool MissionRosAdapter::StoreMissionState(const MissionStateMessage &message) {
     previous_mission_ = latest_mission_;
   }
   latest_mission_ = mission;
+  mission_state_conflicted_ = false;
+  last_state_received_ = std::chrono::steady_clock::now();
   return true;
 }
 
 std::optional<MissionSnapshot> MissionRosAdapter::CurrentMission() const {
   std::lock_guard<std::mutex> lock(mission_mutex_);
-  return latest_mission_;
+  return MissionStateAvailableLocked() ? latest_mission_ : std::nullopt;
 }
 
 std::optional<MissionSnapshot> MissionRosAdapter::PreviousMission() const {
@@ -205,6 +223,13 @@ std::optional<MissionSnapshot> MissionRosAdapter::PreviousMission() const {
 PrimaryTargetResult MissionRosAdapter::CurrentPrimary() const {
   std::lock_guard<std::mutex> lock(mission_mutex_);
   return frame_transaction_.CurrentPrimary();
+}
+
+bool MissionRosAdapter::MissionStateAvailableLocked() const {
+  return latest_mission_.has_value() && !mission_state_conflicted_ &&
+         last_state_received_.has_value() &&
+         std::chrono::steady_clock::now() - last_state_received_.value() <=
+             config_.state_timeout;
 }
 
 void MissionRosAdapter::ReportDetectionTrackingRuntimeStatus(
@@ -236,7 +261,7 @@ dog_patrol_interfaces::msg::MissionEvent MissionRosAdapter::EventMessage(
 
 void MissionRosAdapter::PublishCapabilityStatus() {
   std::lock_guard<std::mutex> lock(mission_mutex_);
-  if (!latest_mission_.has_value() || latest_mission_->phase != MissionPhase::kStartup) {
+  if (!MissionStateAvailableLocked() || latest_mission_->phase != MissionPhase::kStartup) {
     return;
   }
   const auto contribution = detection_tracking_readiness_.Contribution();
@@ -269,8 +294,10 @@ MissionFrameTransaction::Output MissionRosAdapter::ProcessFrame(
   // latches with StoreMissionState so an action cannot be dropped after its
   // latch was committed.
   std::lock_guard<std::mutex> lock(mission_mutex_);
+  const std::optional<MissionSnapshot> current_mission =
+      MissionStateAvailableLocked() ? latest_mission_ : std::nullopt;
   MissionFrameTransaction::Output output = frame_transaction_.Update(
-      {latest_mission_, previous_mission_, identities, source_time, metadata});
+      {current_mission, previous_mission_, identities, source_time, metadata});
   for (const auto &event : output.events) {
     mission_event_publisher_->publish(
         EventMessage(event.event, event.target_id, event.observed_state_seq,

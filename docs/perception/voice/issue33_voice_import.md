@@ -61,5 +61,7 @@ dog_patrol_perception_voice/assets/r818_pcm_base64_aarch64
 便携测试覆盖 Base64/帧对齐、Prompt 前帧丢弃、响应窗 deadline、六麦判定、技术错误和一次性
 恢复，不需要 R818、ADB 或 Vosk 模型。ROS evidence provider 已在 #34 接入；其 MissionState
 驱动、两轮 evidence、取消和真实授权 adapter 验收见
-[`issue34_voice_provider.md`](issue34_voice_provider.md)。真实设备恢复、模型效果、FAR/FRR 和
-感知整体 READY 仍是后续部署/联调工作。
+[`issue34_voice_provider.md`](issue34_voice_provider.md)。当前 aggregate readiness 由
+`perception_readiness` 聚合并向 supervisor 发布；双侧 READY 只形成
+`TASK_NO_TASK + MissionState.READY`，路线准备后仍需显式 `/mission/task_command` START。
+真实设备恢复、模型效果和 FAR/FRR 仍属于部署/联调验收。

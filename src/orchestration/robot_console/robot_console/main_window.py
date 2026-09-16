@@ -26,6 +26,52 @@ except ImportError:
     from log_engine import LogEngine
     from ui_components import BagConfigDialog, BagRecordDialog, TrajectoryMap
 
+
+def task_command_permissions(
+    task_state: int,
+    navigation_mode: int,
+    *,
+    outcome: int = 0,
+    mission_state: int | None = None,
+    route_valid: bool = False,
+) -> dict[str, bool]:
+    """Return UI command permissions for one validated parent-task snapshot."""
+    valid_task_states = {0, 1, 2, 3}
+    valid_navigation_modes = {0, 1, 2}
+    valid_outcomes = {0, 1, 2, 3, 4}
+    if (
+        task_state not in valid_task_states
+        or navigation_mode not in valid_navigation_modes
+        or outcome not in valid_outcomes
+    ):
+        return {"start": False, "pause": False, "resume": False, "return": False, "terminate": False}
+    legal_combo = (
+        (task_state == 0 and navigation_mode == 0)
+        or (task_state == 1 and navigation_mode in (1, 2))
+        or (task_state == 2 and navigation_mode == 0)
+        or (task_state == 3 and navigation_mode == 2)
+    )
+    if not legal_combo:
+        return {"start": False, "pause": False, "resume": False, "return": False, "terminate": False}
+    if task_state != 0 and outcome != 0:
+        return {"start": False, "pause": False, "resume": False, "return": False, "terminate": False}
+    if mission_state is None:
+        return {"start": False, "pause": False, "resume": False, "return": False, "terminate": False}
+    legal_mission = (
+        (task_state == 0 and mission_state in (0, 7))
+        or (task_state == 1 and mission_state in (1, 2, 3, 4, 5, 6))
+        or (task_state in (2, 3) and mission_state == 7)
+    )
+    if not legal_mission:
+        return {"start": False, "pause": False, "resume": False, "return": False, "terminate": False}
+    return {
+        "start": task_state == 0 and mission_state == 7 and route_valid,
+        "pause": task_state == 1,
+        "resume": task_state == 2,
+        "return": task_state in (1, 2),
+        "terminate": task_state in (1, 2, 3),
+    }
+
 class TopicHzWorker(QThread):
     hz_updated = pyqtSignal(str, str) # topic_key, hz_str
 
@@ -80,6 +126,7 @@ class TopicHzWorker(QThread):
 class RobotMainWindow(QMainWindow):
     sig_reset_tf = pyqtSignal()
     sig_clear_nav = pyqtSignal()   # 停止导航时通知 ROS 后台清除 /global_path 话题残影
+    sig_task_command = pyqtSignal(int)
 
     def __init__(self):
         super().__init__()
@@ -248,6 +295,22 @@ class RobotMainWindow(QMainWindow):
         self.btn_perception = self.create_btn("启动感知任务", "#00897B", self.toggle_perception)
         self.btn_perception.setFixedHeight(42)
         left_layout.addWidget(self.btn_perception)
+        self.lbl_task_state = QLabel("父任务：等待状态")
+        self.lbl_task_state.setStyleSheet("font-size: 12px; color: #444;")
+        left_layout.addWidget(self.lbl_task_state)
+        task_grid = QGridLayout()
+        self.btn_task_start = self.create_btn("开始巡检", "#2E7D32", lambda: self.sig_task_command.emit(0))
+        self.btn_task_pause = self.create_btn("暂停", "#F9A825", lambda: self.sig_task_command.emit(1))
+        self.btn_task_resume = self.create_btn("继续", "#1565C0", lambda: self.sig_task_command.emit(2))
+        self.btn_task_return = self.create_btn("返航", "#6A1B9A", lambda: self.sig_task_command.emit(3))
+        self.btn_task_terminate = self.create_btn("终止", "#C62828", lambda: self.sig_task_command.emit(4))
+        task_grid.addWidget(self.btn_task_start, 0, 0)
+        task_grid.addWidget(self.btn_task_pause, 0, 1)
+        task_grid.addWidget(self.btn_task_resume, 0, 2)
+        task_grid.addWidget(self.btn_task_return, 1, 0)
+        task_grid.addWidget(self.btn_task_terminate, 1, 1, 1, 2)
+        left_layout.addLayout(task_grid)
+        self.update_task_state(0, -1, -1, -1, -1, False)
         left_layout.addSpacing(3)
 
         lbl_s7 = QLabel("<b>[ 注入传感器数据 ]</b>")
@@ -409,8 +472,10 @@ class RobotMainWindow(QMainWindow):
         self.is_recording = False
         self.process_nav = None
         self.is_nav_running = False
+        self._stopping_navigation = False
         self.process_perception = None
         self.is_perception_running = False
+        self._stopping_perception = False
         self.process_manager = None
         self._closing = False
         self._manager_should_run = True
@@ -444,7 +509,53 @@ class RobotMainWindow(QMainWindow):
         elif topic_key == 'imu':
             self.lbl_freq_imu.setText(f"IMU: {hz_str}")
 
+    def update_task_state(
+        self,
+        state_seq,
+        task_state,
+        outcome,
+        navigation_mode,
+        mission_state,
+        route_valid,
+    ):
+        names = {0: "无任务", 1: "运行中", 2: "已暂停", 3: "返航中"}
+        outcomes = {0: "", 1: "完成", 2: "已返航", 3: "已终止", 4: "失败"}
+        text = names.get(task_state, "未知")
+        if task_state == 0 and outcome in outcomes and outcomes[outcome]:
+            text = f"{text}（上次：{outcomes[outcome]}）"
+        self.lbl_task_state.setText(
+            f"父任务：{text}  seq={state_seq}  nav={navigation_mode}"
+        )
+        permissions = task_command_permissions(
+            task_state,
+            navigation_mode,
+            outcome=outcome,
+            mission_state=mission_state,
+            route_valid=route_valid,
+        )
+        self.btn_task_start.setEnabled(permissions["start"])
+        self.btn_task_pause.setEnabled(permissions["pause"])
+        self.btn_task_resume.setEnabled(permissions["resume"])
+        self.btn_task_return.setEnabled(permissions["return"])
+        self.btn_task_terminate.setEnabled(permissions["terminate"])
+
+    def handle_task_command_result(self, accepted, message):
+        level = "[SYS]" if accepted else "[ERROR]"
+        self.append_log(f"{level} 父任务命令：{message}")
+
     def get_workspace_path(self):
+        configured_path = os.environ.get('DOG_PATROL_WORKSPACE_ROOT', '').strip()
+        if configured_path:
+            configured_path = os.path.abspath(configured_path)
+            manifest = os.path.join(
+                configured_path,
+                'src',
+                'orchestration',
+                'robot_console',
+                'package.xml',
+            )
+            if os.path.isfile(manifest):
+                return configured_path
         path = os.path.abspath(os.path.dirname(__file__))
         while path != '/' and path != '':
             if os.path.basename(path) == 'src':
@@ -1349,6 +1460,7 @@ class RobotMainWindow(QMainWindow):
 
     def _mission_manager_finished(self, exit_code, exit_status):
         del exit_status
+        restart_required = not self._closing and self._manager_should_run
         if not self._closing:
             level = "[INFO]" if exit_code == 0 else "[ERROR]"
             self.log_engine.parse_and_append_log(
@@ -1357,7 +1469,14 @@ class RobotMainWindow(QMainWindow):
                 is_stderr=(exit_code != 0),
             )
         self.process_manager = None
-        if not self._closing and self._manager_should_run:
+        if restart_required:
+            self.append_log(
+                "[ERROR] 任务管理器意外退出，正在停止导航和感知；重启后必须重新准备路线并 START。"
+            )
+            if self.is_nav_running:
+                self.stop_navigation()
+            if self.is_perception_running:
+                self.stop_perception()
             QTimer.singleShot(1000, self.start_mission_manager)
 
     def reset_mission_session(self, reason):
@@ -1402,6 +1521,7 @@ class RobotMainWindow(QMainWindow):
             "visualization_topic:=/perception/tracking_overlay"
         )
         process = QProcess(self)
+        self._stopping_perception = False
         self.process_perception = process
         self.setup_process_env(process)
         process.readyReadStandardOutput.connect(
@@ -1417,17 +1537,22 @@ class RobotMainWindow(QMainWindow):
 
     def _perception_finished(self, exit_code, exit_status):
         del exit_status
-        if not self._closing:
+        unexpected = not self._closing and not self._stopping_perception
+        self.process_perception = None
+        self.is_perception_running = False
+        if unexpected:
             self.append_log(
                 f"[PERCEPTION] 感知任务已退出，exit_code={exit_code}。",
                 category="PERCEPTION",
             )
-            self.reset_mission_session("感知任务退出")
-        self.process_perception = None
-        self.is_perception_running = False
+            if self.is_nav_running:
+                self.stop_navigation()
+            else:
+                self.reset_mission_session("感知任务退出")
         self.update_ui_state(self.current_state)
 
     def stop_perception(self):
+        self._stopping_perception = True
         process = self.process_perception
         if process and process.state() == QProcess.Running:
             self.append_log("[SYS] 正在停止感知任务...")
@@ -1449,6 +1574,7 @@ class RobotMainWindow(QMainWindow):
         )
         self.reset_mission_session("感知任务关闭")
         self.update_ui_state(self.current_state)
+        self._stopping_perception = False
 
     def stop_perception_process_group(self, process):
         """Stop the perception launch and all nodes it spawned as one group."""
@@ -1787,16 +1913,35 @@ class RobotMainWindow(QMainWindow):
         )
         
         self.process_nav = self.create_tracked_process()
+        self._stopping_navigation = False
         self.setup_process_env(self.process_nav)
         self.process_nav.readyReadStandardOutput.connect(lambda: self.handle_process_out(self.process_nav, "[NAV] "))
         self.process_nav.readyReadStandardError.connect(lambda: self.handle_process_err(self.process_nav, "[NAV] "))
+        self.process_nav.finished.connect(self._navigation_finished)
         self.process_nav.start("bash", ["-c", cmd])
         
         self.is_nav_running = True
         self.update_ui_state(self.current_state)
         self.append_log("[SYS] Nav2 导航与路线控制器已成功拉起。可在 RViz 使用 Publish Point (/clicked_point) 顺次下发路径点进行连续巡航。")
 
+    def _navigation_finished(self, exit_code, exit_status):
+        del exit_status
+        unexpected = not self._closing and not self._stopping_navigation
+        self.process_nav = None
+        self.is_nav_running = False
+        if unexpected:
+            self.append_log(
+                f"[NAV] 导航任务已退出，exit_code={exit_code}；正在停止旧感知会话。",
+                category="NAV",
+            )
+            if self.is_perception_running:
+                self.stop_perception()
+            else:
+                self.reset_mission_session("导航任务退出")
+        self.update_ui_state(self.current_state)
+
     def stop_navigation(self):
+        self._stopping_navigation = True
         if self.process_nav and self.process_nav.state() == QProcess.Running:
             self.append_log("[SYS] 正在关闭 Nav2 规划与导航...")
             self.process_nav.terminate()
@@ -1838,6 +1983,7 @@ class RobotMainWindow(QMainWindow):
         self.sig_clear_nav.emit()   # 通知 ROS 后台清除 /global_path 全局路径残影
         self.reset_mission_session("2D导航关闭")
         self.append_log("[SYS] 规划与导航已安全停止并重置。")
+        self._stopping_navigation = False
 
 
     def closeEvent(self, event):

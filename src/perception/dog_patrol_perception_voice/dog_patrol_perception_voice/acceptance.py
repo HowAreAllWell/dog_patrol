@@ -709,6 +709,7 @@ class _RosAcceptanceHarness:
                 Parameter("mission_state_topic", value=self.state_topic),
                 Parameter("authorization_evidence_topic", value=self.evidence_topic),
                 Parameter("authorization_command_topic", value=self.command_topic),
+                Parameter("state_timeout", value=30.0),
             ],
             adapter_factory=adapter_factory,
         )
@@ -716,6 +717,7 @@ class _RosAcceptanceHarness:
             parameter_overrides=[
                 Parameter("mission_state_topic", value=self.state_topic),
                 Parameter("capability_status_topic", value=self.status_topic),
+                Parameter("state_timeout", value=30.0),
             ],
             preflight=preflight,
         )
@@ -729,6 +731,7 @@ class _RosAcceptanceHarness:
                 Parameter("mission_event_topic", value=self.event_topic),
                 Parameter("authorization_evidence_topic", value=self.evidence_topic),
                 Parameter("authorization_command_topic", value=self.command_topic),
+                Parameter("state_timeout", value=30.0),
             ]
         )
         self.state_pub = self.source.create_publisher(
@@ -1079,11 +1082,15 @@ def _scenario_behaviors(name: str) -> tuple[list[_TaskBehavior], str]:
             _TaskBehavior(windows=(rejected,)),
             _TaskBehavior(windows=(accepted,), cancel_at="window-1"),
         ], "cancel"
-    if name in {"state_seq_replace", "target_id_replace"}:
+    if name == "state_seq_replace":
         return [
             _TaskBehavior(windows=(accepted,), cancel_at="window-1"),
             _TaskBehavior(windows=(accepted,)),
         ], "replace"
+    if name == "target_id_replace":
+        return [
+            _TaskBehavior(windows=(accepted,), cancel_at="window-1"),
+        ], "reject_conflict"
     if name == "stream_failure":
         return [_TaskBehavior(windows=(accepted,), failure="stream")], "failure"
     if name == "adb_failure":
@@ -1152,22 +1159,23 @@ def _run_failure_scenario(
             if name == "second_window_cancel":
                 expected_evidence.insert(0, AuthorizationEvidence.NOT_PASSED)
             expected_events = []
-        elif kind == "replace":
+        elif kind in {"replace", "reject_conflict"}:
             if not first.recognition_started[1].wait(timeout=stage_timeout_seconds):
                 raise RuntimeError(f"scenario did not reach {name} replacement stage")
-            if name == "state_seq_replace":
-                replacement = (11, 2)
-            else:
-                replacement = (10, 2)
+            replacement = (11, 2) if kind == "replace" else (10, 2)
             harness.publish_state(*replacement)
             harness.publish_face_miss(
                 replacement[0], replacement[1], AuthorizationEvidence.INITIAL_FACE
             )
-            expected_evidence = [
-                AuthorizationEvidence.CANCELLED,
-                AuthorizationEvidence.PASSED,
-            ]
-            expected_events = [MissionEvent.AUTHORIZED]
+            if kind == "replace":
+                expected_evidence = [
+                    AuthorizationEvidence.CANCELLED,
+                    AuthorizationEvidence.PASSED,
+                ]
+                expected_events = [MissionEvent.AUTHORIZED]
+            else:
+                expected_evidence = [AuthorizationEvidence.CANCELLED]
+                expected_events = []
         else:
             expected_evidence = [AuthorizationEvidence.ERROR]
             expected_events = [MissionEvent.EXECUTION_ERROR]

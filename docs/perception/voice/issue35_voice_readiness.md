@@ -21,6 +21,13 @@
 `ReadinessCoordinator` 仍负责整体 `detection_tracking + face + voice` 聚合，voice 节点不发布整体
 `MissionEvent`。
 
+当前父任务生命周期以
+[`../../contracts/patrol_task_lifecycle_design.md`](../../contracts/patrol_task_lifecycle_design.md)
+为准。双侧 READY 只形成 `TASK_NO_TASK + MissionState.READY`，不会自动进入 PATROL；准备合法
+waypoint 后仍需通过 `/mission/task_command` 显式 START。`perception_voice_readiness` 默认使用
+`state_timeout=0.75 s`；MissionState heartbeat 超时会使在途 preflight generation 失效，迟到结果
+不得再次发布 READY。
+
 ## 只读 preflight 边界
 
 preflight 从安装产物读取默认 config 和 ARM64 helper，加载部署机提供的 Vosk model，并检查：

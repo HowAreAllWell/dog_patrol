@@ -1,5 +1,7 @@
 import sys
 import os
+import importlib.util
+import subprocess
 
 # Keep ROS Python nodes and colcon on the same runtime as the deployed
 # perception dependencies. This is explicit because a previously generated
@@ -19,9 +21,99 @@ os.environ["RMW_IMPLEMENTATION"] = "rmw_fastrtps_cpp"
 
 # Tracking in the merged system consumes the navigation camera image topic,
 # while the deployed perception binary still links the Hik SDK at runtime.
-app_workspace_root = os.path.abspath(
-    os.path.join(os.path.dirname(__file__), "../../../..")
-)
+def _find_workspace_root():
+    configured_root = os.environ.get("DOG_PATROL_WORKSPACE_ROOT", "").strip()
+    candidates = []
+    if configured_root:
+        candidates.append(os.path.abspath(configured_root))
+
+    current = os.path.abspath(os.path.dirname(__file__))
+    while current and current != os.path.dirname(current):
+        candidates.append(current)
+        current = os.path.dirname(current)
+
+    for candidate in candidates:
+        package_manifest = os.path.join(
+            candidate,
+            "src",
+            "orchestration",
+            "robot_console",
+            "package.xml",
+        )
+        if os.path.isfile(package_manifest):
+            return candidate
+
+    return os.path.abspath(os.path.join(os.path.dirname(__file__), "../../../.."))
+
+
+app_workspace_root = _find_workspace_root()
+os.environ.setdefault("DOG_PATROL_WORKSPACE_ROOT", app_workspace_root)
+
+
+def _bootstrap_workspace_environment():
+    """Load this workspace when app.py is executed directly from source."""
+    if importlib.util.find_spec("dog_patrol_interfaces") is not None:
+        return
+
+    setup_path = os.path.join(app_workspace_root, "install", "setup.bash")
+    bootstrap_marker = "DOG_PATROL_WORKSPACE_BOOTSTRAPPED"
+    if os.environ.get(bootstrap_marker) == app_workspace_root:
+        raise ModuleNotFoundError(
+            "dog_patrol_interfaces is still unavailable after loading "
+            f"{setup_path}; rebuild dog_patrol_interfaces and robot_console"
+        )
+    if not os.path.isfile(setup_path):
+        raise ModuleNotFoundError(
+            "dog_patrol_interfaces is unavailable and this workspace has no "
+            f"{setup_path}; run colcon build before starting robot_console"
+        )
+
+    ros_distro = os.environ.get("ROS_DISTRO", "humble")
+    ros_setup_path = f"/opt/ros/{ros_distro}/setup.bash"
+    if not os.path.isfile(ros_setup_path):
+        raise ModuleNotFoundError(
+            "dog_patrol_interfaces is unavailable and the ROS setup file does "
+            f"not exist: {ros_setup_path}"
+        )
+
+    result = subprocess.run(
+        [
+            "bash",
+            "-c",
+            'source "$1" && source "$2" && env -0',
+            "dog-patrol-console-bootstrap",
+            ros_setup_path,
+            setup_path,
+        ],
+        check=False,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    )
+    if result.returncode != 0:
+        diagnostic = result.stderr.decode(errors="replace").strip()
+        raise RuntimeError(
+            f"failed to load {setup_path}: {diagnostic or 'unknown setup error'}"
+        )
+
+    environment = os.environ.copy()
+    for entry in result.stdout.split(b"\0"):
+        if not entry or b"=" not in entry:
+            continue
+        key, value = entry.split(b"=", 1)
+        environment[os.fsdecode(key)] = os.fsdecode(value)
+    environment[bootstrap_marker] = app_workspace_root
+
+    # Re-exec is required so the dynamic loader also sees the interface package
+    # library path produced by the sourced colcon environment.
+    os.execve(
+        sys.executable,
+        [sys.executable, os.path.abspath(__file__), *sys.argv[1:]],
+        environment,
+    )
+
+
+_bootstrap_workspace_environment()
+
 os.environ.setdefault(
     "DOG_PATROL_ASSETS_ROOT",
     os.path.join(
@@ -106,11 +198,14 @@ def main():
     ros_thread.signals.status_updated.connect(window.handle_localization_status)
     ros_thread.signals.odom_distance_updated.connect(window.update_odom_distance)
     ros_thread.signals.ui_clear.connect(window.ui_clear_callback)
+    ros_thread.signals.task_state_updated.connect(window.update_task_state)
+    ros_thread.signals.task_command_result.connect(window.handle_task_command_result)
     
     # 重置槽连接：当前端触发重置信号时，通知后台清空历史 TF 缓存
     window.sig_reset_tf.connect(ros_thread.reset_tf)
     # 停止导航槽连接：通知后台发送空 /global_path 消息清除 RViz 全局路径残影
     window.sig_clear_nav.connect(ros_thread.clear_nav_viz)
+    window.sig_task_command.connect(ros_thread.send_task_command)
     
     # 启动后台监听线程
     ros_thread.start()
@@ -126,4 +221,14 @@ def main():
     sys.exit(exit_code)
 
 if __name__ == '__main__':
-    main()
+    if "--check-environment" in sys.argv[1:]:
+        from dog_patrol_interfaces.msg import PatrolTaskState
+        from dog_patrol_interfaces.srv import PatrolTaskCommand
+
+        print(
+            "robot_console environment OK: "
+            f"TASK_RUNNING={PatrolTaskState.TASK_RUNNING}, "
+            f"START={PatrolTaskCommand.Request.START}"
+        )
+    else:
+        main()

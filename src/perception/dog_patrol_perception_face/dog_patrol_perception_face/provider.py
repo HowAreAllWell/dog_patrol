@@ -35,6 +35,14 @@ from .recognition import RecModel
 from .verifier import FaceVerifier, ProductionFaceVerifier
 from .whitelist import load_whitelist_npy
 
+UINT32_MASK = (1 << 32) - 1
+UINT32_HALF_RANGE = 1 << 31
+
+
+def _is_newer_state_seq(candidate: int, current: int) -> bool:
+    delta = (int(candidate) - int(current)) & UINT32_MASK
+    return 0 < delta < UINT32_HALF_RANGE
+
 
 class FaceEvidenceResult(Enum):
     PASSED = "passed"
@@ -567,6 +575,7 @@ class FaceEvidenceProviderNode(Node):
         self.declare_parameter("recognition_engine", "")
         self.declare_parameter("whitelist_dir", "")
         self.declare_parameter("max_detail_length", 256)
+        self.declare_parameter("state_timeout", 0.75)
 
         crop_qos = QoSProfile(
             reliability=ReliabilityPolicy.BEST_EFFORT,
@@ -599,6 +608,15 @@ class FaceEvidenceProviderNode(Node):
             32, int(self.get_parameter("max_detail_length").value)
         )
         self._last_drop_log_ns = 0.0
+        self._mission_state_seq: int | None = None
+        self._mission_session: FaceVerificationSession | None = None
+        self._mission_state_signature = None
+        self._mission_state_conflicted = False
+        self._state_timeout = max(
+            0.1, float(self.get_parameter("state_timeout").value)
+        )
+        self._last_state_monotonic = None
+        self._state_timed_out = False
         self._config = config or self._load_config()
         self._adapter_lock = threading.Lock()
         self._production_verifier: FaceVerifier | None = None
@@ -637,6 +655,9 @@ class FaceEvidenceProviderNode(Node):
             overlay_callback=self._publish_face_overlay,
         )
         self._metrics_timer = self.create_timer(5.0, self._log_metrics)
+        self._state_watchdog = self.create_timer(
+            min(0.1, self._state_timeout / 2.0), self._check_state_timeout
+        )
 
     @staticmethod
     def _crop_message_type():
@@ -672,7 +693,48 @@ class FaceEvidenceProviderNode(Node):
         )
 
     def _on_mission(self, msg: MissionState) -> None:
-        self._controller.observe_session(_session_from_mission(msg))
+        state_seq = int(msg.state_seq) & UINT32_MASK
+        if state_seq == 0:
+            self._state_timed_out = True
+            self._controller.observe_session(None)
+            return
+        session = _session_from_mission(msg)
+        signature = (int(msg.state), int(msg.target_id), int(msg.handled_target_id))
+        self._last_state_monotonic = time.monotonic()
+        if self._mission_state_seq is not None:
+            if state_seq == self._mission_state_seq:
+                if self._mission_state_conflicted:
+                    return
+                if signature != self._mission_state_signature:
+                    self._mission_state_conflicted = True
+                    self._controller.observe_session(None)
+                    self._state_timed_out = False
+                    return
+                if self._state_timed_out:
+                    self._state_timed_out = False
+                    self._controller.observe_session(session)
+                return
+            if not _is_newer_state_seq(state_seq, self._mission_state_seq):
+                return
+        self._mission_state_seq = state_seq
+        self._mission_session = session
+        self._mission_state_signature = signature
+        self._mission_state_conflicted = False
+        self._state_timed_out = False
+        self._controller.observe_session(session)
+
+    def _check_state_timeout(self) -> None:
+        if (
+            self._last_state_monotonic is None
+            or self._state_timed_out
+            or time.monotonic() - self._last_state_monotonic <= self._state_timeout
+        ):
+            return
+        self._state_timed_out = True
+        self._controller.observe_session(None)
+        self.get_logger().warning(
+            "mission state heartbeat timed out; face authorization session cancelled"
+        )
 
     def _on_command(self, msg: AuthorizationCommand) -> None:
         session = FaceVerificationSession(
@@ -821,11 +883,13 @@ class FaceEvidenceProviderNode(Node):
 
 def _session_from_mission(msg: MissionState) -> FaceVerificationSession | None:
     if (
-        int(msg.state) != MissionState.VERIFY_IDENTITY
+        int(msg.state_seq) <= 0
+        or int(msg.state_seq) > UINT32_MASK
+        or int(msg.state) != MissionState.VERIFY_IDENTITY
         or int(msg.target_id) <= 0
     ):
         return None
-    return FaceVerificationSession(int(msg.state_seq), int(msg.target_id))
+    return FaceVerificationSession(int(msg.state_seq) & UINT32_MASK, int(msg.target_id))
 
 
 def _exception_detail(exc: Exception) -> str:

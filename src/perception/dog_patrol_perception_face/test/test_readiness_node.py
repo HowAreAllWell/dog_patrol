@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import time
+import threading
 
 import rclpy
 from dog_patrol_interfaces.msg import MissionState
@@ -46,6 +47,7 @@ def test_startup_preflight_is_published_as_retained_face_status() -> None:
         parameter_overrides=[
             Parameter("mission_state_topic", value=state_topic),
             Parameter("capability_status_topic", value=status_topic),
+            Parameter("state_timeout", value=10.0),
         ],
         preflight=lambda: FacePreflightOutcome(READY, "face preflight ready"),
     )
@@ -112,7 +114,10 @@ def test_readiness_resolves_deployment_inputs_from_same_config_as_provider(
     )
     rclpy.init()
     node = FaceReadinessNode(
-        parameter_overrides=[Parameter("config_file", value=str(config))]
+        parameter_overrides=[
+            Parameter("config_file", value=str(config)),
+            Parameter("state_timeout", value=10.0),
+        ]
     )
     try:
         assert node._run_preflight().status == READY
@@ -123,5 +128,65 @@ def test_readiness_resolves_deployment_inputs_from_same_config_as_provider(
         }
     finally:
         node.destroy_node()
+        if rclpy.ok():
+            rclpy.shutdown()
+
+
+def test_node_suppresses_inflight_preflight_after_leaving_startup() -> None:
+    started = threading.Event()
+    release = threading.Event()
+
+    def blocking_preflight():
+        started.set()
+        assert release.wait(timeout=2.0)
+        return FacePreflightOutcome(READY, "late face result")
+
+    rclpy.init()
+    suffix = f"t{time.monotonic_ns()}"
+    state_topic = f"/face/{suffix}/mission/state"
+    status_topic = f"/face/{suffix}/perception/capability_status"
+    source = Node(f"face_readiness_cancel_source_{suffix}")
+    probe = Node(f"face_readiness_cancel_probe_{suffix}")
+    node = FaceReadinessNode(
+        parameter_overrides=[
+            Parameter("mission_state_topic", value=state_topic),
+            Parameter("capability_status_topic", value=status_topic),
+            Parameter("state_timeout", value=10.0),
+        ],
+        preflight=blocking_preflight,
+    )
+    state_pub = source.create_publisher(
+        MissionState, state_topic, _transient_qos(depth=1)
+    )
+    statuses: list[CapabilityStatus] = []
+    status_sub = probe.create_subscription(
+        CapabilityStatus, status_topic, statuses.append, _transient_qos()
+    )
+    executor = SingleThreadedExecutor()
+    for current in (source, probe, node):
+        executor.add_node(current)
+    try:
+        startup = MissionState()
+        startup.state_seq = 41
+        startup.state = MissionState.STARTUP
+        state_pub.publish(startup)
+        assert _wait_for(executor, started.is_set)
+
+        ready = MissionState()
+        ready.state_seq = 42
+        ready.state = MissionState.READY
+        state_pub.publish(ready)
+        for _ in range(5):
+            executor.spin_once(timeout_sec=0.03)
+        release.set()
+        assert _wait_for(executor, lambda: False, timeout=0.2) is False
+        assert statuses == []
+    finally:
+        release.set()
+        node.destroy_node()
+        probe.destroy_node()
+        source.destroy_node()
+        executor.shutdown()
+        del state_pub, status_sub
         if rclpy.ok():
             rclpy.shutdown()

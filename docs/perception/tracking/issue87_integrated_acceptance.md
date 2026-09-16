@@ -1,18 +1,21 @@
 # Issue #87 Hik MVS 无损链路与 mission-aware patrol 集成验收
 
-本页独立核验 umbrella spec #78 的完整链路。子票据的关闭状态只作为待复核证据；最终结论来自
-当前 `dev` 代码、真实 `dog_patrol_manager`、Orin/Hik 硬件和现存 artifact 的组合验证。
+本页记录 umbrella spec #78 的历史完整链路验收证据。子票据的关闭状态只作为待复核证据；文中
+`dev`、现场设备和 artifact 的结论保留作历史复核，不是当前运行手册。当前父任务入口以
+[`patrol_task_lifecycle_design.md`](../../contracts/patrol_task_lifecycle_design.md) 为准：双侧
+READY 后只形成 `TASK_NO_TASK + READY`，准备合法路线后还必须通过
+`/mission/task_command` 显式 START 才进入 `TASK_RUNNING + PATROL`。
 
 ## 验收结论
 
 #79–#94 中除本验收票 #87 外的全部依赖均已关闭，#85 标记为 required 的 #93 也已完成；父
-spec #78 保持打开直到本票验收完成。当前代码通过无资产默认 CTest 和显式 Orin 视觉验收两种模式，
-均从 `STARTUP` 运行到第二个 `CONFIRM_TARGET`。显式模式把受限 historical Hik 录制送入当前 HEAD
-的 TensorRT detector、filter、tracker 和 identity，再将其真实 observations 接到 production
-mission stack 与真实 ROS 2 supervisor；capture、offline replay、live preview/record、retired
-surface 和 shared patrol protocol 的既有证据也保持成立。
+spec #78 保持打开直到本票验收完成。历史验收代码通过无资产默认 CTest 和显式 Orin 视觉验收两种模式，
+均从 `STARTUP` 运行到第二个 `CONFIRM_TARGET`；该旧序列不包含后来加入的父任务 START 门控。显式
+模式把受限 historical Hik 录制送入当时的 TensorRT detector、filter、tracker 和 identity，再将其
+真实 observations 接到 production mission stack 与真实 ROS 2 supervisor；capture、offline replay、
+live preview/record、retired surface 和 shared patrol protocol 的既有证据仍保留供复核。
 
-验收结论为通过。当前实现满足以下关键行为：
+该历史验收结论为通过；当时实现满足以下关键行为：
 
 - `PATROL` 首帧从可用 person 中选择最大框并只发一次 `TARGET_CONFIRMED`，不发 bbox；
 - authoritative target 在 `CONFIRM_TARGET`、`APPROACH_TARGET`、`VERIFY_IDENTITY` 中只发当前帧
@@ -25,6 +28,7 @@ surface 和 shared patrol protocol 的既有证据也保持成立。
   30 秒连续离场条件未满足，因此不具 mission eligibility；显式视觉证据在首帧选择 semantic 1；
 - authorization/navigation 仍由外部 event owner 提供；vision 侧 readiness 通过 required contributor
   聚合，authorization placeholder 默认 not-ready，只有显式认可或同名 provider 替换后才能 READY。
+  当前 readiness 只把 supervisor 推到 `TASK_NO_TASK + READY`，不会自动开始巡检。
 
 ## 依赖与既有证据复核
 
@@ -62,7 +66,9 @@ bash src/dog_patrol_perception_tracking/test/test_mission_pipeline_integration.s
 默认无资产模式的精确断言顺序如下：
 
 1. real detector/tracker readiness contribution 为 READY，并用显式 integration authorization
-   provider 替换 required placeholder；外部 navigation READY 使 supervisor 从 STARTUP 进入 PATROL。
+   provider 替换 required placeholder；在当前父任务契约中，外部 navigation READY 使 supervisor 从
+   STARTUP 进入 `TASK_NO_TASK + READY`，测试还必须准备路线并显式调用 START 才进入 PATROL；本页
+   保留的旧现场序列是在该门控加入前采集的历史证据。
 2. 第一帧同时输入 semantic 42/raw 7 和 semantic 99/raw 9；较大的 42 立即成为 primary，
    `TARGET_CONFIRMED` 经 DDS 到达 supervisor，且 PATROL bbox 数保持 0。
 3. authoritative `CONFIRM_TARGET(42)` 到达后发布新鲜 bbox；断言 source stamp
@@ -187,12 +193,13 @@ colcon test-result --verbose --all
 - artifact SHA-256 为
   `7d3706d95805d1670a9c287f0952edf85e84fa31d6f89c7cbc396c69c6e113f0`。
 
-同一 run 中 supervisor 先接受 `NAVIGATION/READY(seq=8700)`，再接收 vision aggregate
-`PERCEPTION/READY(seq=8700)`，明确记录 `STARTUP -> PATROL`。这验证真实 camera processing 与
-mission state input/ROS event output 可并行工作。由于当前物理画面没有 person，这一 live run 只验证
-readiness 和 mission input，不宣称暗场产生了 target bbox。target event/bbox 的完整状态序列由同一台
-Orin 上的显式 visual mode 验证：它使用实际 detector/tracker/identity observations、真实 DDS 和真实
-supervisor；真人 live overlay 继续引用 #83 已接受的现场证据。
+同一历史 run 中 supervisor 先接受 `NAVIGATION/READY(seq=8700)`，再接收 vision aggregate
+`PERCEPTION/READY(seq=8700)`，记录了当时的 `STARTUP -> PATROL`。这验证真实 camera processing 与
+mission state input/ROS event output 可并行工作，但不代表当前父任务可跳过 START。由于当前物理画面
+没有 person，这一 live run 只验证 readiness 和 mission input，不宣称暗场产生了 target bbox。
+target event/bbox 的完整状态序列由同一台 Orin 上的显式 visual mode 验证：它使用实际
+detector/tracker/identity observations、真实 DDS 和真实 supervisor；真人 live overlay 继续引用
+#83 已接受的现场证据。
 
 ### 当前环境吞吐边界
 

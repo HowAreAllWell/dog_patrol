@@ -67,6 +67,29 @@ def test_old_preflight_result_cannot_publish_after_startup_sequence_changes() ->
         controller.stop()
 
 
+def test_leaving_startup_for_ready_suppresses_in_flight_preflight_result() -> None:
+    started = threading.Event()
+    release = threading.Event()
+    published = []
+
+    def preflight():
+        started.set()
+        assert release.wait(timeout=2.0)
+        return VoicePreflightOutcome(READY, "late startup result")
+
+    controller = VoiceReadinessController(preflight, published.append)
+    try:
+        controller.observe(41, 0)
+        assert started.wait(timeout=1.0)
+        controller.observe(42, 7)
+        release.set()
+        time.sleep(0.1)
+        assert published == []
+    finally:
+        release.set()
+        controller.stop()
+
+
 def test_non_startup_state_does_not_run_or_publish_preflight() -> None:
     calls = []
     published = []
@@ -96,4 +119,45 @@ def test_zero_startup_sequence_is_not_a_publishable_mission_sequence() -> None:
         assert calls == []
         assert published == []
     finally:
+        controller.stop()
+
+
+def test_late_old_startup_snapshot_cannot_restart_preflight_after_ready() -> None:
+    calls = []
+    published = []
+    controller = VoiceReadinessController(
+        lambda: calls.append(True) or VoicePreflightOutcome(READY, "unexpected"),
+        published.append,
+    )
+    try:
+        controller.observe(42, 7)
+        controller.observe(41, 0)
+        time.sleep(0.1)
+
+        assert calls == []
+        assert published == []
+    finally:
+        controller.stop()
+
+
+def test_heartbeat_expiry_suppresses_in_flight_preflight_result() -> None:
+    started = threading.Event()
+    release = threading.Event()
+    published = []
+
+    def preflight():
+        started.set()
+        assert release.wait(timeout=2.0)
+        return VoicePreflightOutcome(READY, "expired startup result")
+
+    controller = VoiceReadinessController(preflight, published.append)
+    try:
+        controller.observe(50, 0)
+        assert started.wait(timeout=1.0)
+        controller.expire()
+        release.set()
+        time.sleep(0.1)
+        assert published == []
+    finally:
+        release.set()
         controller.stop()

@@ -1,5 +1,10 @@
 # Issue #15 权威入口切换与旧仓研究治理
 
+> 本页记录 tracking 权威仓切换时的历史范围。第 11–12 行和末尾“face、voice、导航待后续”的
+> 判断仅描述 #15 关闭当时；当前模块和父任务生命周期状态以
+> [`../../contracts/patrol_task_lifecycle_design.md`](../../contracts/patrol_task_lifecycle_design.md)
+> 以及 [`../../../src/perception/README.md`](../../../src/perception/README.md) 为准。
+
 ## 结论和边界
 
 `HowAreAllWell/dog_patrol` 是 tracking 正式开发、构建、测试和部署的唯一权威仓库。

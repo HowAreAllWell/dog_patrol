@@ -129,6 +129,46 @@ TEST(PrimaryTargetManagerTest,
   EXPECT_EQ(handled.supporting_raw_track_id, 101);
 }
 
+TEST(PrimaryTargetManagerTest, ActiveMissionBindsOnlyTheAuthoritativeTargetId) {
+  using namespace dog_patrol_perception_tracking;
+  PrimaryTargetManager::Config cfg;
+  cfg.min_person_area_px = 100.0F;
+  PrimaryTargetManager mgr(cfg);
+  const auto authoritative =
+      MakeIdentity(11, 101, ClassId::kPerson, cv::Rect2f(0, 0, 40, 40));
+  const auto larger_other =
+      MakeIdentity(22, 202, ClassId::kPerson, cv::Rect2f(100, 0, 100, 100));
+  const MissionSnapshot approach{11U, MissionPhase::kApproachTarget, 11};
+
+  const auto selected = mgr.UpdateForMission(
+      {authoritative, larger_other}, approach, std::nullopt,
+      PrimaryTargetManager::TimePoint{});
+
+  ASSERT_EQ(selected.state, PrimaryState::kLocked);
+  ASSERT_TRUE(selected.primary_track.has_value());
+  EXPECT_EQ(selected.primary_target_id, 11);
+  EXPECT_EQ(selected.primary_track->id, 101);
+}
+
+TEST(PrimaryTargetManagerTest, ActiveMissionNeverReplacesMissingTargetWithAnotherPerson) {
+  using namespace dog_patrol_perception_tracking;
+  PrimaryTargetManager::Config cfg;
+  cfg.lost_threshold_frames = 1;
+  cfg.min_person_area_px = 100.0F;
+  PrimaryTargetManager mgr(cfg);
+  const MissionSnapshot verify{12U, MissionPhase::kVerifyIdentity, 11};
+  const auto other =
+      MakeIdentity(22, 202, ClassId::kPerson, cv::Rect2f(100, 0, 100, 100));
+
+  const auto first = mgr.UpdateForMission(
+      {other}, verify, std::nullopt, PrimaryTargetManager::TimePoint{});
+  EXPECT_NE(first.primary_target_id, 22);
+  const auto second = mgr.UpdateForMission(
+      {other}, verify, verify, PrimaryTargetManager::TimePoint{});
+  EXPECT_NE(second.primary_target_id, 22);
+  EXPECT_FALSE(second.primary_track.has_value());
+}
+
 TEST(PrimaryTargetManagerTest, PreviousTaskPhaseAloneDoesNotExcludeUnfinishedTarget) {
   using namespace dog_patrol_perception_tracking;
   const auto person = MakeIdentity(11, 101, ClassId::kPerson, cv::Rect2f(0, 0, 80, 80));
@@ -235,6 +275,61 @@ TEST(PrimaryTargetManagerTest, PatrolSelectionKeepsMultipleHandledIdentitiesExcl
   ASSERT_TRUE(state.primary_track.has_value());
   EXPECT_EQ(state.primary_target_id, 33);
   EXPECT_EQ(state.primary_track->id, 303);
+}
+
+TEST(PrimaryTargetManagerTest, ReadyClearsPrimaryWithoutSelectingOrDeletingHandledHistory) {
+  using namespace dog_patrol_perception_tracking;
+  PrimaryTargetManager::Config cfg;
+  cfg.min_person_area_px = 100.0F;
+  PrimaryTargetManager mgr(cfg);
+  const auto person = MakeIdentity(11, 101, ClassId::kPerson, cv::Rect2f(0, 0, 80, 80));
+  const auto eligible = MakeIdentity(22, 202, ClassId::kPerson, cv::Rect2f(100, 0, 60, 60));
+  const MissionSnapshot patrol{10U, MissionPhase::kPatrol, 0, 11};
+  const MissionSnapshot ready{11U, MissionPhase::kReady, 0, 11};
+
+  const auto selected = mgr.UpdateForMission({person, eligible}, patrol, std::nullopt,
+                                              PrimaryTargetManager::TimePoint{});
+  ASSERT_EQ(selected.primary_target_id, 22);
+  const auto standby = mgr.UpdateForMission({person, eligible}, ready, patrol,
+                                             PrimaryTargetManager::TimePoint{} + std::chrono::seconds{1});
+  EXPECT_EQ(standby.state, PrimaryState::kIdle);
+  EXPECT_EQ(standby.primary_target_id, -1);
+  EXPECT_FALSE(mgr.IsMissionEligible(person));
+}
+
+TEST(PrimaryTargetManagerTest, ReenteringPatrolDoesNotResetAnExistingHandledAbsenceTimer) {
+  using namespace dog_patrol_perception_tracking;
+  using namespace std::chrono_literals;
+  PrimaryTargetManager::Config cfg;
+  cfg.handled_ignore_absence = 60s;
+  PrimaryTargetManager mgr(cfg);
+  const auto start = PrimaryTargetManager::TimePoint{};
+
+  mgr.ResetForPatrolCycle(11);
+  mgr.UpdateForPatrol({}, start);
+  mgr.ResetForPatrolCycle(11);
+  mgr.UpdateForPatrol({}, start + 59s);
+  EXPECT_FALSE(mgr.IsMissionEligible(MakeLifecycleIdentity(
+      11, IdentityState::kActive, 0, cv::Rect2f{})));
+  mgr.UpdateForPatrol({}, start + 60s);
+  EXPECT_TRUE(mgr.IsMissionEligible(MakeLifecycleIdentity(
+      11, IdentityState::kActive, 0, cv::Rect2f{})));
+}
+
+TEST(PrimaryTargetManagerTest, StartupResetClearsPrimaryAndHandledMissionHistory) {
+  using namespace dog_patrol_perception_tracking;
+  PrimaryTargetManager mgr(PrimaryTargetManager::Config{});
+  const auto person = MakeIdentity(11, 101, ClassId::kPerson, cv::Rect2f(0, 0, 80, 80));
+  const MissionSnapshot patrol{10U, MissionPhase::kPatrol, 0, 11};
+  const MissionSnapshot startup{11U, MissionPhase::kStartup, 0, 0};
+
+  mgr.UpdateForMission({person}, patrol, std::nullopt, PrimaryTargetManager::TimePoint{});
+  EXPECT_FALSE(mgr.IsMissionEligible(person));
+  const auto reset = mgr.UpdateForMission({person}, startup, patrol,
+                                          PrimaryTargetManager::TimePoint{});
+  EXPECT_TRUE(mgr.IsMissionEligible(person));
+  EXPECT_EQ(reset.state, PrimaryState::kIdle);
+  EXPECT_EQ(reset.primary_target_id, -1);
 }
 
 TEST(PrimaryTargetManagerTest, ActivePatrolPrimaryDoesNotSwitchWhenAnotherEligiblePersonBecomesLarger) {
@@ -440,6 +535,87 @@ TEST(PrimaryTargetManagerTest, PendingRecoveryReturnsToLockedWithStableEvidence)
   EXPECT_EQ(s3.primary_track->id, 9);
   EXPECT_EQ(mgr.LastDecisionReason(), "locked_visible_primary_identity");
   EXPECT_TRUE(mgr.LastRejectReason().empty());
+}
+
+TEST(PrimaryTargetManagerTest, StableNewScaleRecoversSameSemanticTarget) {
+  dog_patrol_perception_tracking::PrimaryTargetManager::Config cfg;
+  cfg.lost_threshold_frames = 10;
+  cfg.pending_recovery_frames = 3;
+  cfg.min_person_area_px = 100.0F;
+  cfg.max_area_ratio = 2.0F;
+  dog_patrol_perception_tracking::PrimaryTargetManager mgr(cfg);
+
+  ASSERT_EQ(mgr.Update({MakeIdentity(
+                1, 7, dog_patrol_perception_tracking::ClassId::kPerson,
+                cv::Rect2f(0, 0, 50, 50))})
+                .state,
+            dog_patrol_perception_tracking::PrimaryState::kLocked);
+
+  const auto first = mgr.Update({MakeIdentity(
+      1, 7, dog_patrol_perception_tracking::ClassId::kPerson,
+      cv::Rect2f(0, 0, 90, 90))});
+  EXPECT_EQ(first.state, dog_patrol_perception_tracking::PrimaryState::kPendingRecovery);
+  EXPECT_EQ(mgr.LastRejectReason(), "visible_primary_area_ratio");
+
+  const auto second = mgr.Update({MakeIdentity(
+      1, 7, dog_patrol_perception_tracking::ClassId::kPerson,
+      cv::Rect2f(0, 0, 92, 92))});
+  EXPECT_EQ(second.state, dog_patrol_perception_tracking::PrimaryState::kPendingRecovery);
+
+  const auto recovered = mgr.Update({MakeIdentity(
+      1, 7, dog_patrol_perception_tracking::ClassId::kPerson,
+      cv::Rect2f(0, 0, 94, 94))});
+  ASSERT_EQ(recovered.state, dog_patrol_perception_tracking::PrimaryState::kLocked);
+  ASSERT_TRUE(recovered.primary_track.has_value());
+  EXPECT_EQ(recovered.primary_target_id, 1);
+  EXPECT_EQ(recovered.primary_track->id, 7);
+  EXPECT_EQ(mgr.LastDecisionReason(), "locked_stable_geometry_recovery");
+  EXPECT_TRUE(mgr.LastRejectReason().empty());
+}
+
+TEST(PrimaryTargetManagerTest, GeometryRecoveryCannotBridgeToDifferentRawTrack) {
+  using namespace dog_patrol_perception_tracking;
+  PrimaryTargetManager::Config cfg;
+  cfg.lost_threshold_frames = 10;
+  cfg.pending_recovery_frames = 3;
+  cfg.min_person_area_px = 100.0F;
+  cfg.max_area_ratio = 2.0F;
+  PrimaryTargetManager mgr(cfg);
+
+  ASSERT_EQ(mgr.Update({MakeIdentity(1, 7, ClassId::kPerson,
+                                     cv::Rect2f(0, 0, 50, 50))}).state,
+            PrimaryState::kLocked);
+  for (int frame = 0; frame < 4; ++frame) {
+    const auto state = mgr.Update({MakeIdentity(
+        1, 8, ClassId::kPerson,
+        cv::Rect2f(0, 0, 90 + frame, 90 + frame))});
+    EXPECT_EQ(state.state, PrimaryState::kPendingRecovery);
+    EXPECT_EQ(state.primary_target_id, 1);
+    EXPECT_FALSE(state.primary_track.has_value());
+  }
+}
+
+TEST(PrimaryTargetManagerTest, DisabledPendingRecoveryDoesNotAcceptGeometryOutlier) {
+  dog_patrol_perception_tracking::PrimaryTargetManager::Config cfg;
+  cfg.lost_threshold_frames = 10;
+  cfg.pending_recovery_frames = 0;
+  cfg.min_person_area_px = 100.0F;
+  cfg.max_area_ratio = 2.0F;
+  dog_patrol_perception_tracking::PrimaryTargetManager mgr(cfg);
+
+  ASSERT_EQ(mgr.Update({MakeIdentity(
+                1, 7, dog_patrol_perception_tracking::ClassId::kPerson,
+                cv::Rect2f(0, 0, 50, 50))})
+                .state,
+            dog_patrol_perception_tracking::PrimaryState::kLocked);
+
+  for (int frame = 0; frame < 3; ++frame) {
+    const auto state = mgr.Update({MakeIdentity(
+        1, 7, dog_patrol_perception_tracking::ClassId::kPerson,
+        cv::Rect2f(0, 0, 90 + frame, 90 + frame))});
+    EXPECT_EQ(state.state, dog_patrol_perception_tracking::PrimaryState::kPendingRecovery);
+    EXPECT_FALSE(state.primary_track.has_value());
+  }
 }
 
 TEST(PrimaryTargetManagerTest, PendingRecoveryLossThresholdBecomesLost) {

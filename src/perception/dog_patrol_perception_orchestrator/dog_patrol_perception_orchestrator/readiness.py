@@ -39,22 +39,39 @@ class ReadinessCoordinator:
         self._samples: Dict[str, CapabilitySample] = {}
         self._mission_seq: Optional[int] = None
         self._mission_state: Optional[int] = None
+        self._mission_signature = None
+        self._mission_conflicted = False
         self._emitted_startup_seq: Optional[int] = None
 
     @property
     def required_capabilities(self) -> Tuple[str, ...]:
         return self._required
 
-    def observe_mission(self, state_seq: int, state: int) -> Optional[int]:
+    def observe_mission(
+        self,
+        state_seq: int,
+        state: int,
+        target_id: int = 0,
+        handled_target_id: int = 0,
+    ) -> Optional[int]:
         state_seq = int(state_seq) & UINT32_MASK
         state = int(state)
+        signature = (state, int(target_id), int(handled_target_id))
+        if state_seq == 0:
+            return None
         if self._mission_seq is not None:
             if not _is_current_or_newer(state_seq, self._mission_seq):
                 return None
-            if state_seq == self._mission_seq and state != self._mission_state:
-                return None
+            if state_seq == self._mission_seq:
+                if self._mission_conflicted or signature != self._mission_signature:
+                    self._mission_conflicted = True
+                    self._mission_state = None
+                    return None
+                return self._ready_startup_sequence()
         self._mission_seq = state_seq
         self._mission_state = state
+        self._mission_signature = signature
+        self._mission_conflicted = False
         return self._ready_startup_sequence()
 
     def observe_capability(self, sample: CapabilitySample) -> Optional[int]:
@@ -71,16 +88,37 @@ class ReadinessCoordinator:
             diagnostic=sample.diagnostic,
         )
         previous = self._samples.get(normalized.capability)
-        if previous is not None and not _is_current_or_newer(
-            normalized.observed_startup_state_seq,
-            previous.observed_startup_state_seq,
-        ):
-            return None
+        if previous is not None:
+            if normalized.observed_startup_state_seq == previous.observed_startup_state_seq:
+                # A capability is expected to progress within one STARTUP
+                # sequence (e.g. NOT_READY -> READY). Keep the newest status;
+                # only authoritative MissionState same-sequence conflicts are
+                # locked out.
+                self._samples[normalized.capability] = normalized
+                return self._ready_startup_sequence()
+            if not _is_current_or_newer(
+                normalized.observed_startup_state_seq,
+                previous.observed_startup_state_seq,
+            ):
+                return None
         self._samples[normalized.capability] = normalized
         return self._ready_startup_sequence()
 
+    def expire_mission(self) -> None:
+        """Invalidate the current MissionState after heartbeat loss."""
+        self._mission_seq = None
+        self._mission_state = None
+        self._mission_signature = None
+        self._mission_conflicted = False
+
     def _ready_startup_sequence(self) -> Optional[int]:
-        if self._mission_seq is None or self._mission_state != self._startup_state:
+        if (
+            self._mission_seq is None
+            or self._mission_seq == 0
+            or self._mission_conflicted
+            or self._mission_state != self._startup_state
+            or self._mission_signature[1:] != (0, 0)
+        ):
             return None
         if self._emitted_startup_seq == self._mission_seq:
             return None

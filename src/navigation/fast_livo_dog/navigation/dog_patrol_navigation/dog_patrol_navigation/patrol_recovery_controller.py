@@ -16,6 +16,10 @@ class RecoveryConfig:
     hold_time: float
     republish_period: float
     request_retry_period: float
+    # None keeps a successful path until completion. A positive value asks
+    # the planner for a fresh path from the robot's current pose while the
+    # fixed recovery/return goal remains active.
+    replan_period: Optional[float] = None
 
 
 @dataclass(frozen=True)
@@ -154,15 +158,24 @@ class PatrolRecoveryController:
 
         self.hold_start_seconds = None
         path_to_publish = self.republish_path()
-        request_path = (
-            not self.path_ready
-            and not self.path_requested
-            and not planner_in_flight
+        retry_due = (
+            self.last_path_request_seconds is None
+            or now - self.last_path_request_seconds
+            >= self.config.request_retry_period
+        )
+        replan_due = (
+            self.path_ready
+            and self.config.replan_period is not None
             and (
                 self.last_path_request_seconds is None
                 or now - self.last_path_request_seconds
-                >= self.config.request_retry_period
+                >= self.config.replan_period
             )
+        )
+        request_path = (
+            not self.path_requested
+            and not planner_in_flight
+            and ((not self.path_ready and retry_due) or replan_due)
         )
         return RecoveryCommand(
             publish_path=path_to_publish,

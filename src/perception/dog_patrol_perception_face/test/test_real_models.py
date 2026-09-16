@@ -27,10 +27,11 @@ from pathlib import Path
 import cv2
 import numpy as np
 
-try:
-    import pycuda.autoinit  # noqa: F401  creates the primary CUDA context
-except ImportError:
-    pass
+if __name__ == "__main__":
+    try:
+        import pycuda.autoinit  # noqa: F401  creates the primary CUDA context
+    except ImportError:
+        pass
 
 try:
     from dog_patrol_perception_face.alignment import align_face_5pts

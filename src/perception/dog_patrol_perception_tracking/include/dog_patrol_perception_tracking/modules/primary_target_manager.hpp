@@ -36,6 +36,10 @@ class PrimaryTargetManager {
   // the detector, tracker, and identity manager.
   void ResetForPatrolCycle(int handled_semantic_id = -1);
 
+  // Clears all mission-owned primary and handled-target history. This is used
+  // only for STARTUP/reset or a full process session boundary.
+  void ResetMissionHistory();
+
   // Evaluates the mission-specific handled-ID policy only. Person validity,
   // confidence, and tracking continuity remain selection-layer concerns.
   bool IsMissionEligible(const IdentityObservation &identity) const;
@@ -68,12 +72,19 @@ class PrimaryTargetManager {
   void UpdateHandledIdentityAbsence(const std::vector<IdentityObservation> &identities, TimePoint now);
   PrimaryTargetResult UpdateInternal(const std::vector<IdentityObservation> &identities,
                                      bool require_mission_eligibility);
+  PrimaryTargetResult UpdateForActiveMissionTarget(
+      const std::vector<IdentityObservation> &identities, int target_id);
   bool IsVisibleIdentity(const IdentityObservation &identity) const;
   bool IsVisiblePrimarySane(const Track &track, std::string *reject_reason) const;
+  bool IsGeometryConsistent(const Track &reference, const Track &candidate) const;
+  bool ObserveStableGeometryRecovery(const Track &track);
+  PrimaryTargetResult LockPrimary(const Track &track, int semantic_id,
+                                  const std::string &decision_reason);
   Track TrackFromIdentityObservation(const IdentityObservation &identity) const;
   PrimaryTargetResult EnterPendingRecovery(const std::string &decision_reason);
   PrimaryTargetResult EnterOccluded(const std::string &decision_reason);
   PrimaryTargetResult EnterLost(const std::string &decision_reason, int missing_frames);
+  void ResetCurrentPrimary();
 
   Config config_;
   PrimaryTargetResult state_{};
@@ -81,6 +92,8 @@ class PrimaryTargetManager {
   int bound_raw_track_id_{-1};
   std::optional<Track> last_primary_track_{std::nullopt};
   int pending_recovery_frames_{0};
+  std::optional<Track> pending_geometry_candidate_{std::nullopt};
+  int pending_geometry_stable_frames_{0};
   std::string last_decision_reason_;
   std::string last_reject_reason_;
   std::unordered_map<int, std::optional<TimePoint>> handled_identity_absence_started_at_;

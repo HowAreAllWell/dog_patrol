@@ -14,6 +14,14 @@ from dog_patrol_perception_interfaces.msg import CapabilityStatus, TrackedTarget
 from rclpy.node import Node
 from rclpy.qos import DurabilityPolicy, HistoryPolicy, QoSProfile, ReliabilityPolicy
 
+UINT32_MASK = (1 << 32) - 1
+UINT32_HALF_RANGE = 1 << 31
+
+
+def _is_current_or_newer_state_seq(candidate: int, current: int) -> bool:
+    delta = (int(candidate) - int(current)) & UINT32_MASK
+    return delta == 0 or delta < UINT32_HALF_RANGE
+
 
 def state_qos() -> QoSProfile:
     return QoSProfile(
@@ -62,6 +70,9 @@ class FakeNavigation(Node):
         self._state: MissionState | None = MissionState()
         self._state.state_seq = 1
         self._state.state = MissionState.STARTUP
+        self._state_seq = 1
+        self._state_signature = (MissionState.STARTUP, 0, 0)
+        self._state_conflicted = False
         self._bbox: TargetBoundingBox | None = None
         self._sent: set[tuple[int, int]] = set()
         self._event_pub = self.create_publisher(
@@ -82,6 +93,22 @@ class FakeNavigation(Node):
         self._timer = self.create_timer(0.1, self._tick)
 
     def _on_state(self, msg: MissionState) -> None:
+        seq = int(msg.state_seq) & UINT32_MASK
+        signature = (int(msg.state), int(msg.target_id), int(msg.handled_target_id))
+        if seq == 0:
+            return
+        if self._state_seq:
+            if seq == self._state_seq:
+                if signature == self._state_signature:
+                    return
+                self._state_conflicted = True
+                self._state = None
+                return
+            if not _is_current_or_newer_state_seq(seq, self._state_seq):
+                return
+        self._state_seq = seq
+        self._state_signature = signature
+        self._state_conflicted = False
         self._state = msg
 
     def _on_event(self, msg: MissionEvent) -> None:
@@ -142,6 +169,9 @@ class FakeFace(Node):
         super().__init__("fake_face")
         self._last_startup = 0
         self._state: MissionState | None = None
+        self._state_seq = 0
+        self._state_signature = None
+        self._state_conflicted = False
         self._last_publish_ns = 0
         self._status_pub = self.create_publisher(
             CapabilityStatus, capability_topic, capability_qos()
@@ -158,6 +188,22 @@ class FakeFace(Node):
         self._timer = self.create_timer(0.5, self._retry_startup_ready)
 
     def _on_state(self, msg: MissionState) -> None:
+        seq = int(msg.state_seq) & UINT32_MASK
+        signature = (int(msg.state), int(msg.target_id), int(msg.handled_target_id))
+        if seq == 0:
+            return
+        if self._state_seq:
+            if seq == self._state_seq:
+                if signature == self._state_signature:
+                    return
+                self._state_conflicted = True
+                self._state = None
+                return
+            if not _is_current_or_newer_state_seq(seq, self._state_seq):
+                return
+        self._state_seq = seq
+        self._state_signature = signature
+        self._state_conflicted = False
         self._state = msg
         if msg.state != MissionState.STARTUP:
             return
@@ -196,19 +242,37 @@ class FakeCapabilities(Node):
     def __init__(self, state_topic: str, capability_topic: str) -> None:
         super().__init__("fake_capabilities")
         self._last_startup = 0
+        self._state_seq = 0
+        self._state_signature = None
+        self._state_conflicted = False
         self._pub = self.create_publisher(CapabilityStatus, capability_topic, capability_qos())
         self.create_subscription(MissionState, state_topic, self._on_state, state_qos())
 
     def _on_state(self, msg: MissionState) -> None:
-        if msg.state != MissionState.STARTUP or msg.state_seq == self._last_startup:
+        seq = int(msg.state_seq) & UINT32_MASK
+        signature = int(msg.state)
+        if seq == 0:
             return
-        self._last_startup = msg.state_seq
+        if self._state_seq:
+            if seq == self._state_seq:
+                if signature == self._state_signature:
+                    return
+                self._state_conflicted = True
+                return
+            if not _is_current_or_newer_state_seq(seq, self._state_seq):
+                return
+        self._state_seq = seq
+        self._state_signature = signature
+        self._state_conflicted = False
+        if msg.state != MissionState.STARTUP or seq == self._last_startup:
+            return
+        self._last_startup = seq
         for capability in ("face", "voice"):
             status = CapabilityStatus()
             status.header.stamp = self.get_clock().now().to_msg()
             status.capability = capability
             status.status = CapabilityStatus.READY
-            status.observed_startup_state_seq = msg.state_seq
+            status.observed_startup_state_seq = seq
             status.diagnostic = "test-only capability readiness; algorithm disabled"
             self._pub.publish(status)
 

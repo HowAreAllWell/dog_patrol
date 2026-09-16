@@ -34,10 +34,15 @@ FAST-LIVO-DOG 是一个面向高动态四足机器人（机器狗）平台的鲁
 项目配置了高度集成的图形化交互控制台，您可以直接运行控制台并在 GUI 界面中完成编译与核心算法的启动控制：
 
 ```bash
-# 激活 ROS 2 环境变量并运行控制台入口脚本
-source /opt/ros/$ROS_DISTRO/setup.bash
-python3 src/robot_console/robot_console/app.py
+# 在仓库根目录加载 ROS 2 和本工作区安装产物，再运行控制台
+cd /mnt/nvme/workspace/dog_patrol
+source /opt/ros/humble/setup.bash
+source install/setup.bash
+python3 src/orchestration/robot_console/robot_console/app.py
 ```
+
+从源码目录直接执行 `python app.py` 时，入口也会自动加载本工作区环境；可先运行
+`python app.py --check-environment` 仅检查接口导入而不打开界面。
 
 在启动的控制台界面中，您只需执行以下简单步骤即可快速运行系统：
 
@@ -631,7 +636,7 @@ graph TD
 - `/livox/lidar` (`sensor_msgs/msg/PointCloud2`): LiDAR 三维原始激光点云。
 - `/livox/imu` (`sensor_msgs/msg/Imu`): IMU 高频惯导数据（代码及配置默认话题）。
 - `/initialpose` (`geometry_msgs/msg/PoseWithCovarianceStamped`): RViz 界面下发的 2D 手动重定位初始位姿。
-- `/clicked_point` (`geometry_msgs/msg/PointStamped`): 唯一统一的导航路径下发入口，支持单点到达与多点连续巡航。
+- `/clicked_point` (`geometry_msgs/msg/PointStamped`): waypoint 路线编辑入口，用于准备单点或多点巡检路线；它不启动父任务，也不直接产生运动许可。
 
 ### 7.3 主要输出话题
 
@@ -647,7 +652,9 @@ graph TD
 
 - `/map` (`sensor_msgs/msg/PointCloud2`): 由地图加载器发布的全局稠密三维先验点云地图。
 - `/localization` (`nav_msgs/msg/Odometry`): 融合滤波输出的高频、平滑、无累积漂移的 6-DoF 绝对空间定位位姿（参考系 `map`）。
-- `/global_path` (`nav_msgs/msg/Path`): 在全局 `map` 坐标系下累计的历史 3D 定位轨迹。
+- `/localization/trajectory` (`nav_msgs/msg/Path`): 在全局 `map` 坐标系下累计的历史 3D
+  定位轨迹；production localization launch 会把底层 `transform_fusion` 的原始
+  `/global_path` 输出重映射到该观测 Topic，避免与导航控制路径冲突。
 - `/map_to_odom` (`nav_msgs/msg/Odometry`): 后端重定位计算输出的低频全局校准增量（用于修正前端漂移）。
 - `/cur_scan_in_map` (`sensor_msgs/msg/PointCloud2`): 当前雷达帧配准投影到全局地图坐标系下的实时点云。
 - `/localization_status` (`std_msgs/msg/Bool`): 重定位状态锁定指示（`true` 代表锁死，`false` 代表退化/丢失中）。
@@ -656,7 +663,11 @@ graph TD
 
 #### 7.3.3 导航模式 (Navigation Mode)
 
-- `/global_path` (`nav_msgs/msg/Path`): 由 Nav2 全局规划器或航点序列生成器解算发布的全局参考导航轨迹。
+- `/waypoint_global_path` (`nav_msgs/msg/Path`): waypoint publisher 生成的巡检私有路径。
+- `/mission_global_path` (`nav_msgs/msg/Path`): navigation coordinator 生成的目标处置、恢复和返航私有路径。
+- `/global_path` (`nav_msgs/msg/Path`): 仅由 `navigation_path_mux` 按
+  `PatrolTaskState.navigation_mode` 选择并发布的最终全局参考路径；Nav2、waypoint publisher 和
+  coordinator 均不得直接向该 Topic 发布。
 - `/subgoal` (`geometry_msgs/msg/PoseStamped`): 由纯追踪（Pure Pursuit）算法在全局路径上动态提取的前视子目标，作为 RL 算法的输入引导。
 - `/local_path` (`nav_msgs/msg/Path`): 强化学习（RL）或 DWB 算法结合实时雷达避障生成的局部无碰撞规划轨迹。
 - `/scan` (`sensor_msgs/msg/LaserScan`): 挂载在物理躯干 `base_link` 上的 2D 激光地形随动切片（专供 Costmap2D 避障使用）。
@@ -823,6 +834,12 @@ export RCUTILS_LOGGING_USE_STDOUT=1
 ### 8.6 2D 定位与自主导航模式 (2D Localization & Navigation Mode)
 
 如需对机器人下发导航点并开启自主规划避障，需要降维发布地图 TF 树并拉起 Nav2 导航模块。
+巡检父任务链还必须先启动唯一的 `mission_supervisor`；没有 `/patrol_task/state` 或没有显式
+START，waypoint publisher 和 mux 会保持停止，即使已经在 RViz 发布路线也不会运动。
+
+```bash
+ros2 launch dog_patrol_manager mission_supervisor.launch.py use_sim_time:=false
+```
 
 - **终端 1：定位前端里程计 (FAST-LIVO)**
   ```bash
@@ -843,12 +860,18 @@ export RCUTILS_LOGGING_USE_STDOUT=1
   ```
 - **终端 5：命令行下发目标点位 (CLI Waypoint Publishing)**
   ```bash
-  # 连续发布多个点位，系统将自动拼接为多点巡航轨迹路线：
+  # 连续发布多个点位只准备 waypoint 路线，不会自动启动父任务：
   ros2 topic pub --once /clicked_point geometry_msgs/msg/PointStamped "{header: {frame_id: 'map'}, point: {x: 2.5, y: 1.0, z: 0.0}}"
   ros2 topic pub --once /clicked_point geometry_msgs/msg/PointStamped "{header: {frame_id: 'map'}, point: {x: 5.0, y: 2.5, z: 0.0}}"
   ros2 topic pub --once /clicked_point geometry_msgs/msg/PointStamped "{header: {frame_id: 'map'}, point: {x: 8.0, y: -1.0, z: 0.0}}"
   ```
-- **终端 6 (仅离线回放模式)：回放数据包 (Play Bag)**
+- **终端 6：双 READY 后显式启动父任务**
+  ```bash
+  # 先确认 /mission/state 为 READY 且 /waypoint_sequence/state 为非空未完成路线
+  ros2 service call /mission/task_command \
+    dog_patrol_interfaces/srv/PatrolTaskCommand "{command: 0}"
+  ```
+- **终端 7 (仅离线回放模式)：回放数据包 (Play Bag)**
   ```bash
   ros2 bag play ~/bag_files/bag_name --clock --remap /tf:=/tf_bag_garbage /tf_static:=/tf_static_bag_garbage
   ```
@@ -858,7 +881,7 @@ export RCUTILS_LOGGING_USE_STDOUT=1
 > [!TIP]
 > **统一路线下发与避障控制**：
 >
-> 1. **统一路线下发 (`Publish Point`)**：系统已全线收敛为单一的路线下发入口，使用 RViz2 顶部工具栏的 **Publish Point**（或控制台 2D 地图点击）依次下发途径点。点击 1 个点自动单点到达，连续点击多个点自动平滑拼接为多点巡航路径，彻底杜绝单/多点混用的状态竞争。
+> 1. **统一路线下发 (`Publish Point`)**：使用 RViz2 顶部工具栏的 **Publish Point**（或控制台 2D 地图点击）依次准备 waypoint。发布路线不会启动运动；双 READY 后确认 `/waypoint_sequence/state` 为非空未完成路线，再通过 `/mission/task_command` 显式发送 `START` 才进入 `TASK_RUNNING + PATROL`。
 > 2. **近距离与盲区防护**：为应对贴身人物与近距离障壁，FAST-LIVO 前端预处理与 `pointcloud_to_laserscan` 转换层盲区已统一精细收紧至 **0.15m**，结合自适应躯干系切片，确保极近距离避障无死角。
 > 3. **底层安全参数修改**：控制器的最高物理限速、断连超时与碰撞体积约束等，可通过编辑配置文件 `config/nav_parameters.yaml` 进行精细调整，以适配不同的足式底盘。
 > 4. **路径接替与超时调整**：异步 `FollowPath` 时，可调整 `adapter_path_timeout` 启动参数来适配不同的通信与规划延迟，防范零速度抖动。

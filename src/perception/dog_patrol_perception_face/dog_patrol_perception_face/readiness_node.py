@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Sequence
+import time
 
 import rclpy
 from dog_patrol_interfaces.msg import MissionState
@@ -38,6 +39,7 @@ class FaceReadinessNode(Node):
         self.declare_parameter("detector_engine", "")
         self.declare_parameter("recognition_engine", "")
         self.declare_parameter("whitelist_dir", "")
+        self.declare_parameter("state_timeout", 0.75)
 
         qos = QoSProfile(
             reliability=ReliabilityPolicy.RELIABLE,
@@ -48,6 +50,11 @@ class FaceReadinessNode(Node):
         self._capability = str(self.get_parameter("capability").value).strip()
         if not self._capability:
             raise ValueError("capability must not be empty")
+        self._state_timeout = max(
+            0.1, float(self.get_parameter("state_timeout").value)
+        )
+        self._last_state_monotonic = None
+        self._state_timed_out = False
         self._status_pub = self.create_publisher(
             CapabilityStatus,
             str(self.get_parameter("capability_status_topic").value),
@@ -64,13 +71,39 @@ class FaceReadinessNode(Node):
             self._publish_status,
             startup_state=MissionState.STARTUP,
         )
+        self._state_watchdog = self.create_timer(
+            min(0.1, self._state_timeout / 2.0), self._check_state_timeout
+        )
 
     def destroy_node(self):
         self._controller.stop()
         return super().destroy_node()
 
     def _on_mission(self, msg: MissionState) -> None:
-        self._controller.observe(int(msg.state_seq), int(msg.state))
+        if int(msg.state_seq) <= 0:
+            self._controller.expire()
+            return
+        self._last_state_monotonic = time.monotonic()
+        self._state_timed_out = False
+        self._controller.observe(
+            int(msg.state_seq),
+            int(msg.state),
+            int(msg.target_id),
+            int(msg.handled_target_id),
+        )
+
+    def _check_state_timeout(self) -> None:
+        if (
+            self._last_state_monotonic is None
+            or self._state_timed_out
+            or time.monotonic() - self._last_state_monotonic <= self._state_timeout
+        ):
+            return
+        self._state_timed_out = True
+        self._controller.expire()
+        self.get_logger().warning(
+            "mission state heartbeat timed out; face readiness preflight invalidated"
+        )
 
     def _publish_status(self, outcome: FacePreflightOutcome) -> None:
         msg = CapabilityStatus()

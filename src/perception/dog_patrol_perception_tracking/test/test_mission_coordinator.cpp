@@ -90,10 +90,14 @@ TEST(MissionCoordinatorTest, DoesNotPublishBoxesOutsideTargetLifecycleStates) {
   const auto identities = std::vector<IdentityObservation>{TrustedPerson(42, 7)};
   const auto primary = LockedPrimary(42, 7);
   for (const MissionPhase phase : {MissionPhase::kStartup, MissionPhase::kPatrol,
-                                   MissionPhase::kRecoverPatrol}) {
+                                   MissionPhase::kRecoverPatrol,
+                                   MissionPhase::kReady}) {
     MissionCoordinator coordinator;
     auto mission = ActiveMission(phase);
-    mission.target_id = phase == MissionPhase::kPatrol || phase == MissionPhase::kStartup ? 0 : 42;
+    mission.target_id = phase == MissionPhase::kPatrol || phase == MissionPhase::kStartup ||
+                                phase == MissionPhase::kReady
+                            ? 0
+                            : 42;
     EXPECT_FALSE(coordinator.Update({mission, identities, primary, now}).target_box.has_value());
   }
 }

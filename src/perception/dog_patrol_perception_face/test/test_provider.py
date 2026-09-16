@@ -111,6 +111,7 @@ class ProviderHarness:
                 Parameter("authorization_evidence_topic", value=self.evidence_topic),
                 Parameter("tracked_target_image_topic", value=self.crop_topic),
                 Parameter("face_overlay_topic", value=self.overlay_topic),
+                Parameter("state_timeout", value=10.0),
             ],
             verifier_factory=verifier_factory,
             config=config or _fast_config(),
@@ -160,11 +161,13 @@ class ProviderHarness:
         target,
         *,
         state=MissionState.VERIFY_IDENTITY,
+        handled=0,
     ):
         msg = MissionState()
         msg.state_seq = seq
         msg.state = state
         msg.target_id = target
+        msg.handled_target_id = handled
         self.state_pub.publish(msg)
         for _ in range(5):
             self.executor.spin_once(timeout_sec=0.03)
@@ -327,6 +330,25 @@ def test_cancel_command_stops_active_stage_and_labels_cancelled_evidence():
         harness.close()
 
 
+def test_late_old_verify_snapshot_cannot_resurrect_ready_session():
+    verifier = ScriptedFaceVerifier(
+        [FaceVerification(accepted=True, decided=True, detail="matched")]
+    )
+    harness = ProviderHarness(lambda: verifier)
+    try:
+        harness.publish_state(31, 56)
+        harness.publish_state(32, 0, state=MissionState.READY)
+
+        harness.publish_state(31, 56)
+        harness.publish_command(31, 56, AuthorizationCommand.INITIAL_FACE)
+        harness.publish_crop(56)
+
+        assert not harness.wait(lambda: verifier.calls > 0, timeout=0.25)
+        assert harness.evidence == []
+    finally:
+        harness.close()
+
+
 def _decoded_crop(frame):
     return DecodedCrop(
         target_id=1,
@@ -390,3 +412,38 @@ def test_controller_discards_inflight_result_when_a_newer_crop_arrives():
     finally:
         verifier.release_first.set()
         controller.stop()
+
+
+def test_mission_state_heartbeat_timeout_invalidates_face_session():
+    verifier = ScriptedFaceVerifier([])
+    harness = ProviderHarness(lambda: verifier)
+    try:
+        harness.publish_state(60, 88)
+        harness.provider._state_timeout = 0.01
+        harness.provider._last_state_monotonic = time.monotonic() - 1.0
+
+        harness.provider._check_state_timeout()
+
+        assert harness.provider._state_timed_out
+        assert harness.provider._controller._mission_session is None
+        assert harness.evidence == []
+    finally:
+        harness.close()
+
+
+def test_same_sequence_non_session_field_conflict_locks_face_provider():
+    verifier = ScriptedFaceVerifier(
+        [FaceVerification(accepted=True, decided=True, detail="matched")]
+    )
+    harness = ProviderHarness(lambda: verifier)
+    try:
+        harness.publish_state(70, 90)
+        harness.publish_state(70, 90, handled=90)
+        harness.publish_state(70, 90)
+        harness.publish_command(70, 90, AuthorizationCommand.INITIAL_FACE)
+        harness.publish_crop(90)
+
+        assert not harness.wait(lambda: verifier.calls > 0, timeout=0.25)
+        assert harness.evidence == []
+    finally:
+        harness.close()

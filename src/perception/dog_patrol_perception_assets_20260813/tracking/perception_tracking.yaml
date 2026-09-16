@@ -29,6 +29,7 @@ dog_patrol_perception_tracking_node:
       handled_ignore_absence_sec: 60.0
     mission:
       state_topic: "/mission/state"
+      state_timeout: 0.75
       event_topic: "/mission/event"
       selected_target_bbox_topic: "/perception/selected_target_bbox"
     perception:

@@ -38,13 +38,14 @@ def generate_launch_description():
     waypoint_delete_topic = LaunchConfiguration("waypoint_delete_topic")
     waypoint_replace_topic = LaunchConfiguration("waypoint_replace_topic")
     waypoint_status_topic = LaunchConfiguration("waypoint_status_topic")
-    waypoint_resume_topic = LaunchConfiguration("waypoint_resume_topic")
-    waypoint_resume_from_current_topic = LaunchConfiguration("waypoint_resume_from_current_topic")
     waypoint_replan_period = LaunchConfiguration("waypoint_replan_period")
     waypoint_goal_tolerance = LaunchConfiguration("waypoint_goal_tolerance")
     waypoint_edit_radius = LaunchConfiguration("waypoint_edit_radius")
     waypoint_enable_interactive_markers = LaunchConfiguration("waypoint_enable_interactive_markers")
     waypoint_interactive_marker_ns = LaunchConfiguration("waypoint_interactive_marker_ns")
+    task_state_topic = LaunchConfiguration("task_state_topic")
+    mission_state_topic = LaunchConfiguration("mission_state_topic")
+    waypoint_state_topic = LaunchConfiguration("waypoint_state_topic")
     waypoint_path_topic = LaunchConfiguration("waypoint_path_topic")
     mission_path_topic = LaunchConfiguration("mission_path_topic")
     adapter_path_timeout = LaunchConfiguration("adapter_path_timeout")
@@ -119,13 +120,14 @@ def generate_launch_description():
             "waypoint_delete_topic": waypoint_delete_topic,
             "waypoint_replace_topic": waypoint_replace_topic,
             "waypoint_status_topic": waypoint_status_topic,
-            "waypoint_resume_topic": waypoint_resume_topic,
-            "waypoint_resume_from_current_topic": waypoint_resume_from_current_topic,
             "waypoint_replan_period": waypoint_replan_period,
             "waypoint_goal_tolerance": waypoint_goal_tolerance,
             "waypoint_edit_radius": waypoint_edit_radius,
             "waypoint_enable_interactive_markers": waypoint_enable_interactive_markers,
             "waypoint_interactive_marker_ns": waypoint_interactive_marker_ns,
+            "task_state_topic": task_state_topic,
+            "mission_state_topic": mission_state_topic,
+            "waypoint_state_topic": waypoint_state_topic,
             "waypoint_path_topic": waypoint_path_topic,
             "global_path_topic": "global_path",
             "pure_pursuit_plan_topic": "global_path",
@@ -164,6 +166,8 @@ def generate_launch_description():
             "use_sim_time": use_sim_time,
             "params_file": coordinator_params,
             "device_parameters_file": device_parameters_file,
+            "mission_state_topic": mission_state_topic,
+            "task_state_topic": task_state_topic,
             "waypoint_path_topic": waypoint_path_topic,
             "mission_path_topic": mission_path_topic,
             "selected_global_path_topic": "global_path",
@@ -197,16 +201,14 @@ def generate_launch_description():
             DeclareLaunchArgument("waypoint_delete_topic", default_value="/waypoint_sequence/delete_nearest"),
             DeclareLaunchArgument("waypoint_replace_topic", default_value="/waypoint_sequence/replace_nearest"),
             DeclareLaunchArgument("waypoint_status_topic", default_value="/waypoint_sequence/status"),
-            DeclareLaunchArgument("waypoint_resume_topic", default_value="/waypoint_sequence/resume"),
-            DeclareLaunchArgument(
-                "waypoint_resume_from_current_topic",
-                default_value="/waypoint_sequence/resume_from_current",
-            ),
             DeclareLaunchArgument("waypoint_replan_period", default_value="1.0"),
             DeclareLaunchArgument("waypoint_goal_tolerance", default_value="1.0"),
             DeclareLaunchArgument("waypoint_edit_radius", default_value="1.5"),
             DeclareLaunchArgument("waypoint_enable_interactive_markers", default_value="true"),
             DeclareLaunchArgument("waypoint_interactive_marker_ns", default_value="waypoint_editor"),
+            DeclareLaunchArgument("task_state_topic", default_value="/patrol_task/state"),
+            DeclareLaunchArgument("mission_state_topic", default_value="/mission/state"),
+            DeclareLaunchArgument("waypoint_state_topic", default_value="/waypoint_sequence/state"),
             DeclareLaunchArgument("waypoint_path_topic", default_value="waypoint_global_path"),
             DeclareLaunchArgument("mission_path_topic", default_value="mission_global_path"),
             DeclareLaunchArgument("use_map_server", default_value="false", description="Whether to launch map_server in navigation (set false if localization already provides it)"),
