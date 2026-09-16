@@ -72,8 +72,14 @@ class PrimaryTargetManager {
   void UpdateHandledIdentityAbsence(const std::vector<IdentityObservation> &identities, TimePoint now);
   PrimaryTargetResult UpdateInternal(const std::vector<IdentityObservation> &identities,
                                      bool require_mission_eligibility);
+  PrimaryTargetResult UpdateForActiveMissionTarget(
+      const std::vector<IdentityObservation> &identities, int target_id);
   bool IsVisibleIdentity(const IdentityObservation &identity) const;
   bool IsVisiblePrimarySane(const Track &track, std::string *reject_reason) const;
+  bool IsGeometryConsistent(const Track &reference, const Track &candidate) const;
+  bool ObserveStableGeometryRecovery(const Track &track);
+  PrimaryTargetResult LockPrimary(const Track &track, int semantic_id,
+                                  const std::string &decision_reason);
   Track TrackFromIdentityObservation(const IdentityObservation &identity) const;
   PrimaryTargetResult EnterPendingRecovery(const std::string &decision_reason);
   PrimaryTargetResult EnterOccluded(const std::string &decision_reason);
@@ -86,6 +92,8 @@ class PrimaryTargetManager {
   int bound_raw_track_id_{-1};
   std::optional<Track> last_primary_track_{std::nullopt};
   int pending_recovery_frames_{0};
+  std::optional<Track> pending_geometry_candidate_{std::nullopt};
+  int pending_geometry_stable_frames_{0};
   std::string last_decision_reason_;
   std::string last_reject_reason_;
   std::unordered_map<int, std::optional<TimePoint>> handled_identity_absence_started_at_;

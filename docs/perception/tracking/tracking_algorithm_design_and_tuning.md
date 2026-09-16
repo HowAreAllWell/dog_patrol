@@ -212,6 +212,9 @@ ros2 run dog_patrol_perception_tracking dog_patrol_perception_tracking_node --ro
 - 初次锁定时选最大有效人框。
 - 锁定后 continuity-first，不因为 raw_id 变化立刻切换。
 - 短时丢失进入 `OCCLUDED`，继续等待同一语义目标恢复。
+- 目标任务阶段只维持 `MissionState.target_id`，不按面积选择其他人员接管任务。
+- 相同 semantic ID/raw track 的强证据只因中心或面积突变被拒绝时，连续
+  `target.pending_recovery_frames` 帧在新位置稳定后更新几何基线并恢复 `LOCKED`。
 - 超过 `target.lost_threshold_frames` 后进入 `LOST`，才允许重选。
 
 相关参数：
@@ -228,6 +231,8 @@ ros2 run dog_patrol_perception_tracking dog_patrol_perception_tracking_node --ro
 - 主目标离画面几秒回来应保持同 ID：增大 `target.lost_threshold_frames`。
 - 主目标已离开但系统迟迟不换人：减小 `target.lost_threshold_frames`。
 - 主目标被旁边大框抢走：检查 Identity 层是否把旧目标恢复成功，再调 primary 的面积/中心跳变约束。
+- 靠近目标后顶部出现 `reason=area_ratio`：先确认新框能在默认 3 帧内恢复 `LOCKED`；如果框上的
+  semantic `id=` 已变化，应调 Identity missing/re-ID 连续性，不能通过放宽任务 target_id 门禁解决。
 
 ## 8. 现场调参流程
 

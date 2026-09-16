@@ -41,6 +41,10 @@ TEST(PrimaryRecoveryDebugTest, MapsSanityRejectReasonsToCompactTokens) {
             "center_jump");
   EXPECT_EQ(dog_patrol_perception_tracking::PrimaryRecoveryReasonToken(
                 primary, identities, "pending_recovery_visible_primary_sanity_rejected",
+                "visible_primary_area_ratio"),
+            "area_ratio");
+  EXPECT_EQ(dog_patrol_perception_tracking::PrimaryRecoveryReasonToken(
+                primary, identities, "pending_recovery_visible_primary_sanity_rejected",
                 "visible_primary_low_score_update"),
             "low_score");
   EXPECT_EQ(dog_patrol_perception_tracking::PrimaryRecoveryReasonToken(

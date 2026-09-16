@@ -95,6 +95,8 @@ void PrimaryTargetManager::ResetCurrentPrimary() {
   bound_raw_track_id_ = -1;
   last_primary_track_ = std::nullopt;
   pending_recovery_frames_ = 0;
+  pending_geometry_candidate_ = std::nullopt;
+  pending_geometry_stable_frames_ = 0;
   last_decision_reason_.clear();
   last_reject_reason_.clear();
 }
@@ -155,6 +157,8 @@ PrimaryTargetResult PrimaryTargetManager::EnterPendingRecovery(const std::string
 
 PrimaryTargetResult PrimaryTargetManager::EnterOccluded(const std::string &decision_reason) {
   pending_recovery_frames_ = 0;
+  pending_geometry_candidate_ = std::nullopt;
+  pending_geometry_stable_frames_ = 0;
   state_.state = PrimaryState::kOccluded;
   last_decision_reason_ = decision_reason;
   return state_;
@@ -165,6 +169,8 @@ PrimaryTargetResult PrimaryTargetManager::EnterLost(const std::string &decision_
   primary_target_id_ = -1;
   last_primary_track_ = std::nullopt;
   pending_recovery_frames_ = 0;
+  pending_geometry_candidate_ = std::nullopt;
+  pending_geometry_stable_frames_ = 0;
   state_.primary_track = std::nullopt;
   state_.primary_target_id = -1;
   state_.raw_track_id = -1;
@@ -222,6 +228,55 @@ bool PrimaryTargetManager::IsVisiblePrimarySane(const Track &track, std::string 
   return true;
 }
 
+bool PrimaryTargetManager::IsGeometryConsistent(const Track &reference,
+                                                const Track &candidate) const {
+  const float jump = association::CenterDistanceNormByDiag(reference.bbox, candidate.bbox);
+  if (jump > config_.max_center_jump_norm) {
+    return false;
+  }
+  const float area_ratio = association::AreaRatio(candidate.bbox, reference.bbox);
+  return area_ratio >= config_.min_area_ratio && area_ratio <= config_.max_area_ratio;
+}
+
+bool PrimaryTargetManager::ObserveStableGeometryRecovery(const Track &track) {
+  if (config_.pending_recovery_frames <= 0 || !last_primary_track_.has_value() ||
+      last_primary_track_->id != track.id) {
+    pending_geometry_candidate_ = std::nullopt;
+    pending_geometry_stable_frames_ = 0;
+    return false;
+  }
+  if (!pending_geometry_candidate_.has_value() ||
+      pending_geometry_candidate_->id != track.id ||
+      !IsGeometryConsistent(pending_geometry_candidate_.value(), track)) {
+    pending_geometry_candidate_ = track;
+    pending_geometry_stable_frames_ = 1;
+  } else {
+    pending_geometry_candidate_ = track;
+    pending_geometry_stable_frames_ += 1;
+  }
+  return pending_geometry_stable_frames_ >= config_.pending_recovery_frames;
+}
+
+PrimaryTargetResult PrimaryTargetManager::LockPrimary(
+    const Track &track, const int semantic_id, const std::string &decision_reason) {
+  Track authoritative_track = track;
+  authoritative_track.authoritative = true;
+  primary_target_id_ = semantic_id;
+  bound_raw_track_id_ = authoritative_track.id;
+  state_.state = PrimaryState::kLocked;
+  state_.primary_track = authoritative_track;
+  state_.primary_target_id = primary_target_id_;
+  state_.raw_track_id = authoritative_track.id;
+  state_.missing_frames = 0;
+  pending_recovery_frames_ = 0;
+  pending_geometry_candidate_ = std::nullopt;
+  pending_geometry_stable_frames_ = 0;
+  last_primary_track_ = authoritative_track;
+  last_decision_reason_ = decision_reason;
+  last_reject_reason_.clear();
+  return state_;
+}
+
 PrimaryTargetResult PrimaryTargetManager::Update(const std::vector<IdentityObservation> &identities) {
   return UpdateInternal(identities, false);
 }
@@ -275,8 +330,29 @@ PrimaryTargetResult PrimaryTargetManager::UpdateForMission(
   }
 
   last_mission_for_primary_ = mission;
-  return mission->phase == MissionPhase::kPatrol ? UpdateForPatrol(identities, now)
-                                                 : Update(identities);
+  if (mission->phase == MissionPhase::kPatrol) {
+    return UpdateForPatrol(identities, now);
+  }
+  return UpdateForActiveMissionTarget(identities, mission->target_id);
+}
+
+PrimaryTargetResult PrimaryTargetManager::UpdateForActiveMissionTarget(
+    const std::vector<IdentityObservation> &identities, const int target_id) {
+  if (target_id <= 0) {
+    ResetCurrentPrimary();
+    last_decision_reason_ = "idle_invalid_active_mission_target";
+    return state_;
+  }
+
+  const int current_primary_id =
+      primary_target_id_ > 0 ? primary_target_id_
+                             : (state_.primary_target_id > 0 ? state_.primary_target_id : -1);
+  if (current_primary_id != target_id) {
+    ResetCurrentPrimary();
+    primary_target_id_ = target_id;
+    state_.primary_target_id = target_id;
+  }
+  return UpdateInternal(identities, false);
 }
 
 PrimaryTargetResult PrimaryTargetManager::UpdateInternal(const std::vector<IdentityObservation> &identities,
@@ -293,6 +369,17 @@ PrimaryTargetResult PrimaryTargetManager::UpdateInternal(const std::vector<Ident
     std::string reject_reason;
     if (!IsVisiblePrimarySane(primary_track, &reject_reason)) {
       last_reject_reason_ = reject_reason;
+      const bool geometry_only_rejection =
+          reject_reason == "visible_primary_center_jump" ||
+          reject_reason == "visible_primary_area_ratio";
+      if (geometry_only_rejection && ObserveStableGeometryRecovery(primary_track)) {
+        return LockPrimary(primary_track, visible_primary_identity->semantic_id,
+                           "locked_stable_geometry_recovery");
+      }
+      if (!geometry_only_rejection) {
+        pending_geometry_candidate_ = std::nullopt;
+        pending_geometry_stable_frames_ = 0;
+      }
       if (current_primary_id > 0) {
         primary_target_id_ = current_primary_id;
         state_.missing_frames = std::max(state_.missing_frames + 1, visible_primary_identity->missing_frames);
@@ -306,20 +393,13 @@ PrimaryTargetResult PrimaryTargetManager::UpdateInternal(const std::vector<Ident
       }
       last_decision_reason_ = "visible_primary_sanity_rejected_no_primary";
     } else {
-      primary_target_id_ = visible_primary_identity->semantic_id;
-      bound_raw_track_id_ = primary_track.id;
-      primary_track.authoritative = true;
-      state_.state = PrimaryState::kLocked;
-      state_.primary_track = primary_track;
-      state_.primary_target_id = primary_target_id_;
-      state_.raw_track_id = primary_track.id;
-      state_.missing_frames = 0;
-      pending_recovery_frames_ = 0;
-      last_primary_track_ = primary_track;
-      last_decision_reason_ = "locked_visible_primary_identity";
-      return state_;
+      return LockPrimary(primary_track, visible_primary_identity->semantic_id,
+                         "locked_visible_primary_identity");
     }
   }
+
+  pending_geometry_candidate_ = std::nullopt;
+  pending_geometry_stable_frames_ = 0;
 
   if (current_primary_identity.has_value() && current_primary_id > 0) {
     primary_target_id_ = current_primary_id;
@@ -372,18 +452,8 @@ PrimaryTargetResult PrimaryTargetManager::UpdateInternal(const std::vector<Ident
   auto new_identity = SelectLargestValidPersonIdentity(identities, require_mission_eligibility);
   if (new_identity.has_value()) {
     auto new_target = TrackFromIdentityObservation(new_identity.value());
-    primary_target_id_ = new_identity->semantic_id;
-    bound_raw_track_id_ = new_target.id;
-    new_target.authoritative = true;
-    state_.state = PrimaryState::kLocked;
-    state_.primary_track = new_target;
-    state_.primary_target_id = primary_target_id_;
-    state_.raw_track_id = new_target.id;
-    state_.missing_frames = 0;
-    pending_recovery_frames_ = 0;
-    last_primary_track_ = new_target;
-    last_decision_reason_ = "locked_largest_valid_identity";
-    return state_;
+    return LockPrimary(new_target, new_identity->semantic_id,
+                       "locked_largest_valid_identity");
   }
 
   state_.state = PrimaryState::kIdle;

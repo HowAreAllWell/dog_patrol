@@ -23,6 +23,9 @@ std::string TokenFromRejectReason(const std::string_view reason) {
   if (reason == "visible_primary_center_jump") {
     return "center_jump";
   }
+  if (reason == "visible_primary_area_ratio") {
+    return "area_ratio";
+  }
   if (reason == "visible_primary_low_score_update") {
     return "low_score";
   }

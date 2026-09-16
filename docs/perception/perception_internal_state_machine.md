@@ -102,6 +102,13 @@ IDLE
 层级的 `LOST` 是感知内部状态，不是直接等价于总状态机的 `TARGET_LOST`；公共事件
 只有在任务目标已经建立且连续没有可信当前目标达到 10 秒时才由任务协调器发出。
 
+进入 `CONFIRM_TARGET`、`APPROACH_TARGET`、`VERIFY_IDENTITY` 或 `TRACK_INTRUDER` 后，
+`MissionState.target_id` 是唯一允许维持的主目标。即使本地主目标上下文短暂缺失，也只能重新绑定
+相同 semantic ID，不能在任务中按面积选择另一个人。对于 semantic ID 和 raw track 都未变化、
+且 association/score 等可信门禁已通过，仅因中心或面积相对最后可信框突变而进入
+`PENDING_RECOVERY` 的目标，连续 `target.pending_recovery_frames` 帧在新几何位置稳定后可以更新
+几何基线并恢复 `LOCKED`；低分、遮挡嫌疑、association gate 失败等证据不能走该恢复路径。
+
 ## 3. MissionFrameTransaction 的作用
 
 `MissionFrameTransaction` 把同一帧中的主目标选择和任务输出串起来，保证不会出现“主目标来自这一帧、bounding box 却来自旧帧”的组合。
@@ -157,6 +164,11 @@ IDLE
 - 目标在任务状态中有效，但超过该时间没有新的可信 bounding box 时，感知产生一次 `TARGET_LOST`。
 - 感知不会用其他人的 bounding box 替代当前任务目标。
 - 目标丢失期间不会继续发布旧的缓存框。
+
+监视画面的红框表示该 semantic ID 是当前 primary，绿框只表示该人员 identity 当前可见但不是
+primary，不表示人脸认证通过。画面仍有绿框而任务发布 `TARGET_LOST` 并不矛盾：它表示当前仍检测
+到人员，但连续 10 秒没有得到权威 `target_id` 对应的可信框。此时必须保留 fail-closed 行为，不能
+把绿框人员自动转接成旧目标。
 
 该逻辑对 `CONFIRM_TARGET`、`APPROACH_TARGET`、`VERIFY_IDENTITY` 和 `TRACK_INTRUDER` 共用，因此理论上覆盖：
 

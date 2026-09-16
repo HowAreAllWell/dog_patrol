@@ -136,6 +136,8 @@ VisualizerRecorder::Render(frame, tracks, primary, identity_result)
 当前行为要点：
 
 - 主目标绑定 semantic id，而不是裸 raw track id；
+- `CONFIRM_TARGET`、`APPROACH_TARGET`、`VERIFY_IDENTITY`、`TRACK_INTRUDER` 只绑定权威
+  `MissionState.target_id`，不在活动任务中改选其他人员；
 - 可见主目标会经过 sanity check；
 - 可拒绝明显异常的可见主目标，例如：
   - 非 person；
@@ -148,11 +150,15 @@ VisualizerRecorder::Render(frame, tracks, primary, identity_result)
   - 中心跳变过大；
   - 面积比例异常；
 - 被拒绝的可见主目标会转为 `PENDING_RECOVERY`，保留当前 `primary_target_id`，但不输出 `primary_track`；
+- 相同 semantic ID 的强证据仅因中心或面积跳变被拒绝时，会要求同一候选 raw track 在新几何位置
+  连续稳定达到 `target.pending_recovery_frames`，再更新基线并恢复 `LOCKED`；配置为 `0` 时关闭该恢复；
 - 当前 primary identity 处于 `MERGED` 或 `SPLIT_RECOVERY` 时也会转为 `PENDING_RECOVERY`；
 - 普通缺失仍转为 `OCCLUDED`，而不是立即释放 primary；
 - identity 进入 lost / inactive 后会释放 primary。
 
-注意：`PENDING_RECOVERY` 已是公开 `PrimaryState`，当前只覆盖可见 primary sanity rejection 以及 identity `MERGED` / `SPLIT_RECOVERY` 的窄范围语义，不表示完整 pending recovery 状态机已经迁移完成。
+注意：`PENDING_RECOVERY` 已是公开 `PrimaryState`，当前覆盖可见 primary sanity rejection、几何候选
+连续稳定恢复，以及 identity `MERGED` / `SPLIT_RECOVERY` 的窄范围语义，不表示所有 identity 恢复
+路径都由 PrimaryTargetManager 处理。
 
 ### 2.5 输出与可视化
 

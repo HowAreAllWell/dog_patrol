@@ -394,6 +394,12 @@ IDLE
 
 感知在当前 `PATROL state_seq` 下只对同一个目标发送一次 `TARGET_CONFIRMED`。总控接受后进入 `CONFIRM_TARGET`，感知才开始向导航持续发布该目标 bbox。
 
+进入目标任务状态后，主目标管理器必须绑定 `MissionState.target_id`：只维持该 semantic ID，不能
+重新选择同帧中面积更大的其他人员。相同 semantic ID/raw track 的强证据若只因相对最后可信框的
+中心或面积突变进入 `PENDING_RECOVERY`，在新几何位置连续稳定达到
+`target.pending_recovery_frames` 后可更新几何基线；低分、遮挡嫌疑、association gate 失败或其他
+semantic ID 均不能据此接管当前任务。
+
 ### 5.4 `MissionFrameTransaction`
 
 每一帧按以下顺序处理：
@@ -436,6 +442,11 @@ tracking 在有界异步 overlay worker 中把检测框、semantic ID、主目�
 
 画面转换和 ROS 发布都在 overlay worker 内执行，检测/跟踪主线程只向容量受限的队列提交当前帧；
 消费者过慢时允许丢弃监视帧，不能反压业务感知链。`visualization.enable=false` 时不生成或发布画面。
+
+overlay 中红框表示当前 primary semantic ID，绿框表示可见但非 primary 的人员 identity；框色与
+人脸认证结果无关。顶部 `PENDING_RECOVERY ... reason=area_ratio` 表示当前目标因几何尺度突变正在
+等待连续稳定证据。检测到绿框不等于得到了当前任务 `target_id` 的可信 bbox，因此不会阻止针对旧
+目标的 `TARGET_LOST` 计时。
 
 ### 5.7 目标丢失
 
