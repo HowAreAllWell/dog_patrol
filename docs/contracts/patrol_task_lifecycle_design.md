@@ -1154,8 +1154,10 @@ state_seq + 1
 5. navigation coordinator 使用 PatrolTaskState.home_pose 发起返航规划；
 6. 返航过程中按 `motion.return_replan_period` 从当前机器人位姿重新规划到同一个 home pose；
    新规划失败时立即清空旧返航路径并停车重试，不能继续执行可能已失效的缓存路径；
-7. mux 只接受新状态后的 mission path；
-8. 到达 home 并稳定停车后发布 RETURN_REACHED。
+7. 返航到达位置容差由 `motion.return_position_tolerance` 独立配置，生产默认值为 `0.50 m`；
+   它不能复用 `RECOVER_PATROL` 的 `motion.recovery_position_tolerance=0.25 m`；
+8. mux 只接受新状态后的 mission path；
+9. 到达 home 并稳定停车后发布 RETURN_REACHED。
 
 RETURN_REACHED 被接受后：
 

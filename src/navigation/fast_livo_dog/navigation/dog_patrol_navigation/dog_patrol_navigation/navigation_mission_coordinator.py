@@ -301,7 +301,7 @@ class NavigationMissionCoordinator(Node):
         )
         self._task_return = PatrolRecoveryController(
             RecoveryConfig(
-                position_tolerance=self.recovery_position_tolerance,
+                position_tolerance=self.return_position_tolerance,
                 linear_speed=self.arrival_linear_speed,
                 angular_speed=self.arrival_angular_speed,
                 odom_timeout=0.5,
@@ -400,6 +400,7 @@ class NavigationMissionCoordinator(Node):
             "motion.arrival_angular_speed": 0.10,
             "motion.arrival_hold_time": 0.50,
             "motion.recovery_position_tolerance": 0.25,
+            "motion.return_position_tolerance": 0.50,
             "motion.approach_replan_period": 0.50,
             "motion.tracking_replan_period": 0.50,
             "motion.return_replan_period": 0.50,
@@ -526,6 +527,9 @@ class NavigationMissionCoordinator(Node):
         self.arrival_hold_time = float(value("motion.arrival_hold_time").value)
         self.recovery_position_tolerance = float(
             value("motion.recovery_position_tolerance").value
+        )
+        self.return_position_tolerance = float(
+            value("motion.return_position_tolerance").value
         )
         self.approach_replan_period = float(value("motion.approach_replan_period").value)
         self.tracking_replan_period = float(value("motion.tracking_replan_period").value)

@@ -92,6 +92,9 @@ navigation_mission_coordinator:
       # RECOVER_PATROL returns to the map pose saved when APPROACH_TARGET
       # started, then resumes the paused waypoint task.
       recovery_position_tolerance: 0.25
+      # Parent-task RETURN accepts home arrival within 0.50 m, independently
+      # of the tighter patrol-interruption recovery tolerance above.
+      return_position_tolerance: 0.50
       # APPROACH_TARGET also tracks a moving target. Replan periodically even
       # when each individual bbox update is below target_replan_distance.
       approach_replan_period: 0.50
