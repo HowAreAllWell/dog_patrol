@@ -146,3 +146,35 @@ def test_recovery_completion_only_reports_event_and_does_not_command_waypoint():
             "patrol interruption pose reached",
         )
     ]
+
+
+def test_failed_return_replan_clears_the_cached_motion_path(monkeypatch):
+    actions = []
+    monkeypatch.setattr(
+        coordinator_module,
+        "now_time",
+        lambda _node: coordinator_module.Time(nanoseconds=1_000_000_000),
+    )
+    node = SimpleNamespace(
+        _planner_request_matches_current_mission=lambda _request: True,
+        _task_return=SimpleNamespace(
+            set_path_requested=lambda requested: actions.append(
+                ("requested", requested)
+            ),
+            clear_path=lambda: actions.append("clear"),
+        ),
+        _recovery=SimpleNamespace(set_path_requested=lambda _requested: None),
+        _publish_empty_path=lambda: actions.append("empty"),
+        _planner_failure_start=None,
+        _planner_failure_reason="",
+        technical_error_timeout=3.0,
+        _publish_event=lambda *_args, **_kwargs: actions.append("event"),
+    )
+
+    NavigationMissionCoordinator._record_planner_failure(
+        node, "no current route", planner_request(12, 0, "return")
+    )
+
+    assert "clear" in actions
+    assert "empty" in actions
+    assert "event" not in actions

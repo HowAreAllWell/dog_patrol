@@ -115,7 +115,9 @@ perception bbox + /livox/lidar
    等待下一次规划。
 4. 恢复路径由协调器缓存并周期重发；恢复完成或超时切回 `PATROL` 时清理任务路径并发布
    `PATROL_RECOVERY_COMPLETE`。supervisor 发布新序号的 waypoint 导航许可后，waypoint
-   publisher 从保留的当前进度重新规划。
+   publisher 从保留的当前进度重新规划。父任务返航路径则按
+   `motion.return_replan_period` 从机器人当前 map 位姿重新规划到 START 时保存的固定 home；
+   新规划失败时立即清空旧返航路径并停车重试。
 5. 运动组件只返回 `stop`、`arrived` 或 planner goal 等纯决策，真正的 ROS 发布和任务
    事件仍集中在协调器，便于审查状态序号和发布顺序。
 

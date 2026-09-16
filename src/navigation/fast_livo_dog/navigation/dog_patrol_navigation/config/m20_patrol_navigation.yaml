@@ -96,6 +96,9 @@ navigation_mission_coordinator:
       # when each individual bbox update is below target_replan_distance.
       approach_replan_period: 0.50
       tracking_replan_period: 0.50
+      # While RETURNING, recompute the path from the robot's current map pose
+      # to the fixed START-time home pose at 2 Hz.
+      return_replan_period: 0.50
       target_replan_distance: 0.25
       stop_republish_period: 0.20
 

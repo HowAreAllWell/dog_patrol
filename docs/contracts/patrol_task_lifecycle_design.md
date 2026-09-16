@@ -819,7 +819,8 @@ CONFIRM_TARGET 都使用 WAYPOINT source，但状态切换后也只允许新状�
   当前位姿重新规划并发布；
 - `APPROACH_TARGET`、`TRACK_INTRUDER`：目标导航按现有重规划周期继续发布当前状态的新路径；
 - `RECOVER_PATROL`：恢复控制器在到达前周期重发当前有效恢复路径；
-- `TASK_RETURNING`：返航控制器在到家前周期重发当前有效返航路径；
+- `TASK_RETURNING`：返航控制器在到家前以配置周期从机器人当前 map 位姿重新规划到固定
+  home pose，并周期发布最新有效返航路径；不能只更新时间戳后反复发布首次规划得到的旧路径；
 - `VERIFY_IDENTITY`：navigation coordinator 周期发布空 mission path/停止要求，不发布非空
   目标路径。
 
@@ -1151,8 +1152,10 @@ state_seq + 1
 3. waypoint publisher 立即清空原巡检路线和进度；
 4. navigation coordinator 清空旧 mission path；
 5. navigation coordinator 使用 PatrolTaskState.home_pose 发起返航规划；
-6. mux 只接受新状态后的 mission path；
-7. 到达 home 并稳定停车后发布 RETURN_REACHED。
+6. 返航过程中按 `motion.return_replan_period` 从当前机器人位姿重新规划到同一个 home pose；
+   新规划失败时立即清空旧返航路径并停车重试，不能继续执行可能已失效的缓存路径；
+7. mux 只接受新状态后的 mission path；
+8. 到达 home 并稳定停车后发布 RETURN_REACHED。
 
 RETURN_REACHED 被接受后：
 

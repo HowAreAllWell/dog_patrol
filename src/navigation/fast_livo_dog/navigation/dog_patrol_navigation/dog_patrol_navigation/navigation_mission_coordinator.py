@@ -308,6 +308,7 @@ class NavigationMissionCoordinator(Node):
                 hold_time=self.arrival_hold_time,
                 republish_period=self.stop_republish_period,
                 request_retry_period=self.approach_replan_period,
+                replan_period=self.return_replan_period,
             ),
             now_seconds,
         )
@@ -401,6 +402,7 @@ class NavigationMissionCoordinator(Node):
             "motion.recovery_position_tolerance": 0.25,
             "motion.approach_replan_period": 0.50,
             "motion.tracking_replan_period": 0.50,
+            "motion.return_replan_period": 0.50,
             "motion.target_replan_distance": 0.25,
             "motion.stop_republish_period": 0.20,
             "runtime.tick_rate": 10.0,
@@ -527,6 +529,9 @@ class NavigationMissionCoordinator(Node):
         )
         self.approach_replan_period = float(value("motion.approach_replan_period").value)
         self.tracking_replan_period = float(value("motion.tracking_replan_period").value)
+        self.return_replan_period = max(
+            0.1, float(value("motion.return_replan_period").value)
+        )
         self.target_replan_distance = float(value("motion.target_replan_distance").value)
         self.stop_republish_period = float(value("motion.stop_republish_period").value)
         self.tick_rate = max(1.0, float(value("runtime.tick_rate").value))
@@ -1230,7 +1235,11 @@ class NavigationMissionCoordinator(Node):
         if request.plan_kind == "recovery":
             self._recovery.set_path_requested(False)
         elif request.plan_kind == "return":
-            self._task_return.set_path_requested(False)
+            # A failed refresh means the cached route may no longer be safe.
+            # Stop immediately and retry from the current robot pose instead
+            # of continuing to drive the last successful return path.
+            self._task_return.clear_path()
+            self._publish_empty_path()
         elif request.plan_kind == "target":
             # A failed replan must not leave the previous path driving toward
             # an obsolete position. The motion controller will retry after
