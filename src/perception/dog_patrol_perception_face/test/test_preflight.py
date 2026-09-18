@@ -16,12 +16,12 @@ def _write_engine(path, payload: bytes = b"engine") -> None:
 
 def _write_whitelist(path) -> None:
     (path / "alice").mkdir(parents=True)
-    np.save(str(path / "alice" / "0_100px.npy"), np.ones(8, dtype=np.float32))
+    np.save(str(path / "alice" / "0_100px.npy"), np.ones(512, dtype=np.float32))
 
 
 def test_all_inputs_present_is_ready(tmp_path) -> None:
     detector = tmp_path / "det.engine"
-    recognition = tmp_path / "sface.engine"
+    recognition = tmp_path / "mobilefacenet.engine"
     whitelist = tmp_path / "whitelist"
     _write_engine(detector)
     _write_engine(recognition)
@@ -43,7 +43,7 @@ def test_preflight_exercises_and_closes_models_before_cuda_context_pop(
     tmp_path, monkeypatch
 ) -> None:
     detector_path = tmp_path / "det.engine"
-    recognition_path = tmp_path / "sface.engine"
+    recognition_path = tmp_path / "mobilefacenet.engine"
     whitelist = tmp_path / "whitelist"
     _write_engine(detector_path)
     _write_engine(recognition_path)
@@ -65,7 +65,7 @@ def test_preflight_exercises_and_closes_models_before_cuda_context_pop(
         def infer(self, frame):
             assert frame.shape == (112, 112, 3)
             calls.append("recognition_infer")
-            return np.ones(8, dtype=np.float32)
+            return np.ones(512, dtype=np.float32)
 
         def close(self):
             calls.append("recognition_close")
@@ -84,7 +84,6 @@ def test_preflight_exercises_and_closes_models_before_cuda_context_pop(
         whitelist_dir=str(whitelist),
         detector_loader=lambda path: Detector(),
         recognition_loader=lambda path: Recognition(),
-        expected_embedding_dim=8,
     ).run()
 
     assert outcome.status == READY
@@ -116,7 +115,6 @@ def test_preflight_rejects_recognition_output_dimension_mismatch(tmp_path) -> No
         whitelist_dir=str(whitelist),
         detector_loader=lambda path: None,
         recognition_loader=lambda path: Recognition(),
-        expected_embedding_dim=512,
     ).run()
 
     assert outcome.status == ERROR
@@ -129,7 +127,8 @@ def test_preflight_rejects_whitelist_dimension_mismatch(tmp_path) -> None:
     whitelist = tmp_path / "whitelist"
     _write_engine(detector)
     _write_engine(recognition)
-    _write_whitelist(whitelist)
+    (whitelist / "alice").mkdir(parents=True)
+    np.save(str(whitelist / "alice" / "0_100px.npy"), np.ones(8, dtype=np.float32))
 
     class Recognition:
         def infer(self, frame):
@@ -141,7 +140,6 @@ def test_preflight_rejects_whitelist_dimension_mismatch(tmp_path) -> None:
         whitelist_dir=str(whitelist),
         detector_loader=lambda path: None,
         recognition_loader=lambda path: Recognition(),
-        expected_embedding_dim=512,
     ).run()
 
     assert outcome.status == ERROR
@@ -153,7 +151,7 @@ def test_missing_engine_is_not_ready(tmp_path) -> None:
     _write_whitelist(whitelist)
     outcome = FacePreflight(
         detector_engine=str(tmp_path / "missing.engine"),
-        recognition_engine=str(tmp_path / "sface.engine"),
+        recognition_engine=str(tmp_path / "mobilefacenet.engine"),
         whitelist_dir=str(whitelist),
         detector_loader=lambda path: None,
         recognition_loader=lambda path: None,
@@ -164,7 +162,7 @@ def test_missing_engine_is_not_ready(tmp_path) -> None:
 
 def test_load_failure_is_error(tmp_path) -> None:
     detector = tmp_path / "det.engine"
-    recognition = tmp_path / "sface.engine"
+    recognition = tmp_path / "mobilefacenet.engine"
     whitelist = tmp_path / "whitelist"
     _write_engine(detector)
     _write_engine(recognition)
@@ -186,7 +184,7 @@ def test_load_failure_is_error(tmp_path) -> None:
 
 def test_whitelist_load_failure_is_error(tmp_path) -> None:
     detector = tmp_path / "det.engine"
-    recognition = tmp_path / "sface.engine"
+    recognition = tmp_path / "mobilefacenet.engine"
     _write_engine(detector)
     _write_engine(recognition)
     whitelist = tmp_path / "whitelist"

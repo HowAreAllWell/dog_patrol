@@ -129,8 +129,6 @@ class FaceReadinessNode(Node):
             whitelist_dir=str(self.get_parameter("whitelist_dir").value).strip()
             or config.whitelist_dir
             or None,
-            recognition_model=config.recognition_model,
-            expected_embedding_dim=config.recognition_embedding_dim,
         ).run()
 
 

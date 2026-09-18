@@ -16,6 +16,7 @@ import numpy as np
 
 from .alignment import align_face_5pts
 from .config import FaceConfig, load_face_config
+from .config import RECOGNITION_EMBEDDING_DIM, RECOGNITION_MODEL
 from .whitelist import load_whitelist_npy, match_embedding
 
 
@@ -259,7 +260,6 @@ def _extract_sample(
     detector,
     recognition,
     quality: QualityThresholds,
-    alignment_profile: str,
 ) -> tuple[EnrollmentSample | None, str | None]:
     import cv2
 
@@ -280,7 +280,7 @@ def _extract_sample(
     if face_size < quality.min_face_size:
         return None, f"face size {face_size:.1f}px is below {quality.min_face_size:.1f}px"
 
-    aligned = align_face_5pts(frame, face["kpts"][:5], alignment_profile)
+    aligned = align_face_5pts(frame, face["kpts"][:5])
     gray = cv2.cvtColor(aligned, cv2.COLOR_BGR2GRAY)
     brightness = float(gray.mean())
     sharpness = float(cv2.Laplacian(gray, cv2.CV_64F).var())
@@ -328,7 +328,6 @@ def _extract_video_samples(
     sample_stride: int,
     holdout_count: int,
     max_candidate_count: int,
-    alignment_profile: str,
 ) -> tuple[list[EnrollmentSample], list[EnrollmentSample], list[dict]]:
     import cv2
 
@@ -375,7 +374,6 @@ def _extract_video_samples(
                     detector=detector,
                     recognition=recognition,
                     quality=quality,
-                    alignment_profile=alignment_profile,
                 )
                 if sample is None:
                     rejected.append({"source_index": frame_index, "reason": reason})
@@ -393,7 +391,6 @@ def _extract_image_samples(
     recognition,
     quality: QualityThresholds,
     holdout_count: int,
-    alignment_profile: str,
 ) -> tuple[list[EnrollmentSample], list[EnrollmentSample], list[dict]]:
     import cv2
 
@@ -429,7 +426,6 @@ def _extract_image_samples(
             detector=detector,
             recognition=recognition,
             quality=quality,
-            alignment_profile=alignment_profile,
         )
         if sample is None:
             rejected.append({"source": str(path), "reason": reason})
@@ -488,8 +484,6 @@ def enroll_from_source(
         detector._ensure_gpu_preproc()
         recognition = RecModel(
             str(recognition_path),
-            model=face_config.recognition_model,
-            expected_embedding_dim=face_config.recognition_embedding_dim,
         )
         if source_path.is_dir() or source_path.suffix.lower() in _IMAGE_SUFFIXES:
             candidates, holdouts, rejected = _extract_image_samples(
@@ -498,7 +492,6 @@ def enroll_from_source(
                 recognition=recognition,
                 quality=quality,
                 holdout_count=holdout_count,
-                alignment_profile=face_config.alignment_profile,
             )
         elif source_path.suffix.lower() in _VIDEO_SUFFIXES:
             candidates, holdouts, rejected = _extract_video_samples(
@@ -509,7 +502,6 @@ def enroll_from_source(
                 sample_stride=sample_stride,
                 holdout_count=holdout_count,
                 max_candidate_count=max_candidate_count,
-                alignment_profile=face_config.alignment_profile,
             )
         else:
             raise ValueError(f"unsupported registration source: {source_path}")
@@ -525,10 +517,10 @@ def enroll_from_source(
 
         existing_database = _load_existing_database(whitelist_path)
         for name, (embeddings, _) in existing_database.items():
-            if embeddings.shape[1] != face_config.recognition_embedding_dim:
+            if embeddings.shape[1] != RECOGNITION_EMBEDDING_DIM:
                 raise ValueError(
                     f"existing whitelist dimension {embeddings.shape[1]} for {name}; "
-                    f"expected {face_config.recognition_embedding_dim}. "
+                    f"expected {RECOGNITION_EMBEDDING_DIM}. "
                     "Enroll into a separate whitelist for this model"
                 )
         holdout_results = validate_holdout_samples(
@@ -557,9 +549,9 @@ def enroll_from_source(
             "backup": str(backup) if backup is not None else None,
             "similarity_threshold": face_config.similarity_threshold,
             "size_sigma": face_config.size_sigma,
-            "recognition_model": face_config.recognition_model,
-            "recognition_embedding_dim": face_config.recognition_embedding_dim,
-            "alignment_profile": face_config.alignment_profile,
+            "recognition_model": RECOGNITION_MODEL,
+            "recognition_embedding_dim": RECOGNITION_EMBEDDING_DIM,
+            "alignment_profile": "arcface_112",
             "templates": [_sample_summary(sample) for sample in templates],
             "holdouts": holdout_results,
             "rejected": rejected,

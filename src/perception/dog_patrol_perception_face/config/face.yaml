@@ -1,10 +1,7 @@
-# MobileFaceNet production defaults. Engine and whitelist paths are deployment
-# inputs supplied by launch or by a site-local copy of this file.
+# MobileFaceNet production defaults. The model, ArcFace alignment and 512
+# dimensional embedding contract are fixed in code.
 detector_engine: ""
 recognition_engine: ""
-recognition_model: mobilefacenet_arcface
-recognition_embedding_dim: 512
-alignment_profile: arcface_112
 whitelist_dir: ""
 
 detector_conf_thres: 0.25

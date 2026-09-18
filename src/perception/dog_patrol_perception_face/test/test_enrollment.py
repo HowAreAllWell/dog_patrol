@@ -163,8 +163,6 @@ def test_install_templates_accepts_a_one_shot_sample_iterable(tmp_path: Path) ->
 
 
 def test_extract_sample_accepts_configured_512_dimension(monkeypatch) -> None:
-    observed_profiles = []
-
     class Detector:
         def infer_frame(self, frame):
             return object(), object()
@@ -188,9 +186,7 @@ def test_extract_sample_accepts_configured_512_dimension(monkeypatch) -> None:
     aligned = np.full((112, 112, 3), 128, dtype=np.uint8)
     monkeypatch.setattr(
         "dog_patrol_perception_face.enrollment.align_face_5pts",
-        lambda frame, keypoints, profile: (
-            observed_profiles.append(profile) or aligned
-        ),
+        lambda frame, keypoints: aligned,
     )
 
     sample, reason = _extract_sample(
@@ -200,11 +196,9 @@ def test_extract_sample_accepts_configured_512_dimension(monkeypatch) -> None:
         detector=Detector(),
         recognition=Recognition(),
         quality=QualityThresholds(min_sharpness=0.0),
-        alignment_profile="arcface_112",
     )
 
     assert reason is None
     assert sample is not None
     assert sample.embedding.shape == (512,)
     assert np.linalg.norm(sample.embedding) == pytest.approx(1.0)
-    assert observed_profiles == ["arcface_112"]

@@ -12,7 +12,7 @@
 | 模块 | 状态 | 平台与部署输入 | 验收边界 |
 | --- | --- | --- | --- |
 | tracking | `implemented` | Jetson Orin；CUDA/TensorRT、Hikrobot MVS SDK、相机、本机 engine、ROS 参数；仅 `osnet_onnx` 后端需要 ReID ONNX | 完整 Orin build/test；相机可枚举；live 节点加载 engine 并稳定输出 tracking 指标 |
-| face | `implemented` | YOLO/TensorRT detector、sface recognition、latest-only provider、真实 preflight/readiness 和 overlay adapter；engine、白名单与配置由部署机提供 | 真实模型 crop→stage evidence、取消/隔离、readiness 与同 canvas bbox 自动测试已通过；最终用户参与的整流程现场验收待执行 |
+| face | `implemented` | YOLO/TensorRT detector、MobileFaceNet 512 维 recognition、latest-only provider、真实 preflight/readiness 和 overlay adapter；engine、白名单与配置由部署机提供 | 真实模型 preflight 和节点级测试已通过；最终用户参与的整流程现场验收待执行 |
 | voice | `implemented` | R818/Vosk 核心、命令驱动的异步 evidence provider、只读 preflight/readiness、Prompt player、安装 helper 和部署配置 | 每条并行授权命令运行一个真实响应窗；既有 #37/#38 硬件/真人验收已通过；仍随最终感知整流程复验 |
 | orchestrator | `implemented` | ROS 2 Humble；readiness 聚合、ROS-independent 分阶段授权规则、授权命令与最终事件 adapter | tracking/face/voice 对当前 STARTUP sequence 都 ready 才发布感知整体 READY；内部流程为初始人脸加两轮人脸/语音并行 |
 

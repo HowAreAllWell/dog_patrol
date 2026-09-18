@@ -22,9 +22,17 @@ def _sample(index: int, sharpness: float, embedding: list[float]):
     )
 
 
+def _embedding(first: float, second: float) -> list[float]:
+    return [first, second] + [0.0] * 510
+
+
 def test_supplier_centroid_uses_sharpest_samples_and_normalizes_mean() -> None:
     samples = [
-        _sample(index, float(index), [1.0, 0.0] if index < 6 else [0.0, 1.0])
+        _sample(
+            index,
+            float(index),
+            _embedding(1.0, 0.0) if index < 6 else _embedding(0.0, 1.0),
+        )
         for index in range(10)
     ]
 
@@ -36,13 +44,13 @@ def test_supplier_centroid_uses_sharpest_samples_and_normalizes_mean() -> None:
 
     assert [sample.frame_index for sample in selected] == [9, 8, 7, 6, 5]
     assert centroid == pytest.approx(
-        np.asarray([0.2, 0.8]) / np.linalg.norm([0.2, 0.8])
+        np.asarray(_embedding(0.2, 0.8)) / np.linalg.norm([0.2, 0.8])
     )
     assert np.linalg.norm(centroid) == pytest.approx(1.0)
 
 
 def test_supplier_centroid_requires_five_qualified_faces() -> None:
-    samples = [_sample(index, 100.0, [1.0, 0.0]) for index in range(4)]
+    samples = [_sample(index, 100.0, _embedding(1.0, 0.0)) for index in range(4)]
 
     with pytest.raises(ValueError, match="Only 4 qualified faces"):
         build_supplier_centroid(samples, max_samples=80, min_samples=5)
@@ -50,12 +58,23 @@ def test_supplier_centroid_requires_five_qualified_faces() -> None:
 
 def test_supplier_centroid_rejects_inconsistent_embedding_dimensions() -> None:
     samples = [
-        _sample(index, 100.0, [1.0, 0.0] if index < 4 else [1.0, 0.0, 0.0])
+        _sample(
+            index,
+            100.0,
+            _embedding(1.0, 0.0) if index < 4 else [1.0] + [0.0] * 255,
+        )
         for index in range(5)
     ]
 
     with pytest.raises(ValueError, match="inconsistent dimensions"):
         build_supplier_centroid(samples, max_samples=80, min_samples=5)
+
+
+def test_supplier_centroid_rejects_uniform_wrong_dimension() -> None:
+    samples = [_sample(index, 100.0, [1.0, 0.0]) for index in range(5)]
+
+    with pytest.raises(ValueError, match="expected 512 dimensions"):
+        build_supplier_centroid(samples)
 
 
 def test_install_supplier_centroid_writes_runtime_compatible_single_template(

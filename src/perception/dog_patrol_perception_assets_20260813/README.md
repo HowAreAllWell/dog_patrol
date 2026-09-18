@@ -8,17 +8,16 @@
 
 ```text
 perception_assets/
+├── runtime/
+│   └── face.yaml
 ├── tracking/
 │   ├── yolo26n_fp16_640.engine
 │   ├── perception_tracking.yaml
 │   └── bot_sort.yaml
 ├── face/
 │   ├── detector.engine
-│   ├── recognition.engine
 │   ├── mobilefacenet_fp16.engine
 │   ├── face_detection_yunet_2023mar.onnx
-│   ├── face.yaml
-│   ├── whitelist/<person>/*.npy
 │   └── whitelist_mobilefacenet/<person>/*.npy
 ├── voice/
 │   ├── vosk-model-small-en-us-0.15/
@@ -26,12 +25,12 @@ perception_assets/
 └── SHA256SUMS
 ```
 
-`SHA256SUMS` 应由资产提供方在填充真实文件后生成。白名单文件名应包含采集时的人脸尺寸，例如 `g0_342px.npy`；同一人员可有多个 embedding。
+`SHA256SUMS` 应由资产提供方在填充真实文件后生成，不包含白名单。供应方注册每人写入一个归一化的 512 维中心特征 `g0_0px_f0.npy`；备用注册工具可写入多模板，文件名携带采集时的人脸尺寸。
 
 ## 必需资产
 
 - tracking：目标 Orin 本机生成的 YOLO26n FP16 TensorRT engine、相机序列号参数和 tracker YAML。
-- face：YOLO/TensorRT detector engine、所选 recognition engine，以及与该模型维度匹配的正式 whitelist embedding 目录。SFace 使用 128 维；MobileFaceNet 使用 512 维，两套白名单不能混用。
+- face：YOLO/TensorRT detector engine、MobileFaceNet recognition engine、YuNet 注册模型，以及 512 维 MobileFaceNet whitelist embedding 目录。
 - voice：Vosk 模型目录、目标 R818 的 ADB serial、实际 ALSA 播放设备和 mixer 配置。
 
 Tracking engine 必须在目标 JetPack/TensorRT 组合上生成或验证，不能只按文件名跨设备复用。白名单属于生物特征数据，应通过受控渠道分发。
@@ -78,8 +77,7 @@ python3 src/perception/scripts/check_perception_environment.py \
 
 ```bash
 cd /path/to/perception_assets
-find tracking face voice -type f \
-  -not -path '*/whitelist/*' \
+find runtime tracking face voice -type f \
   -not -path '*/whitelist_mobilefacenet/*' \
   -print0 | sort -z | xargs -0 sha256sum > SHA256SUMS
 ```
@@ -98,7 +96,7 @@ python3 -m dog_patrol_perception_face.enrollment \
   --assets-root /mnt/nvme/workspace/dog_patrol/src/perception/dog_patrol_perception_assets_20260813
 ```
 
-工具只在质量检查和保留帧竞争验证全部通过后，写入 `face/whitelist/<name>/*.npy`。更新已有身份
+工具只在质量检查和保留帧竞争验证全部通过后，写入 `face/whitelist_mobilefacenet/<name>/*.npy`。更新已有身份
 必须显式增加 `--replace`；操作前停止感知，完成后重新启动以加载新白名单。
 
 MobileFaceNet 先在目标 Orin 上从交付 ZIP 构建 engine：
@@ -110,7 +108,7 @@ bash src/perception/dog_patrol_perception_face/scripts/build_mobilefacenet_engin
 ```
 
 脚本还会提取供应方白名单注册使用的 YuNet ONNX；该模型由 OpenCV 直接执行，无需转换。
-然后用供应方兼容流程为每个身份重新注册，旧 SFace NPY 不可复制到新目录：
+然后用供应方兼容流程为每个身份重新注册：
 
 ```bash
 source /mnt/nvme/venv/m20_nav/bin/activate
@@ -122,5 +120,4 @@ python3 -m dog_patrol_perception_face.supplier_enrollment \
 该流程把每个人的合格特征求均值，最终中心特征写入
 `face/whitelist_mobilefacenet/<name>/g0_0px_f0.npy`，可由现有 provider 直接加载。
 完整感知bringup默认使用 `runtime/face.yaml`、`mobilefacenet_fp16.engine` 和
-`whitelist_mobilefacenet`。白名单为空时readiness会保持NOT_READY。旧SFace只通过
-`runtime/face_sface.yaml` 显式回退，不再是生产默认值。
+`whitelist_mobilefacenet`。白名单为空时 readiness 会保持 `NOT_READY`；系统没有旧模型回退路径。

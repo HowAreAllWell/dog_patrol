@@ -4,20 +4,11 @@ from __future__ import annotations
 
 import numpy as np
 
+from .config import RECOGNITION_EMBEDDING_DIM
 
-SUPPORTED_RECOGNITION_MODELS = frozenset({"sface", "mobilefacenet_arcface"})
 
-
-def prepare_recognition_input(bgr_image, input_shape, model: str) -> np.ndarray:
-    """Prepare one aligned BGR face for the configured TensorRT model.
-
-    Model preprocessing is explicit because an engine filename does not encode
-    its color order or normalization contract.  ``sface`` retains the legacy
-    raw-BGR behavior.  InsightFace MobileFaceNet uses RGB values in [-1, 1].
-    """
-
-    if model not in SUPPORTED_RECOGNITION_MODELS:
-        raise ValueError(f"unsupported recognition model: {model!r}")
+def prepare_recognition_input(bgr_image, input_shape) -> np.ndarray:
+    """Prepare one aligned BGR face for the fixed MobileFaceNet contract."""
     shape = tuple(int(value) for value in input_shape)
     if len(shape) != 4 or shape[0] != 1:
         raise ValueError(f"unsupported recognition engine input shape: {shape}")
@@ -30,10 +21,7 @@ def prepare_recognition_input(bgr_image, input_shape, model: str) -> np.ndarray:
             f"{expected_image_shape}"
         )
 
-    if model == "sface":
-        prepared = image.astype(np.float32)
-    else:
-        prepared = image[..., ::-1].astype(np.float32) / 127.5 - 1.0
+    prepared = image[..., ::-1].astype(np.float32) / 127.5 - 1.0
     if not is_nhwc:
         prepared = prepared.transpose(2, 0, 1)
     return np.ascontiguousarray(prepared[None, ...])
@@ -46,20 +34,11 @@ class RecModel:
     environments without a GPU.
     """
 
-    def __init__(
-        self,
-        engine_path,
-        *,
-        model: str = "sface",
-        expected_embedding_dim: int | None = None,
-    ):
+    def __init__(self, engine_path):
         import tensorrt as trt
         import pycuda.driver as cuda
 
         self.name = str(engine_path)
-        if model not in SUPPORTED_RECOGNITION_MODELS:
-            raise ValueError(f"unsupported recognition model: {model!r}")
-        self.model = model
         with open(engine_path, "rb") as f:
             self.engine = trt.Runtime(
                 trt.Logger(trt.Logger.WARNING)
@@ -88,16 +67,13 @@ class RecModel:
             del self.engine
             raise ValueError(f"recognition engine output shape is unresolved: {self.fixed_out}")
         self.embedding_dim = int(np.prod(self.fixed_out))
-        if (
-            expected_embedding_dim is not None
-            and self.embedding_dim != int(expected_embedding_dim)
-        ):
+        if self.embedding_dim != RECOGNITION_EMBEDDING_DIM:
             del self.context
             del self.engine
             raise ValueError(
                 "recognition engine output dimension "
                 f"{self.embedding_dim} does not match expected "
-                f"{int(expected_embedding_dim)}"
+                f"{RECOGNITION_EMBEDDING_DIM}"
             )
         self.stream = cuda.Stream()
         self.inp_host = cuda.pagelocked_empty(self.fixed_inp, self.inp_dtype)
@@ -106,7 +82,7 @@ class RecModel:
         self.out_device = cuda.mem_alloc(self.out_host.nbytes)
 
     def infer(self, bgr_112):
-        blob = prepare_recognition_input(bgr_112, self.fixed_inp, self.model)
+        blob = prepare_recognition_input(bgr_112, self.fixed_inp)
         np.copyto(self.inp_host, blob.astype(self.inp_dtype))
         import pycuda.driver as cuda
 

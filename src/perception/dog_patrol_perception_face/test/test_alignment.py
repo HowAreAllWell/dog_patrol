@@ -15,7 +15,7 @@ _KEYPOINTS = [
 ]
 
 
-def _capture_alignment_source(monkeypatch, profile: str) -> np.ndarray:
+def _capture_alignment_source(monkeypatch) -> np.ndarray:
     captured = {}
 
     def fake_estimate(source, destination):
@@ -27,21 +27,11 @@ def _capture_alignment_source(monkeypatch, profile: str) -> np.ndarray:
     align_face_5pts(
         np.zeros((64, 64, 3), dtype=np.uint8),
         _KEYPOINTS,
-        profile,
     )
     return captured["source"]
 
 
 def test_arcface_profile_preserves_yolo_landmark_order(monkeypatch) -> None:
-    source = _capture_alignment_source(monkeypatch, "arcface_112")
+    source = _capture_alignment_source(monkeypatch)
 
     assert source.tolist() == [point[:2] for point in _KEYPOINTS]
-
-
-def test_legacy_sface_profile_keeps_historical_landmark_swap(monkeypatch) -> None:
-    source = _capture_alignment_source(monkeypatch, "legacy_sface")
-
-    assert source.tolist() == [
-        _KEYPOINTS[index][:2]
-        for index in (1, 0, 2, 4, 3)
-    ]

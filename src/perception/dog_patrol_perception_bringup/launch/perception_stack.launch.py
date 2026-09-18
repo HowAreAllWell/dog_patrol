@@ -36,11 +36,6 @@ def generate_launch_description():
     authorization_evidence_topic = LaunchConfiguration("authorization_evidence_topic")
     authorization_command_topic = LaunchConfiguration("authorization_command_topic")
     state_timeout = LaunchConfiguration("state_timeout")
-    face_config_name = LaunchConfiguration("face_config_name")
-    face_recognition_engine_name = LaunchConfiguration(
-        "face_recognition_engine_name"
-    )
-    face_whitelist_name = LaunchConfiguration("face_whitelist_name")
     python_prefix = [
         EnvironmentVariable("DOG_PATROL_PYTHON", default_value="python3"),
         " ",
@@ -51,13 +46,13 @@ def generate_launch_description():
     tracking_engine = PathJoinSubstitution(
         [assets_root, "tracking", "yolo26n_fp16_640.engine"]
     )
-    face_config = PathJoinSubstitution([assets_root, "runtime", face_config_name])
+    face_config = PathJoinSubstitution([assets_root, "runtime", "face.yaml"])
     face_detector_engine = PathJoinSubstitution([assets_root, "face", "detector.engine"])
     face_recognition_engine = PathJoinSubstitution(
-        [assets_root, "face", face_recognition_engine_name]
+        [assets_root, "face", "mobilefacenet_fp16.engine"]
     )
     face_whitelist = PathJoinSubstitution(
-        [assets_root, "face", face_whitelist_name]
+        [assets_root, "face", "whitelist_mobilefacenet"]
     )
     voice_config = PathJoinSubstitution([assets_root, "runtime", "voice.yaml"])
     voice_model = PathJoinSubstitution(
@@ -199,15 +194,6 @@ def generate_launch_description():
             ),
             DeclareLaunchArgument("mission_state_topic", default_value="/mission/state"),
             DeclareLaunchArgument("state_timeout", default_value="0.75"),
-            DeclareLaunchArgument("face_config_name", default_value="face.yaml"),
-            DeclareLaunchArgument(
-                "face_recognition_engine_name",
-                default_value="mobilefacenet_fp16.engine",
-            ),
-            DeclareLaunchArgument(
-                "face_whitelist_name",
-                default_value="whitelist_mobilefacenet",
-            ),
             DeclareLaunchArgument("mission_event_topic", default_value="/mission/event"),
             DeclareLaunchArgument(
                 "capability_status_topic",

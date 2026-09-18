@@ -1,6 +1,6 @@
 # dog_patrol_perception_face
 
-人脸验证算法在主仓中的正式接入目录，包含 YOLO/TensorRT 检测、SFace 或 MobileFaceNet 识别、白名单匹配、
+人脸验证算法在主仓中的正式接入目录，包含 YOLO/TensorRT 检测、MobileFaceNet 识别、白名单匹配、
 `perception_face_provider`、`perception_face_readiness`、统一 launch、配置和测试。
 
 核心输入是 tracking 发布的
@@ -18,10 +18,9 @@ RETURN、TERMINATE 后的 READY）或其他非 VERIFY 状态会取消会话；�
 `perception_face_readiness` 从与 provider 相同的 YAML 读取 engine 和白名单路径；它实际加载两个
 TensorRT engine、分别执行一次最小推理并读取白名单后才发布 `face=READY`。显式 ROS 参数可覆盖
 YAML 中的 `detector_engine`、`recognition_engine` 和 `whitelist_dir`。
-识别后端由 `recognition_model` 和 `recognition_embedding_dim` 明确声明，运行时不根据文件名猜测
-预处理。`sface` 使用既有 raw-BGR 输入和 128 维特征；`mobilefacenet_arcface` 使用 RGB、
-`pixel / 127.5 - 1`、供应方 ArcFace 五点模板和 512 维特征。模型、维度与 `alignment_profile`
-必须成套匹配；readiness 会校验 engine 输出与白名单维度，任何不一致均拒绝 READY。
+识别契约固定为 `mobilefacenet_arcface`：输入使用 RGB、`pixel / 127.5 - 1`、供应方 ArcFace
+五点模板，输出固定为 512 维特征。模型、维度和对齐方式不再由 YAML 切换；readiness 会校验
+engine 输出与白名单维度，任何不一致均拒绝 READY。
 
 readiness 只由当前 `MissionState.STARTUP` 触发。离开 STARTUP 后，迟到 preflight 或旧 STARTUP
 快照不能再次发布 `face=READY`；新的 readiness 必须等待 supervisor reset 后的新序号。
@@ -42,7 +41,7 @@ ros2 launch dog_patrol_perception_face face.launch.py \
 ## 注册白名单人员
 
 白名单注册使用与生产 provider 完全相同的 face detector、五点对齐和 TensorRT recognition
-模型，不需要重新训练。每个身份保存为 `whitelist/<name>/*.npy` 多模板目录；模板文件名携带人脸
+模型，不需要重新训练。每个身份保存为 `whitelist_mobilefacenet/<name>/*.npy` 目录；模板文件名携带人脸
 像素尺寸，运行时按当前 `size_sigma` 对余弦相似度做尺度加权后取该身份的最高模板分数。
 
 先停止感知任务，准备只包含一个人的清晰图片、视频或图片目录。使用统一虚拟环境执行：
@@ -95,7 +94,7 @@ bash src/perception/dog_patrol_perception_face/scripts/build_mobilefacenet_engin
 脚本同时从供应方 ZIP 提取 `face_detection_yunet_2023mar.onnx`。YuNet 通过 OpenCV DNN
 直接加载，不需要转换成 TensorRT engine。
 
-新模型不能读取旧 SFace 白名单。为每个授权人员准备单人图片或视频，并使用供应方兼容注册命令：
+为每个授权人员准备单人图片或视频，并使用供应方兼容注册命令：
 
 相机驱动发布 `/left_camera/image_raw` 时，先保持原始1280x1024比例录制30秒MP4：
 
@@ -137,8 +136,7 @@ ros2 launch dog_patrol_perception_bringup perception_stack.launch.py \
   assets_root:=/mnt/nvme/workspace/dog_patrol/src/perception/dog_patrol_perception_assets_20260813
 ```
 
-新白名单为空时face readiness会保持NOT_READY，不会退回旧SFace或无白名单运行。确需诊断旧模型时，
-必须显式指定 `face_sface.yaml`、`recognition.engine` 和 `whitelist`。
+新白名单为空时 face readiness 会保持 `NOT_READY`，不会回退到其他识别模型或无白名单运行。
 
 配置中的 `0.3274939358` 仅是供应方 9-5 协议下 FAR 不高于 1% 的参考值。上线前必须使用现场
 摄像头、距离和光照数据重新标定 `similarity_threshold`；本接入默认关闭旧的脸框尺寸相似度加权，

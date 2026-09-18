@@ -64,11 +64,11 @@ DETECTOR_ENGINE = Path(
 RECOGNITION_ENGINE = Path(
     os.environ.get(
         "FACE_RECOGNITION_ENGINE",
-        _BASE / "face_models/engines/sface_2021dec_fp16.engine",
+        _BASE / "face_models/engines/mobilefacenet_fp16.engine",
     )
 )
 WHITELIST_DIR = Path(
-    os.environ.get("FACE_WHITELIST_DIR", _BASE / "whitelist_npy")
+    os.environ.get("FACE_WHITELIST_DIR", _BASE / "whitelist_mobilefacenet")
 )
 
 THRESHOLD = 0.55

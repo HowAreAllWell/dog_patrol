@@ -52,7 +52,6 @@ class ProductionFaceVerifier(FaceVerifier):
         database,
         similarity_threshold=0.55,
         size_sigma=20.0,
-        alignment_profile="legacy_sface",
         temporal_window=10,
         min_frames_for_decision=5,
         min_score=0.5,
@@ -63,7 +62,6 @@ class ProductionFaceVerifier(FaceVerifier):
         self._database = database
         self._threshold = float(similarity_threshold)
         self._size_sigma = None if size_sigma is None else float(size_sigma)
-        self._alignment_profile = alignment_profile
         self._min_frames = max(1, int(min_frames_for_decision))
         self._buffer = deque(maxlen=max(1, int(temporal_window)))
         self._decided_frames = 0
@@ -118,9 +116,7 @@ class ProductionFaceVerifier(FaceVerifier):
             )
 
         try:
-            aligned = align_face_5pts(
-                crop.image, best["kpts"][:5], self._alignment_profile
-            )
+            aligned = align_face_5pts(crop.image, best["kpts"][:5])
             emb = self._recognition.infer(aligned)
         except Exception as exc:
             return FaceVerification(

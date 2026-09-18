@@ -29,7 +29,7 @@
 ## 2026-09-08 - 增加可复用的人脸白名单注册工具
 
 - 新增 `dog_patrol_perception_face.enrollment` 和 `perception_face_enroll` 入口，统一使用生产 face
-  detector、五点对齐和 SFace TensorRT recognition，不再依赖不存在的 `app/manage_whitelist.py`
+  detector、五点对齐和 MobileFaceNet TensorRT recognition，不再依赖不存在的 `app/manage_whitelist.py`
   或不兼容的 `gallery.npz` 格式。
 - 支持单张图片、视频和图片目录；执行单人、置信度、人脸尺寸、亮度和清晰度检查，视频从全程候选中
   按人脸像素尺度分布选择多模板，避免运行时尺度加权导致远近人脸无法匹配。

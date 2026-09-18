@@ -18,7 +18,7 @@ from typing import Iterable, Iterator
 
 import numpy as np
 
-from .config import load_face_config
+from .config import RECOGNITION_EMBEDDING_DIM, load_face_config
 from .enrollment import (
     EnrollmentSample,
     install_identity_templates,
@@ -56,12 +56,15 @@ def _normalize(embedding: np.ndarray) -> np.ndarray:
     value = np.asarray(embedding, dtype=np.float32).reshape(-1)
     norm = float(np.linalg.norm(value))
     if (
-        value.size == 0
+        value.size != RECOGNITION_EMBEDDING_DIM
         or not np.isfinite(value).all()
         or not np.isfinite(norm)
         or norm <= 0
     ):
-        raise ValueError("enrollment produced an unusable embedding")
+        raise ValueError(
+            "enrollment produced an unusable embedding; expected "
+            f"{RECOGNITION_EMBEDDING_DIM} dimensions"
+        )
     return value / norm
 
 
@@ -190,8 +193,6 @@ class SupplierMobileFaceNetEnroller:
         )
         self._recognition = RecModel(
             str(recognition_engine),
-            model="mobilefacenet_arcface",
-            expected_embedding_dim=512,
         )
 
     def extract(
@@ -345,13 +346,9 @@ def main() -> None:
     config_path = (
         Path(args.config).expanduser().resolve()
         if args.config
-        else assets_root / "runtime" / "face_mobilefacenet.yaml"
+        else assets_root / "runtime" / "face.yaml"
     )
     config = load_face_config(config_path)
-    if config.recognition_model != "mobilefacenet_arcface":
-        raise ValueError(
-            "supplier enrollment requires the MobileFaceNet configuration"
-        )
     report = enroll_with_supplier_pipeline(
         identity=args.name,
         source=args.source,
