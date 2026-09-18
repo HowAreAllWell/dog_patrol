@@ -14,9 +14,13 @@ class FaceConfig:
     detector_conf_thres: float = 0.25
     detector_iou_thres: float = 0.5
     recognition_engine: str = ""
+    recognition_model: str = "mobilefacenet_arcface"
+    recognition_embedding_dim: int = 512
+    alignment_profile: str = "arcface_112"
     whitelist_dir: str = ""
-    similarity_threshold: float = 0.55
+    similarity_threshold: float = 0.3274939358
     size_sigma: float = 20.0
+    size_weighting_enabled: bool = False
     temporal_window: int = 10
     min_frames_for_decision: int = 5
     window_timeout_seconds: float = 3.0
@@ -78,11 +82,39 @@ def load_face_config(path) -> FaceConfig:
     for key in (
         "temporal_window",
         "min_frames_for_decision",
+        "recognition_embedding_dim",
     ):
         if values[key] <= 0:
             raise ValueError(f"face config field {key!r} must be positive")
     for key in ("window_timeout_seconds", "crop_freshness_timeout_seconds"):
         if values[key] <= 0.0:
             raise ValueError(f"face config field {key!r} must be positive")
+    if values["recognition_model"] not in {"sface", "mobilefacenet_arcface"}:
+        raise ValueError(
+            "face config field 'recognition_model' must be 'sface' or "
+            "'mobilefacenet_arcface'"
+        )
+    if values["alignment_profile"] not in {"legacy_sface", "arcface_112"}:
+        raise ValueError(
+            "face config field 'alignment_profile' must be 'legacy_sface' or "
+            "'arcface_112'"
+        )
+    expected_dimensions = {"sface": 128, "mobilefacenet_arcface": 512}
+    expected_dimension = expected_dimensions[values["recognition_model"]]
+    if values["recognition_embedding_dim"] != expected_dimension:
+        raise ValueError(
+            f"face config model {values['recognition_model']!r} requires "
+            f"recognition_embedding_dim={expected_dimension}"
+        )
+    expected_alignments = {
+        "sface": "legacy_sface",
+        "mobilefacenet_arcface": "arcface_112",
+    }
+    expected_alignment = expected_alignments[values["recognition_model"]]
+    if values["alignment_profile"] != expected_alignment:
+        raise ValueError(
+            f"face config model {values['recognition_model']!r} requires "
+            f"alignment_profile={expected_alignment!r}"
+        )
 
     return FaceConfig(**values)

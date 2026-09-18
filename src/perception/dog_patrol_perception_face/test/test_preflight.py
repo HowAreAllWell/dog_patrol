@@ -65,6 +65,7 @@ def test_preflight_exercises_and_closes_models_before_cuda_context_pop(
         def infer(self, frame):
             assert frame.shape == (112, 112, 3)
             calls.append("recognition_infer")
+            return np.ones(8, dtype=np.float32)
 
         def close(self):
             calls.append("recognition_close")
@@ -83,6 +84,7 @@ def test_preflight_exercises_and_closes_models_before_cuda_context_pop(
         whitelist_dir=str(whitelist),
         detector_loader=lambda path: Detector(),
         recognition_loader=lambda path: Recognition(),
+        expected_embedding_dim=8,
     ).run()
 
     assert outcome.status == READY
@@ -94,6 +96,56 @@ def test_preflight_exercises_and_closes_models_before_cuda_context_pop(
         "recognition_close",
         "context_pop",
     ]
+
+
+def test_preflight_rejects_recognition_output_dimension_mismatch(tmp_path) -> None:
+    detector = tmp_path / "det.engine"
+    recognition = tmp_path / "mobilefacenet.engine"
+    whitelist = tmp_path / "whitelist"
+    _write_engine(detector)
+    _write_engine(recognition)
+    _write_whitelist(whitelist)
+
+    class Recognition:
+        def infer(self, frame):
+            return np.ones(128, dtype=np.float32)
+
+    outcome = FacePreflight(
+        detector_engine=str(detector),
+        recognition_engine=str(recognition),
+        whitelist_dir=str(whitelist),
+        detector_loader=lambda path: None,
+        recognition_loader=lambda path: Recognition(),
+        expected_embedding_dim=512,
+    ).run()
+
+    assert outcome.status == ERROR
+    assert "expected 512" in outcome.diagnostic
+
+
+def test_preflight_rejects_whitelist_dimension_mismatch(tmp_path) -> None:
+    detector = tmp_path / "det.engine"
+    recognition = tmp_path / "mobilefacenet.engine"
+    whitelist = tmp_path / "whitelist"
+    _write_engine(detector)
+    _write_engine(recognition)
+    _write_whitelist(whitelist)
+
+    class Recognition:
+        def infer(self, frame):
+            return np.ones(512, dtype=np.float32)
+
+    outcome = FacePreflight(
+        detector_engine=str(detector),
+        recognition_engine=str(recognition),
+        whitelist_dir=str(whitelist),
+        detector_loader=lambda path: None,
+        recognition_loader=lambda path: Recognition(),
+        expected_embedding_dim=512,
+    ).run()
+
+    assert outcome.status == ERROR
+    assert "whitelist embedding dimension 8" in outcome.diagnostic
 
 
 def test_missing_engine_is_not_ready(tmp_path) -> None:

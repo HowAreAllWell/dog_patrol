@@ -864,14 +864,25 @@ class FaceEvidenceProviderNode(Node):
                 iou_thres=config.detector_iou_thres,
             )
             detector._ensure_gpu_preproc()
-            recognition = RecModel(recognition_engine)
+            recognition = RecModel(
+                recognition_engine,
+                model=config.recognition_model,
+                expected_embedding_dim=config.recognition_embedding_dim,
+            )
             database = load_whitelist_npy(whitelist_dir)
+            for name, (embeddings, _) in database.items():
+                if embeddings.shape[1] != config.recognition_embedding_dim:
+                    raise ValueError(
+                        f"whitelist embedding dimension {embeddings.shape[1]} "
+                        f"for {name}; expected {config.recognition_embedding_dim}"
+                    )
             verifier = ProductionFaceVerifier(
                 detector=detector,
                 recognition=recognition,
                 database=database,
                 similarity_threshold=config.similarity_threshold,
-                size_sigma=config.size_sigma,
+                size_sigma=(config.size_sigma if config.size_weighting_enabled else None),
+                alignment_profile=config.alignment_profile,
                 temporal_window=config.temporal_window,
                 min_frames_for_decision=config.min_frames_for_decision,
                 min_score=config.face_min_score,

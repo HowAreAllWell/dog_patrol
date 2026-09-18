@@ -1,14 +1,18 @@
-# Face verification production defaults. Engine and whitelist paths are
-# deployment inputs; this file keeps the recognition/verification defaults.
+# MobileFaceNet production defaults. Engine and whitelist paths are deployment
+# inputs supplied by launch or by a site-local copy of this file.
 detector_engine: ""
 recognition_engine: ""
+recognition_model: mobilefacenet_arcface
+recognition_embedding_dim: 512
+alignment_profile: arcface_112
 whitelist_dir: ""
 
 detector_conf_thres: 0.25
 detector_iou_thres: 0.5
 
-similarity_threshold: 0.55
+similarity_threshold: 0.3274939358
 size_sigma: 20.0
+size_weighting_enabled: false
 temporal_window: 10
 min_frames_for_decision: 5
 

@@ -125,6 +125,8 @@ def test_readiness_resolves_deployment_inputs_from_same_config_as_provider(
             "detector_engine": "/models/det.engine",
             "recognition_engine": "/models/rec.engine",
             "whitelist_dir": "/models/whitelist",
+            "recognition_model": "mobilefacenet_arcface",
+            "expected_embedding_dim": 512,
         }
     finally:
         node.destroy_node()

@@ -1,0 +1,28 @@
+# InsightFace buffalo_sc MobileFaceNet (w600k_mbf) recognition contract.
+# Engine and whitelist paths are deployment inputs supplied by launch or by a
+# site-local copy of this file. Existing SFace embeddings are incompatible.
+detector_engine: ""
+recognition_engine: ""
+recognition_model: mobilefacenet_arcface
+recognition_embedding_dim: 512
+alignment_profile: arcface_112
+whitelist_dir: ""
+
+detector_conf_thres: 0.25
+detector_iou_thres: 0.5
+
+# Supplier reference for FAR <= 1% under its 9-5 protocol. Recalibrate with
+# the deployed camera, illumination and enrollment data before final rollout.
+similarity_threshold: 0.3274939358
+size_sigma: 20.0
+size_weighting_enabled: false
+temporal_window: 10
+min_frames_for_decision: 5
+
+window_timeout_seconds: 3.0
+crop_freshness_timeout_seconds: 1.0
+overlay_inference_hz: 10.0
+face_min_score: 0.4
+face_min_box_ratio: 0.01
+stop_after_matched: true
+matched_hold_seconds: 5.0
