@@ -16,7 +16,8 @@ def _write(tmp_path: Path, text: str) -> Path:
 def test_defaults_without_config() -> None:
     config = FaceConfig()
     assert config.window_timeout_seconds == 3.0
-    assert config.similarity_threshold == 0.55
+    assert config.similarity_threshold == pytest.approx(0.3274939358)
+    assert config.size_weighting_enabled is False
 
 
 def test_load_face_config_roundtrip(tmp_path: Path) -> None:
@@ -24,14 +25,16 @@ def test_load_face_config_roundtrip(tmp_path: Path) -> None:
         tmp_path,
         """
 detector_engine: /opt/face/det.engine
-recognition_engine: /opt/face/sface.engine
+recognition_engine: /opt/face/mobilefacenet.engine
 whitelist_dir: /opt/face/whitelist
 similarity_threshold: 0.60
+size_weighting_enabled: false
 window_timeout_seconds: 4.0
 """,
     )
     config = load_face_config(str(path))
     assert config.detector_engine == "/opt/face/det.engine"
+    assert config.size_weighting_enabled is False
     assert config.similarity_threshold == 0.60
     assert config.window_timeout_seconds == 4.0
     assert config.temporal_window == 10
@@ -58,3 +61,8 @@ def test_nonpositive_window_raises(tmp_path: Path) -> None:
     path = _write(tmp_path, "window_timeout_seconds: 0")
     with pytest.raises(ValueError, match="positive"):
         load_face_config(str(path))
+
+
+def test_legacy_model_fields_are_rejected(tmp_path: Path) -> None:
+    with pytest.raises(ValueError, match="unsupported fields"):
+        load_face_config(str(_write(tmp_path, "recognition_model: legacy_model")))

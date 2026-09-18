@@ -1,12 +1,34 @@
-"""Face recognition embedding model (adapted from ``yolo-rec.py`` ``RecModel``)."""
+"""TensorRT face embedding models used by the production face provider."""
 
 from __future__ import annotations
 
 import numpy as np
 
+from .config import RECOGNITION_EMBEDDING_DIM
+
+
+def prepare_recognition_input(bgr_image, input_shape) -> np.ndarray:
+    """Prepare one aligned BGR face for the fixed MobileFaceNet contract."""
+    shape = tuple(int(value) for value in input_shape)
+    if len(shape) != 4 or shape[0] != 1:
+        raise ValueError(f"unsupported recognition engine input shape: {shape}")
+    is_nhwc = shape[-1] == 3
+    expected_image_shape = shape[1:3] + (3,) if is_nhwc else shape[2:4] + (3,)
+    image = np.asarray(bgr_image)
+    if image.shape != expected_image_shape:
+        raise ValueError(
+            f"aligned face shape {image.shape} does not match engine input "
+            f"{expected_image_shape}"
+        )
+
+    prepared = image[..., ::-1].astype(np.float32) / 127.5 - 1.0
+    if not is_nhwc:
+        prepared = prepared.transpose(2, 0, 1)
+    return np.ascontiguousarray(prepared[None, ...])
+
 
 class RecModel:
-    """TensorRT face embedding model (sface family, 128-d output).
+    """TensorRT face embedding model with an explicit preprocessing contract.
 
     TensorRT and PyCUDA are imported lazily so the package can be imported in
     environments without a GPU.
@@ -21,8 +43,9 @@ class RecModel:
             self.engine = trt.Runtime(
                 trt.Logger(trt.Logger.WARNING)
             ).deserialize_cuda_engine(f.read())
+        if self.engine is None:
+            raise ValueError(f"recognition engine cannot be loaded: {engine_path}")
         self.context = self.engine.create_execution_context()
-        self.stream = cuda.Stream()
         for i in range(self.engine.num_io_tensors):
             tname = self.engine.get_tensor_name(i)
             shape = tuple(self.engine.get_tensor_shape(tname))
@@ -36,46 +59,63 @@ class RecModel:
                 self.out_shape = shape
                 self.out_dtype = trt.nptype(dtype)
         self.fixed_inp = tuple(1 if d in (0, -1) else d for d in self.inp_shape)
-        self.fixed_out = tuple(1 if d in (0, -1) else d for d in self.out_shape)
         if self.fixed_inp != self.inp_shape:
             self.context.set_input_shape(self.inp_name, self.fixed_inp)
-        self.is_nhwc = self.fixed_inp[-1] == 3
-        self.use_raw = "sface" in self.name
+        self.fixed_out = tuple(self.context.get_tensor_shape(self.out_name))
+        if any(d <= 0 for d in self.fixed_out):
+            del self.context
+            del self.engine
+            raise ValueError(f"recognition engine output shape is unresolved: {self.fixed_out}")
+        self.embedding_dim = int(np.prod(self.fixed_out))
+        if self.embedding_dim != RECOGNITION_EMBEDDING_DIM:
+            del self.context
+            del self.engine
+            raise ValueError(
+                "recognition engine output dimension "
+                f"{self.embedding_dim} does not match expected "
+                f"{RECOGNITION_EMBEDDING_DIM}"
+            )
+        self.stream = cuda.Stream()
         self.inp_host = cuda.pagelocked_empty(self.fixed_inp, self.inp_dtype)
         self.out_host = cuda.pagelocked_empty(self.fixed_out, self.out_dtype)
+        self.inp_device = cuda.mem_alloc(self.inp_host.nbytes)
+        self.out_device = cuda.mem_alloc(self.out_host.nbytes)
 
     def infer(self, bgr_112):
-        if self.use_raw:
-            blob = bgr_112.astype(np.float32)
-            if not self.is_nhwc:
-                blob = blob.transpose(2, 0, 1)[None, ...]
-            else:
-                blob = blob[None, ...]
-        else:
-            import cv2
-
-            rgb = cv2.cvtColor(bgr_112, cv2.COLOR_BGR2RGB).astype(np.float32) / 255.0
-            if self.is_nhwc:
-                blob = rgb[None, ...]
-            else:
-                blob = rgb.transpose(2, 0, 1)[None, ...]
+        blob = prepare_recognition_input(bgr_112, self.fixed_inp)
         np.copyto(self.inp_host, blob.astype(self.inp_dtype))
-        self.context.set_tensor_address(self.inp_name, int(self.inp_host.ctypes.data))
-        self.context.set_tensor_address(self.out_name, int(self.out_host.ctypes.data))
-        self.context.execute_async_v3(stream_handle=self.stream.handle)
+        import pycuda.driver as cuda
+
+        cuda.memcpy_htod_async(self.inp_device, self.inp_host, self.stream)
+        self.context.set_tensor_address(self.inp_name, int(self.inp_device))
+        self.context.set_tensor_address(self.out_name, int(self.out_device))
+        if not self.context.execute_async_v3(stream_handle=self.stream.handle):
+            raise RuntimeError("TensorRT recognition inference failed")
+        cuda.memcpy_dtoh_async(self.out_host, self.out_device, self.stream)
         self.stream.synchronize()
         emb = self.out_host.copy().flatten()
+        if emb.size != self.embedding_dim or not np.isfinite(emb).all():
+            raise RuntimeError(
+                f"recognition returned an invalid embedding shape={emb.shape}"
+            )
         n = np.linalg.norm(emb)
         return emb / n if n > 0 else emb
 
     def close(self):
+        if getattr(self, "stream", None) is not None:
+            self.stream.synchronize()
+        if getattr(self, "inp_device", None) is not None:
+            self.inp_device.free()
+            self.inp_device = None
+        if getattr(self, "out_device", None) is not None:
+            self.out_device.free()
+            self.out_device = None
         if getattr(self, "inp_host", None) is not None:
             self.inp_host.base.free()
             self.inp_host = None
         if getattr(self, "out_host", None) is not None:
             self.out_host.base.free()
             self.out_host = None
-        self.stream.synchronize()
         del self.stream
         del self.context
         del self.engine

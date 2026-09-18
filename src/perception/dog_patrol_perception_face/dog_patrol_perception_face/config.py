@@ -7,6 +7,9 @@ from pathlib import Path
 
 import yaml
 
+RECOGNITION_MODEL = "mobilefacenet_arcface"
+RECOGNITION_EMBEDDING_DIM = 512
+
 
 @dataclass(frozen=True)
 class FaceConfig:
@@ -15,8 +18,9 @@ class FaceConfig:
     detector_iou_thres: float = 0.5
     recognition_engine: str = ""
     whitelist_dir: str = ""
-    similarity_threshold: float = 0.55
+    similarity_threshold: float = 0.3274939358
     size_sigma: float = 20.0
+    size_weighting_enabled: bool = False
     temporal_window: int = 10
     min_frames_for_decision: int = 5
     window_timeout_seconds: float = 3.0
@@ -45,6 +49,12 @@ def load_face_config(path) -> FaceConfig:
         raise ValueError(f"face config is not valid YAML: {exc}") from exc
     if not isinstance(raw, dict):
         raise ValueError("face config root must be a mapping")
+
+    unknown = sorted(set(raw) - set(_FIELDS))
+    if unknown:
+        raise ValueError(
+            "face config contains unsupported fields: " + ", ".join(unknown)
+        )
 
     defaults = {field: getattr(FaceConfig, field) for field in _FIELDS}
 
@@ -75,14 +85,10 @@ def load_face_config(path) -> FaceConfig:
     except ValueError as exc:
         raise ValueError(f"face config is invalid: {exc}") from exc
 
-    for key in (
-        "temporal_window",
-        "min_frames_for_decision",
-    ):
+    for key in ("temporal_window", "min_frames_for_decision"):
         if values[key] <= 0:
             raise ValueError(f"face config field {key!r} must be positive")
     for key in ("window_timeout_seconds", "crop_freshness_timeout_seconds"):
         if values[key] <= 0.0:
             raise ValueError(f"face config field {key!r} must be positive")
-
     return FaceConfig(**values)

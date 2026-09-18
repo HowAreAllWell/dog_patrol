@@ -7,6 +7,8 @@ import pytest
 
 from dog_patrol_perception_face.enrollment import (
     EnrollmentSample,
+    QualityThresholds,
+    _extract_sample,
     build_video_sample_plan,
     install_identity_templates,
     select_scale_distributed_samples,
@@ -158,3 +160,45 @@ def test_install_templates_accepts_a_one_shot_sample_iterable(tmp_path: Path) ->
     )
 
     assert len(list(destination.glob("*.npy"))) == 2
+
+
+def test_extract_sample_accepts_configured_512_dimension(monkeypatch) -> None:
+    class Detector:
+        def infer_frame(self, frame):
+            return object(), object()
+
+        def postprocess(self, raw, padding):
+            return [
+                {
+                    "class": "face",
+                    "conf": 0.9,
+                    "box": [0, 0, 100, 100],
+                    "kpts": [[0.0, 0.0, 1.0]] * 5,
+                }
+            ]
+
+    class Recognition:
+        embedding_dim = 512
+
+        def infer(self, aligned):
+            return np.ones(self.embedding_dim, dtype=np.float32)
+
+    aligned = np.full((112, 112, 3), 128, dtype=np.uint8)
+    monkeypatch.setattr(
+        "dog_patrol_perception_face.enrollment.align_face_5pts",
+        lambda frame, keypoints: aligned,
+    )
+
+    sample, reason = _extract_sample(
+        np.zeros((120, 120, 3), dtype=np.uint8),
+        source_label="mobilefacenet",
+        source_index=1,
+        detector=Detector(),
+        recognition=Recognition(),
+        quality=QualityThresholds(min_sharpness=0.0),
+    )
+
+    assert reason is None
+    assert sample is not None
+    assert sample.embedding.shape == (512,)
+    assert np.linalg.norm(sample.embedding) == pytest.approx(1.0)

@@ -9,6 +9,7 @@ from pathlib import Path
 import numpy as np
 
 from .whitelist import load_whitelist_npy
+from .config import RECOGNITION_EMBEDDING_DIM
 
 
 NOT_READY = 0
@@ -123,10 +124,22 @@ class FacePreflight:
     def _check_recognition(self, errors: list[str]) -> None:
         recognition = None
         try:
-            recognition = self.recognition_loader(self.recognition_engine)
+            if self.recognition_loader is _load_recognition:
+                from .recognition import RecModel
+
+                recognition = RecModel(self.recognition_engine)
+            else:
+                recognition = self.recognition_loader(self.recognition_engine)
             infer = getattr(recognition, "infer", None)
             if callable(infer):
-                infer(np.zeros((112, 112, 3), dtype=np.uint8))
+                embedding = infer(np.zeros((112, 112, 3), dtype=np.uint8))
+                if embedding is not None:
+                    embedding = np.asarray(embedding).reshape(-1)
+                    if embedding.size != RECOGNITION_EMBEDDING_DIM:
+                        raise ValueError(
+                            f"recognition embedding dimension {embedding.size}; "
+                            f"expected {RECOGNITION_EMBEDDING_DIM}"
+                        )
         except Exception as exc:
             errors.append(
                 f"face recognition engine cannot be loaded: {_exception_detail(exc)}"
@@ -136,7 +149,14 @@ class FacePreflight:
 
     def _check_whitelist(self, errors: list[str]) -> None:
         try:
-            self.whitelist_loader(self.whitelist_dir)
+            database = self.whitelist_loader(self.whitelist_dir)
+            for name, (embeddings, _) in database.items():
+                dimension = np.asarray(embeddings).shape[-1]
+                if dimension != RECOGNITION_EMBEDDING_DIM:
+                    raise ValueError(
+                        f"whitelist embedding dimension {dimension} for {name}; "
+                        f"expected {RECOGNITION_EMBEDDING_DIM}"
+                    )
         except Exception as exc:
             errors.append(f"face whitelist cannot be loaded: {_exception_detail(exc)}")
 

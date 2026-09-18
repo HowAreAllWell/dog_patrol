@@ -30,3 +30,6 @@ MvSdkLog/
 
 # Tool-local virtualenvs and runtime artifacts
 tools/face_verify/
+
+# Local biometric templates
+src/perception/dog_patrol_perception_assets_20260813/face/whitelist_mobilefacenet/*/*.npy

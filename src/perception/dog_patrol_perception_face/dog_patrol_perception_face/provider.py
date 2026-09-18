@@ -29,6 +29,7 @@ from rclpy.parameter import Parameter
 from rclpy.qos import DurabilityPolicy, HistoryPolicy, QoSProfile, ReliabilityPolicy
 
 from .config import FaceConfig, load_face_config
+from .config import RECOGNITION_EMBEDDING_DIM
 from .crop import DecodedCrop, decode_crop
 from .detector import TRTInference, ensure_cuda_context
 from .recognition import RecModel
@@ -858,27 +859,47 @@ class FaceEvidenceProviderNode(Node):
                     "face deployment inputs are unset: " + ", ".join(missing)
                 )
 
-            detector = TRTInference(
-                detector_engine,
-                conf_thres=config.detector_conf_thres,
-                iou_thres=config.detector_iou_thres,
-            )
-            detector._ensure_gpu_preproc()
-            recognition = RecModel(recognition_engine)
-            database = load_whitelist_npy(whitelist_dir)
-            verifier = ProductionFaceVerifier(
-                detector=detector,
-                recognition=recognition,
-                database=database,
-                similarity_threshold=config.similarity_threshold,
-                size_sigma=config.size_sigma,
-                temporal_window=config.temporal_window,
-                min_frames_for_decision=config.min_frames_for_decision,
-                min_score=config.face_min_score,
-                min_box_ratio=config.face_min_box_ratio,
-            )
-            self._production_verifier = verifier
-            return verifier
+            detector = None
+            recognition = None
+            try:
+                detector = TRTInference(
+                    detector_engine,
+                    conf_thres=config.detector_conf_thres,
+                    iou_thres=config.detector_iou_thres,
+                )
+                detector._ensure_gpu_preproc()
+                recognition = RecModel(recognition_engine)
+                database = load_whitelist_npy(whitelist_dir)
+                for name, (embeddings, _) in database.items():
+                    if embeddings.shape[1] != RECOGNITION_EMBEDDING_DIM:
+                        raise ValueError(
+                            f"whitelist embedding dimension {embeddings.shape[1]} "
+                            f"for {name}; expected {RECOGNITION_EMBEDDING_DIM}"
+                        )
+                verifier = ProductionFaceVerifier(
+                    detector=detector,
+                    recognition=recognition,
+                    database=database,
+                    similarity_threshold=config.similarity_threshold,
+                    size_sigma=(
+                        config.size_sigma if config.size_weighting_enabled else None
+                    ),
+                    temporal_window=config.temporal_window,
+                    min_frames_for_decision=config.min_frames_for_decision,
+                    min_score=config.face_min_score,
+                    min_box_ratio=config.face_min_box_ratio,
+                )
+                # ProductionFaceVerifier owns these resources from this point.
+                detector = None
+                recognition = None
+                self._production_verifier = verifier
+                return verifier
+            except Exception:
+                for resource in (recognition, detector):
+                    close = getattr(resource, "close", None)
+                    if callable(close):
+                        close()
+                raise
 
 
 def _session_from_mission(msg: MissionState) -> FaceVerificationSession | None:

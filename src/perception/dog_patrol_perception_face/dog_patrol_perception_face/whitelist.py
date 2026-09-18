@@ -20,6 +20,7 @@ def load_whitelist_npy(whitelist_dir):
     if not root.is_dir():
         raise ValueError(f"whitelist directory is missing: {root}")
     database = {}
+    embedding_dimension = None
     for entry in sorted(p.name for p in root.iterdir() if p.is_dir()):
         person_path = root / entry
         embs = []
@@ -41,6 +42,15 @@ def load_whitelist_npy(whitelist_dir):
                 raise ValueError(
                     f"whitelist embeddings have inconsistent dimensions: {entry}"
                 )
+            person_dimension = len(embs[0])
+            if embedding_dimension is None:
+                embedding_dimension = person_dimension
+            elif person_dimension != embedding_dimension:
+                raise ValueError(
+                    "whitelist embeddings have inconsistent dimensions across "
+                    f"identities: expected {embedding_dimension}, "
+                    f"{entry} has {person_dimension}"
+                )
             database[entry] = (np.stack(embs), np.array(sizes, dtype=np.float32))
     if not database:
         raise ValueError(f"whitelist directory contains no usable embeddings: {root}")
@@ -61,6 +71,11 @@ def match_embedding(emb, database, threshold, probe_size=None, size_sigma=30.0):
     best_name = None
     best_sim = 0.0
     for name, (gallery, sizes) in database.items():
+        if gallery.ndim != 2 or gallery.shape[1] != emb.size:
+            raise ValueError(
+                f"probe embedding dimension {emb.size} does not match "
+                f"whitelist dimension {gallery.shape[-1]} for {name}"
+            )
         sims = gallery @ emb
         if (
             probe_size is not None

@@ -49,9 +49,11 @@ def generate_launch_description():
     face_config = PathJoinSubstitution([assets_root, "runtime", "face.yaml"])
     face_detector_engine = PathJoinSubstitution([assets_root, "face", "detector.engine"])
     face_recognition_engine = PathJoinSubstitution(
-        [assets_root, "face", "recognition.engine"]
+        [assets_root, "face", "mobilefacenet_fp16.engine"]
     )
-    face_whitelist = PathJoinSubstitution([assets_root, "face", "whitelist"])
+    face_whitelist = PathJoinSubstitution(
+        [assets_root, "face", "whitelist_mobilefacenet"]
+    )
     voice_config = PathJoinSubstitution([assets_root, "runtime", "voice.yaml"])
     voice_model = PathJoinSubstitution(
         [assets_root, "voice", "vosk-model-small-en-us-0.15"]
@@ -163,7 +165,7 @@ def generate_launch_description():
                 default_value=EnvironmentVariable(
                     "DOG_PATROL_ASSETS_ROOT",
                     default_value=(
-                        "/home/orin/workspace/dog_patrol/src/perception/"
+                        "/mnt/nvme/workspace/dog_patrol/src/perception/"
                         "dog_patrol_perception_assets_20260813"
                     ),
                 ),

@@ -63,10 +63,10 @@ _DETECTOR_ENGINE = Path(
 _RECOGNITION_ENGINE = Path(
     os.environ.get(
         "FACE_RECOGNITION_ENGINE",
-        _BASE / "face_models/engines/sface_2021dec_fp16.engine",
+        _BASE / "face_models/engines/mobilefacenet_fp16.engine",
     )
 )
-_WHITELIST_DIR = Path(os.environ.get("FACE_WHITELIST_DIR", _BASE / "whitelist_npy"))
+_WHITELIST_DIR = Path(os.environ.get("FACE_WHITELIST_DIR", _BASE / "whitelist_mobilefacenet"))
 _VIDEO = Path(os.environ.get("FACE_VIDEO", _BASE / "extracted_20260720_183143_raw.avi"))
 
 _ASSETS_PRESENT = all(

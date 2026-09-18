@@ -1,5 +1,5 @@
-# Face verification production defaults. Engine and whitelist paths are
-# deployment inputs; this file keeps the recognition/verification defaults.
+# MobileFaceNet production defaults. The model, ArcFace alignment and 512
+# dimensional embedding contract are fixed in code.
 detector_engine: ""
 recognition_engine: ""
 whitelist_dir: ""
@@ -7,8 +7,9 @@ whitelist_dir: ""
 detector_conf_thres: 0.25
 detector_iou_thres: 0.5
 
-similarity_threshold: 0.55
+similarity_threshold: 0.3274939358
 size_sigma: 20.0
+size_weighting_enabled: false
 temporal_window: 10
 min_frames_for_decision: 5
 

@@ -43,6 +43,21 @@ def test_load_whitelist_zero_norm_raises(tmp_path: Path) -> None:
         load_whitelist_npy(str(tmp_path))
 
 
+def test_load_whitelist_rejects_dimensions_that_differ_between_people(
+    tmp_path: Path,
+) -> None:
+    _write_whitelist(
+        tmp_path,
+        {
+            "alice": [np.ones(128, dtype=np.float32)],
+            "bob": [np.ones(512, dtype=np.float32)],
+        },
+    )
+
+    with pytest.raises(ValueError, match="across identities"):
+        load_whitelist_npy(str(tmp_path))
+
+
 def test_match_embedding_accepts_close_probe() -> None:
     gallery = np.zeros(8, dtype=np.float32)
     gallery[0] = 1.0
@@ -77,3 +92,12 @@ def test_match_embedding_zero_probe_returns_none() -> None:
     name, sim = match_embedding(np.zeros(8), database, 0.55, None, None)
     assert name is None
     assert sim == 0.0
+
+
+def test_match_embedding_rejects_probe_gallery_dimension_mismatch() -> None:
+    database = {
+        "alice": (np.ones((1, 512), dtype=np.float32), np.array([100.0]))
+    }
+
+    with pytest.raises(ValueError, match="dimension"):
+        match_embedding(np.ones(128), database, 0.55, None, None)

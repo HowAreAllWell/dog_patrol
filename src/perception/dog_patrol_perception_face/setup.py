@@ -18,7 +18,7 @@ setup(
             f"share/{package_name}",
             ["package.xml", "README.md", "COLLABORATION.md", "LICENSE"],
         ),
-        (f"share/{package_name}/config", ["config/face.yaml"]),
+        (f"share/{package_name}/config", glob("config/*.yaml")),
         (f"share/{package_name}/launch", glob("launch/*.launch.py")),
     ],
     install_requires=[
@@ -38,6 +38,10 @@ setup(
             "perception_face_provider = dog_patrol_perception_face.provider:main",
             "perception_face_readiness = dog_patrol_perception_face.readiness_node:main",
             "perception_face_enroll = dog_patrol_perception_face.enrollment:main",
+            "perception_face_enroll_supplier = "
+            "dog_patrol_perception_face.supplier_enrollment:main",
+            "perception_face_record_enrollment = "
+            "dog_patrol_perception_face.enrollment_recorder:main",
         ],
     },
 )

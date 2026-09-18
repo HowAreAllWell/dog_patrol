@@ -16,6 +16,7 @@ import numpy as np
 
 from .alignment import align_face_5pts
 from .config import FaceConfig, load_face_config
+from .config import RECOGNITION_EMBEDDING_DIM, RECOGNITION_MODEL
 from .whitelist import load_whitelist_npy, match_embedding
 
 
@@ -87,7 +88,11 @@ def build_video_sample_plan(
     exclusion_radius = max(2, sample_stride // 2)
     candidates = [
         frame_index
-        for frame_index in range(sample_stride, max(sample_stride, frame_count - sample_stride), sample_stride)
+        for frame_index in range(
+            sample_stride,
+            max(sample_stride, frame_count - sample_stride),
+            sample_stride,
+        )
         if all(abs(frame_index - holdout) > exclusion_radius for holdout in holdouts)
     ]
     # Some screen-recorded MP4 files report a millisecond timebase as an
@@ -142,7 +147,7 @@ def validate_holdout_samples(
     holdouts: Iterable[EnrollmentSample],
     existing_database: dict,
     threshold: float,
-    size_sigma: float,
+    size_sigma: float | None,
 ) -> list[dict]:
     identity = validate_identity_name(identity)
     gallery, sizes = _normalized_gallery(templates)
@@ -286,7 +291,11 @@ def _extract_sample(
 
     embedding = np.asarray(recognition.infer(aligned), dtype=np.float32).reshape(-1)
     norm = float(np.linalg.norm(embedding))
-    if embedding.size != 128 or not np.isfinite(embedding).all() or norm <= 0.0:
+    if (
+        embedding.size != recognition.embedding_dim
+        or not np.isfinite(embedding).all()
+        or norm <= 0.0
+    ):
         return None, f"recognition returned an invalid embedding shape={embedding.shape}"
     return EnrollmentSample(
         source_label=source_label,
@@ -473,7 +482,9 @@ def enroll_from_source(
             iou_thres=face_config.detector_iou_thres,
         )
         detector._ensure_gpu_preproc()
-        recognition = RecModel(str(recognition_path))
+        recognition = RecModel(
+            str(recognition_path),
+        )
         if source_path.is_dir() or source_path.suffix.lower() in _IMAGE_SUFFIXES:
             candidates, holdouts, rejected = _extract_image_samples(
                 source_path,
@@ -496,19 +507,29 @@ def enroll_from_source(
             raise ValueError(f"unsupported registration source: {source_path}")
 
         templates = select_scale_distributed_samples(candidates, template_count)
-        if source_path.suffix.lower() in _VIDEO_SUFFIXES and len(templates) < min(6, template_count):
+        if (
+            source_path.suffix.lower() in _VIDEO_SUFFIXES
+            and len(templates) < min(6, template_count)
+        ):
             raise ValueError("fewer than six video templates passed quality checks")
         if source_path.suffix.lower() in _VIDEO_SUFFIXES and len(holdouts) < min(3, holdout_count):
             raise ValueError("fewer than three video holdouts passed quality checks")
 
         existing_database = _load_existing_database(whitelist_path)
+        for name, (embeddings, _) in existing_database.items():
+            if embeddings.shape[1] != RECOGNITION_EMBEDDING_DIM:
+                raise ValueError(
+                    f"existing whitelist dimension {embeddings.shape[1]} for {name}; "
+                    f"expected {RECOGNITION_EMBEDDING_DIM}. "
+                    "Enroll into a separate whitelist for this model"
+                )
         holdout_results = validate_holdout_samples(
             identity=identity,
             templates=templates,
             holdouts=holdouts,
             existing_database=existing_database,
             threshold=face_config.similarity_threshold,
-            size_sigma=face_config.size_sigma,
+            size_sigma=(face_config.size_sigma if face_config.size_weighting_enabled else None),
         )
         destination, backup = install_identity_templates(
             whitelist_dir=whitelist_path,
@@ -528,6 +549,9 @@ def enroll_from_source(
             "backup": str(backup) if backup is not None else None,
             "similarity_threshold": face_config.similarity_threshold,
             "size_sigma": face_config.size_sigma,
+            "recognition_model": RECOGNITION_MODEL,
+            "recognition_embedding_dim": RECOGNITION_EMBEDDING_DIM,
+            "alignment_profile": "arcface_112",
             "templates": [_sample_summary(sample) for sample in templates],
             "holdouts": holdout_results,
             "rejected": rejected,
@@ -574,11 +598,27 @@ def _parser() -> argparse.ArgumentParser:
 def main() -> None:
     args = _parser().parse_args()
     assets_root = Path(args.assets_root).expanduser().resolve()
-    config_path = Path(args.config).expanduser().resolve() if args.config else assets_root / "runtime" / "face.yaml"
+    config_path = (
+        Path(args.config).expanduser().resolve()
+        if args.config
+        else assets_root / "runtime" / "face.yaml"
+    )
     config = load_face_config(str(config_path))
-    detector_engine = args.detector_engine or assets_root / "face" / "detector.engine"
-    recognition_engine = args.recognition_engine or assets_root / "face" / "recognition.engine"
-    whitelist_dir = args.whitelist_dir or assets_root / "face" / "whitelist"
+    detector_engine = (
+        args.detector_engine
+        or config.detector_engine
+        or assets_root / "face" / "detector.engine"
+    )
+    recognition_engine = (
+        args.recognition_engine
+        or config.recognition_engine
+        or assets_root / "face" / "mobilefacenet_fp16.engine"
+    )
+    whitelist_dir = (
+        args.whitelist_dir
+        or config.whitelist_dir
+        or assets_root / "face" / "whitelist_mobilefacenet"
+    )
     report = enroll_from_source(
         identity=args.name,
         source=args.source,

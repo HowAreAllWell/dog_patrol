@@ -61,7 +61,7 @@ class ProductionFaceVerifier(FaceVerifier):
         self._recognition = recognition
         self._database = database
         self._threshold = float(similarity_threshold)
-        self._size_sigma = float(size_sigma)
+        self._size_sigma = None if size_sigma is None else float(size_sigma)
         self._min_frames = max(1, int(min_frames_for_decision))
         self._buffer = deque(maxlen=max(1, int(temporal_window)))
         self._decided_frames = 0

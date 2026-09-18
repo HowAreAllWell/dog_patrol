@@ -26,7 +26,7 @@ mission ROS 2 adapter，以及录制和离线评估工具。普通开发和 CI �
 `TASK_RUNNING + MissionState.PATROL`。在 READY、PAUSE、RETURN、TERMINATE 和其他非
 `VERIFY_IDENTITY` 状态下，face、voice、authorization 都保持安全待命并取消当前认证会话。
 
-`dog_patrol_perception_face` 包含 YOLO/TensorRT 检测、sface 识别、白名单匹配、生产 provider、
+`dog_patrol_perception_face` 包含 YOLO/TensorRT 检测、MobileFaceNet 识别、白名单匹配、生产 provider、
 readiness 和 launch。它只消费 tracking 的 latest-only `TrackedTargetImage`；MissionState 负责会话门禁，
 `AuthorizationCommand` 决定当前算法窗口。bbox 通过 `FaceOverlay` 返回并叠加到 tracking 的既有
 `VisualizerRecorder`，不创建第二个相机或预览窗口。详见

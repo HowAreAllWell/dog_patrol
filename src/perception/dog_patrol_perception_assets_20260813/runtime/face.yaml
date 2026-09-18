@@ -1,11 +1,12 @@
-detector_engine: "/home/orin/workspace/dog_patrol/src/perception/dog_patrol_perception_assets_20260813/face/detector.engine"
-recognition_engine: "/home/orin/workspace/dog_patrol/src/perception/dog_patrol_perception_assets_20260813/face/recognition.engine"
-whitelist_dir: "/home/orin/workspace/dog_patrol/src/perception/dog_patrol_perception_assets_20260813/face/whitelist"
+detector_engine: "/mnt/nvme/workspace/dog_patrol/src/perception/dog_patrol_perception_assets_20260813/face/detector.engine"
+recognition_engine: "/mnt/nvme/workspace/dog_patrol/src/perception/dog_patrol_perception_assets_20260813/face/mobilefacenet_fp16.engine"
+whitelist_dir: "/mnt/nvme/workspace/dog_patrol/src/perception/dog_patrol_perception_assets_20260813/face/whitelist_mobilefacenet"
 
 detector_conf_thres: 0.25
 detector_iou_thres: 0.5
-similarity_threshold: 0.55
+similarity_threshold: 0.3274939358
 size_sigma: 20.0
+size_weighting_enabled: false
 temporal_window: 10
 min_frames_for_decision: 5
 window_timeout_seconds: 3.0
