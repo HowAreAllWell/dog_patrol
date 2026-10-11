@@ -2,6 +2,7 @@
 
 #include <chrono>
 #include <cstdint>
+#include <functional>
 #include <mutex>
 #include <optional>
 #include <string>
@@ -76,10 +77,22 @@ class MissionRosAdapter {
   // Processes actions from the current source frame only. Mission state and
   // primary-selection ordering stay inside the frame transaction; callers pass
   // only current-frame perception evidence and metadata.
+  // confirm_gate（可选，默认空 = 未启用，行为与不接 ReID 完全一致）：
+  // kTargetConfirmed 发布前的短时 ReID 去重闸门，返回 false 抑制该次发布
+  //（含问询在途的 hold）。语义与线程约束见 reid_confirm_gate.hpp。
   MissionFrameTransaction::Output ProcessFrame(
       const std::vector<IdentityObservation> &identities,
       MissionCoordinator::TimePoint source_time,
-      const SourceFrameMetadata &metadata);
+      const SourceFrameMetadata &metadata,
+      const std::function<bool(int target_id)> *confirm_gate = nullptr);
+
+  // ReID 去重排除注入（评审 R04）：进入选人资格边界（PrimaryTargetManager
+  // 排除表）。线程安全：内部持 mission_mutex_，可在帧处理路径调用。
+  void ExcludeForReidDedup(int semantic_id);
+
+  // 跨天清理选人层 ReID 排除项（评审 N03）：与 gate 的 SyncDay 配对调用；
+  // 业务 handled 表按原有规则维护。线程安全：内部持 mission_mutex_。
+  void ClearReidDedupExclusions();
 
  private:
   static std::optional<MissionPhase> MissionPhaseFromMessage(std::uint8_t state);

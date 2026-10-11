@@ -1,0 +1,18 @@
+# reid_cloud_proxy 参数（云端请求代理 + 全局人员库，我们维护的"云端"侧）
+/reid_cloud_proxy:
+  ros__parameters:
+    # ---- 接口 ----
+    request_topic: /reid/cloud/request
+    response_topic: /reid/cloud/response
+    library_update_topic: /reid/cloud/library_update   # 扇出（我们的扩展接口）
+    status_topic: /reid/cloud_proxy/status
+    qos_depth: 200
+
+    # ---- 兼容性（必须与端侧一致，否则请求被拒 MODEL_MISMATCH）----
+    api_version: "1.0"
+    model_name: "clipreid_vitb16_after"
+    model_version: "1.0.0"
+
+    # ---- 全局库 ----
+    threshold: 0.70               # 云端命中阈值（与端侧一致）
+    max_persons: 20000            # 容量上限（约 100MB 内存），超出按最久未见淘汰

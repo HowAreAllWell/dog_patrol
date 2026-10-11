@@ -1,0 +1,20 @@
+# 检测节点 -> ReID 去重节点（同步一对一 service）
+# 字段语义详见 shorttermreid/docs/reid_dedup_interface_for_detection.md
+# 范围（项目组 2026-09-30 确认）：只判断"这个 track 的人今天是否见过"，
+# 不做白/黑名单判定；将来启用时在响应中增加字段，无破坏性变更。
+# ---------- 请求 ----------
+std_msgs/Header header      # stamp=裁剪图采集时刻; frame_id=相机坐标系(仅记录用)
+string track_id             # 本地人员跟踪 ID，追踪侧分配，同一目标保持不变
+sensor_msgs/Image crop      # 人体裁剪图 BGR8，整人框
+float32 det_conf            # 该次检测置信度，缺省 0
+string camera_id            # 相机 ID，单相机可留空
+string task_id              # 巡检任务 ID，可空（透传扩展位，当前无消费者）
+string event_id             # 感知事件 ID，可空（透传扩展位，当前无消费者）
+---
+# ---------- 响应 ----------
+uint8 status                # 0=调用成功 1=失败(参数缺失/图不可用/提特征失败)
+string track_id             # 回显请求的 track_id（对齐用）
+bool is_seen                # 今天是否见过（外观事实：本狗端侧或其他狗云端命中）
+bool handled                # 今天是否已完成处置（supervisor handled 结论经
+                            #   ReID 外观延续；false=未处置/仅见过，不能免处置）
+string error_message        # status=1 时非空，其余为空
