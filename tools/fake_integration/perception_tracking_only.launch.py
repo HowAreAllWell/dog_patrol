@@ -1,6 +1,6 @@
 """Real-robot tracking-only perception test launch.
 
-Starts real person tracking, synthetic face/voice capability readiness, and
+Starts real person tracking, synthetic face/voice/reid capability readiness, and
 the perception readiness aggregator. It intentionally does not start face,
 voice, or authorization providers.
 """

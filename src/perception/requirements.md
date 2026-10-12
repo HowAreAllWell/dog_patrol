@@ -12,9 +12,10 @@
 | 模块 | 状态 | 平台与部署输入 | 验收边界 |
 | --- | --- | --- | --- |
 | tracking | `implemented` | Jetson Orin；CUDA/TensorRT、Hikrobot MVS SDK、相机、本机 engine、ROS 参数；仅 `osnet_onnx` 后端需要 ReID ONNX | 完整 Orin build/test；相机可枚举；live 节点加载 engine 并稳定输出 tracking 指标 |
+| reid | `implemented` | 独立 CLIP ReID provider，资产包 `reid/` 的 1280 维 TensorRT engine 和 `runtime/reid.yaml`；当日库写入工作区 `data/reid` | 随完整感知栈启动；真实模型预热及 dedup service 就绪后报告 STARTUP capability；不与 tracking 的 light/OSNet 后端混淆 |
 | face | `implemented` | YOLO/TensorRT detector、MobileFaceNet 512 维 recognition、latest-only provider、真实 preflight/readiness 和 overlay adapter；engine、白名单与配置由部署机提供 | 真实模型 preflight 和节点级测试已通过；最终用户参与的整流程现场验收待执行 |
 | voice | `implemented` | R818/Vosk 核心、命令驱动的异步 evidence provider、只读 preflight/readiness、Prompt player、安装 helper 和部署配置 | 每条并行授权命令运行一个真实响应窗；既有 #37/#38 硬件/真人验收已通过；仍随最终感知整流程复验 |
-| orchestrator | `implemented` | ROS 2 Humble；readiness 聚合、ROS-independent 分阶段授权规则、授权命令与最终事件 adapter | tracking/face/voice 对当前 STARTUP sequence 都 ready 才发布感知整体 READY；内部流程为初始人脸加两轮人脸/语音并行 |
+| orchestrator | `implemented` | ROS 2 Humble；readiness 聚合、ROS-independent 分阶段授权规则、授权命令与最终事件 adapter | tracking/reid/face/voice 对当前 STARTUP sequence 都 ready 才发布感知整体 READY；内部流程为初始人脸加两轮人脸/语音并行 |
 
 环境检查中的最终 `PASS` 表示部署前置条件完整，但不等价于 mission 中当前 STARTUP sequence 的
 感知整体 `READY`，也不替代用户参与的真实流程验收。
@@ -72,6 +73,7 @@ source /opt/ros/humble/setup.bash
 colcon build --packages-select \
   dog_patrol_interfaces dog_patrol_perception_interfaces \
   dog_patrol_manager \
+  dog_patrol_reid_provider dog_patrol_perception_bringup \
   dog_patrol_perception_orchestrator \
   dog_patrol_perception_face \
   dog_patrol_perception_voice \
@@ -81,6 +83,7 @@ source install/setup.bash
 colcon test --packages-select \
   dog_patrol_interfaces dog_patrol_perception_interfaces \
   dog_patrol_manager \
+  dog_patrol_reid_provider dog_patrol_perception_bringup \
   dog_patrol_perception_orchestrator \
   dog_patrol_perception_face \
   dog_patrol_perception_voice \
@@ -135,9 +138,9 @@ ros2 launch dog_patrol_perception_tracking \
 
 运行后以 production 节点的 `runtime_monitor` 日志、`ros2 topic hz /perception/tracked_target_image` 和
 `ros2 topic bw /perception/tracked_target_image` 核验相机、推理、tracking FPS 和 crop transport。
-需要 mission 模式时改为运行 `dog_patrol_perception_tracking_node`，并同时启动主仓内的 supervisor、
-orchestrator、`perception_face_readiness`、`perception_face_provider`、`perception_voice_readiness`
-和 `perception_voice_provider`；感知三项 capability 都必须针对当前 STARTUP 序号报告 READY，
+需要 mission 模式时启动 supervisor/导航链，并通过控制台感知按钮或
+`ros2 launch dog_patrol_perception_bringup perception_stack.launch.py` 一并启动 tracking、ReID、
+orchestrator、face 和 voice；感知四项 capability 都必须针对当前 STARTUP 序号报告 READY，
 supervisor 才会形成 `TASK_NO_TASK + MissionState.READY`。准备合法 waypoint 后，还必须通过
 `/mission/task_command` 显式发送 START 才能进入 `TASK_RUNNING + PATROL`。在 face provider、voice
 现场部署输入和现场验收均未完成前，感知整体 READY 仍应保持未就绪。

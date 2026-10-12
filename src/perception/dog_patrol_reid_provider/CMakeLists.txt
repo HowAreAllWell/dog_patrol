@@ -13,6 +13,8 @@ find_package(ament_cmake REQUIRED)
 find_package(rclcpp REQUIRED)
 find_package(std_msgs REQUIRED)
 find_package(sensor_msgs REQUIRED)
+find_package(dog_patrol_interfaces REQUIRED)
+find_package(dog_patrol_perception_interfaces REQUIRED)
 find_package(rosidl_default_generators REQUIRED)
 find_package(OpenCV REQUIRED COMPONENTS core dnn imgproc imgcodecs)
 
@@ -66,6 +68,8 @@ ament_target_dependencies(reid_node
   rclcpp
   std_msgs
   sensor_msgs
+  dog_patrol_interfaces
+  dog_patrol_perception_interfaces
 )
 target_link_libraries(reid_node ${OpenCV_LIBS} ${REID_TRT_LIBS})
 
@@ -131,6 +135,13 @@ install(TARGETS sim_reid_e2e
 
 # 注册进 CTest：colcon test / ctest 自动执行，失败体现在 test-result 里
 if(BUILD_TESTING)
+  find_package(ament_cmake_pytest REQUIRED)
+  set(REID_TEST_PYTHON "${Python3_EXECUTABLE}" CACHE FILEPATH "Python interpreter for ReID ROS node tests")
+  ament_add_pytest_test(reid_readiness_node test/test_readiness_node.py
+    PYTHON_EXECUTABLE "${REID_TEST_PYTHON}" TIMEOUT 90)
+  add_executable(test_reid_readiness test/test_readiness_main.cpp)
+  target_include_directories(test_reid_readiness PRIVATE include)
+  add_test(NAME reid_readiness COMMAND test_reid_readiness)
   add_test(NAME reid_gallery COMMAND test_reid_gallery)
   add_test(NAME sim_reid_e2e COMMAND sim_reid_e2e)
 endif()

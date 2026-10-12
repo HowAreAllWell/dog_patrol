@@ -8,6 +8,23 @@ from tools.fake_integration import fake_nodes
 from tools.fake_integration import run_fake_integration
 
 
+def test_synthetic_capabilities_include_reid_and_support_reid_only():
+    for selected in (("face", "voice", "reid"), ("reid",)):
+        messages = []
+        node = SimpleNamespace(
+            _state_seq=0, _state_signature=None, _state_conflicted=False,
+            _last_startup=0, _capabilities=selected,
+            _pub=SimpleNamespace(publish=messages.append),
+            get_clock=lambda: SimpleNamespace(now=lambda: SimpleNamespace(to_msg=Time)),
+        )
+        state = SimpleNamespace(state_seq=2, state=MissionState.STARTUP)
+        fake_nodes.FakeCapabilities._on_state(node, state)
+        assert [message.capability for message in messages] == list(selected)
+        assert all(message.observed_startup_state_seq == 2 for message in messages)
+        fake_nodes.FakeCapabilities._on_state(node, state)
+        assert len(messages) == len(selected)
+
+
 def test_parent_start_requires_same_ready_no_task_snapshot() -> None:
     mission = {"state_seq": 12, "state": MissionState.READY, "target_id": 0}
     task = {

@@ -1463,6 +1463,15 @@ READY 必须满足 `target_id=0`，来源只能是感知或导航。第一个 RE
 能力故障严重到当前任务不能继续，应由模块发布既有 EXECUTION_ERROR 或由进程 watchdog 触发
 整套重启，不能由 capability provider 自行修改 MissionState。
 
+生产感知栈统一启动 tracking、ReID、face、voice 和 orchestrator。感知侧 required capability
+为 `detection_tracking`、`reid`、`face`、`voice`：四项都必须针对同一当前 STARTUP state_seq
+报告 READY，才由 aggregate readiness 发布一次 SOURCE_PERCEPTION/READY。ReID 直接依据
+本进程实际模型加载及预热成功、dedup service 已创建报告 capability，不以进程存在、服务名
+存在或调试 JSON 的历史值替代模型就绪；预加载失败时阻止握手，在当前有效 STARTUP 中重试。
+此检查不发送虚构人员问询、不修改当日身份库。离开 STARTUP、heartbeat 超时或同序号字段
+冲突后停止发布，reset 使用新的 STARTUP 序号重新报告；PAUSE/RESUME 等不重新执行握手。
+ReID 与 tracking 属于同一感知启动组，任一关键进程退出均关闭整组，不独立 respawn。
+
 ### 10.3 导航异步 planner
 
 navigation planner 请求至少捕获：

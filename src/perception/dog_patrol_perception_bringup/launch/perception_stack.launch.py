@@ -36,6 +36,8 @@ def generate_launch_description():
     authorization_evidence_topic = LaunchConfiguration("authorization_evidence_topic")
     authorization_command_topic = LaunchConfiguration("authorization_command_topic")
     state_timeout = LaunchConfiguration("state_timeout")
+    reid_service_name = LaunchConfiguration("reid_service_name")
+    reid_handled_topic = LaunchConfiguration("reid_handled_topic")
     python_prefix = [
         EnvironmentVariable("DOG_PATROL_PYTHON", default_value="python3"),
         " ",
@@ -55,6 +57,10 @@ def generate_launch_description():
         [assets_root, "face", "whitelist_mobilefacenet"]
     )
     voice_config = PathJoinSubstitution([assets_root, "runtime", "voice.yaml"])
+    reid_config = PathJoinSubstitution([assets_root, "runtime", "reid.yaml"])
+    reid_engine = PathJoinSubstitution(
+        [assets_root, "reid", "reid_clipreid_vitb16_after.fp16.engine"]
+    )
     voice_model = PathJoinSubstitution(
         [assets_root, "voice", "vosk-model-small-en-us-0.15"]
     )
@@ -70,6 +76,9 @@ def generate_launch_description():
             {
                 "use_sim_time": use_sim_time,
                 "runtime.mode": "mission",
+                "reid.enable": True,
+                "reid.service_name": reid_service_name,
+                "reid.handled_topic": reid_handled_topic,
                 "camera.input_mode": "ros_image",
                 "camera.image_topic": image_topic,
                 "perception.camera_optical_frame_id": camera_frame,
@@ -86,6 +95,27 @@ def generate_launch_description():
                 "visualization.image_topic": visualization_topic,
                 "visualization.window": ParameterValue(preview_window, value_type=bool),
                 "recording.enable": ParameterValue(record, value_type=bool),
+            },
+        ],
+    )
+    reid = Node(
+        package="dog_patrol_reid_provider",
+        executable="reid_node",
+        name="perception_reid",
+        output="screen",
+        on_exit=Shutdown(reason="ReID provider exited"),
+        parameters=[
+            reid_config,
+            {
+                "use_sim_time": use_sim_time,
+                "device": "tensorrt",
+                "model_path": reid_engine,
+                "service_name": reid_service_name,
+                "handled_topic": reid_handled_topic,
+                "mission_state_topic": mission_state_topic,
+                "capability_status_topic": capability_status_topic,
+                "state_timeout": ParameterValue(state_timeout, value_type=float),
+                "model_idle_unload_sec": 0.0,
             },
         ],
     )
@@ -194,6 +224,8 @@ def generate_launch_description():
             ),
             DeclareLaunchArgument("mission_state_topic", default_value="/mission/state"),
             DeclareLaunchArgument("state_timeout", default_value="0.75"),
+            DeclareLaunchArgument("reid_service_name", default_value="/perception/reid/dedup"),
+            DeclareLaunchArgument("reid_handled_topic", default_value="/perception/reid/handled"),
             DeclareLaunchArgument("mission_event_topic", default_value="/mission/event"),
             DeclareLaunchArgument(
                 "capability_status_topic",
@@ -216,6 +248,7 @@ def generate_launch_description():
                 default_value="/perception/authorization_command",
             ),
             tracking,
+            reid,
             face,
             voice,
             readiness,

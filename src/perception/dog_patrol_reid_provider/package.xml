@@ -17,6 +17,8 @@
   <depend>rclcpp</depend>
   <depend>std_msgs</depend>
   <depend>sensor_msgs</depend>
+  <depend>dog_patrol_interfaces</depend>
+  <depend>dog_patrol_perception_interfaces</depend>
   <depend>libopencv-dev</depend>
 
   <exec_depend>rosidl_default_runtime</exec_depend>
@@ -24,6 +26,10 @@
 
   <test_depend>ament_lint_auto</test_depend>
   <test_depend>ament_lint_common</test_depend>
+  <test_depend>ament_cmake_pytest</test_depend>
+  <test_depend>python3-pytest</test_depend>
+  <test_depend>rclpy</test_depend>
+  <test_depend>dog_patrol_perception_orchestrator</test_depend>
 
   <export>
     <build_type>ament_cmake</build_type>

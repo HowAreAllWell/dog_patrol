@@ -31,9 +31,12 @@ source install/setup.bash
 export ROS_DOMAIN_ID=42
 export RMW_IMPLEMENTATION=rmw_fastrtps_cpp
 export FASTRTPS_DEFAULT_PROFILES_FILE="$PWD/src/navigation/fast_livo_dog/config/fastdds_udp_only.xml"
-ros2 run dog_patrol_reid_provider reid_node --ros-args \
-  --params-file "$PWD/src/perception/dog_patrol_perception_assets_20260813/runtime/reid.yaml"
+export DOG_PATROL_PYTHON=/home/orin/venv/m20_nav/bin/python
+ros2 launch dog_patrol_perception_bringup perception_stack.launch.py
 ```
 
 当日身份库仍使用仓库根目录的 `data/reid`，不随模型资源复制或发布。当前运行中的服务不会
-因文件整理自动切换参数；由用户下次启动时加载新配置。
+因文件整理自动切换参数；由用户下次启动感知时加载新配置。控制台感知按钮已使用上述
+完整 launch，会一并启动 ReID，无需另开服务终端。整体 READY 等待 ReID 实际模型加载/
+预热成功，模型不可用时停留 STARTUP；暂停/继续不重做握手。请先停止已有手工启动的
+ReID 服务，避免重复启动。模型路径按 launch 的 assets_root 自动覆盖。

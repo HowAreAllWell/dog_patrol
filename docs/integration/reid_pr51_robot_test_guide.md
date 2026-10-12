@@ -20,10 +20,11 @@ tracking 与 ReID 一起执行，不考虑单侧离线或独立重启；这些�
 [最新评审结论](../reviews/pr_50_reid_review.md)。验收后的合并已完成并同步远端，PR #51 已接收。
 
 本轮新增 CLIP 人体特征用于判断“这个人今天是否已经完成处置”。人员跟踪和 MobileFaceNet
-人脸认证沿用现有实现。新增服务需要单独启动，现有控制台的感知按钮不会启动它；服务未启动
-时 gate 会按设计回退到原有流程。
+人脸认证沿用现有实现。当前感知生产 launch 已自动启动 ReID，控制台的感知按钮一并管理它，
+无需单独启动服务。整体感知 READY 等待 detection_tracking、reid、face、voice 四项能力匹配
+当前 STARTUP 序号；ReID 实际模型加载和预热失败时阻止 READY，不能直接 START。
 
-## 终端一：先启动 ReID 服务
+## 推荐：由控制台统一启动
 
 ```bash
 cd /mnt/nvme/workspace/dog_patrol
@@ -32,18 +33,19 @@ source install/setup.bash
 export ROS_DOMAIN_ID=42
 export RMW_IMPLEMENTATION=rmw_fastrtps_cpp
 export FASTRTPS_DEFAULT_PROFILES_FILE="$PWD/src/navigation/fast_livo_dog/config/fastdds_udp_only.xml"
-export ROS_LOG_DIR="$PWD/log/reid-runtime"
-mkdir -p data/reid log/reid-runtime
-
-ros2 run dog_patrol_reid_provider reid_node --ros-args \
-  --params-file "$PWD/src/perception/dog_patrol_perception_assets_20260813/runtime/reid.yaml"
+export DOG_PATROL_VENV=/home/orin/venv/m20_nav
+export ROS_LOG_DIR="$PWD/log/robot-console"
+mkdir -p data/reid "$ROS_LOG_DIR"
+/home/orin/venv/m20_nav/bin/python src/orchestration/robot_console/robot_console/app.py
 ```
 
-保持此终端运行。应看到 TensorRT engine 就绪和模型预加载完成，使用的特征维度为 1280。
+按原有方式启动传感器、定位、导航和感知，准备路线后显式 START。启动感知时应看到
+TensorRT engine 就绪和模型预加载完成，使用的特征维度为 1280。
 模型已转换并放入感知资产包的 `reid/`，无需再次转换；配置中的 model_path 指向该目录的
 `reid_clipreid_vitb16_after.fp16.engine`。数据和日志放在 NVMe 工作区，避免写入系统盘的默认 `/data/reid`。
-直接使用默认 `reid.launch.py` 没有配置此机的模型路径；本次测试使用上述资产配置命令。
-现有运行进程不会自动改用新路径，下次启动时由用户加载新配置。
+完整感知栈自动读取 `runtime/reid.yaml` 并按 assets_root 设置 engine 路径；不再单独运行
+`reid.launch.py`。此前若有手工启动的 ReID 服务，请自行先停止，避免与统一启动产生重复
+节点/服务。现有运行进程不会因编译自动更新；下一次启动感知才使用新版本。
 
 2026-10-12 资源整理后已验证：资产包 `SHA256SUMS` 全部 31 项通过；使用上述 runtime
 配置在隔离 ROS domain 223、独立测试身份库中实际加载新路径 engine，依次验证新人、
@@ -51,21 +53,61 @@ ros2 run dog_patrol_reid_provider reid_node --ros-args \
 未修改 `data/reid`。记录见 `build/pr51-review-88fa528/resources_service_smoke.log` 和
 `resources_service_smoke_node.log`。
 
-## 终端二：照常启动控制台
+## 不使用控制台时：启动完整感知栈
 
 ```bash
 cd /mnt/nvme/workspace/dog_patrol
 source /opt/ros/humble/setup.bash
 source install/setup.bash
-export DOG_PATROL_VENV=/home/orin/venv/m20_nav
-export ROS_LOG_DIR="$PWD/log/robot-console"
-mkdir -p "$ROS_LOG_DIR"
-/home/orin/venv/m20_nav/bin/python src/orchestration/robot_console/robot_console/app.py
+export ROS_DOMAIN_ID=42
+export RMW_IMPLEMENTATION=rmw_fastrtps_cpp
+export FASTRTPS_DEFAULT_PROFILES_FILE="$PWD/src/navigation/fast_livo_dog/config/fastdds_udp_only.xml"
+export DOG_PATROL_PYTHON=/home/orin/venv/m20_nav/bin/python
+export ROS_LOG_DIR="$PWD/log/perception-runtime"
+mkdir -p "$ROS_LOG_DIR" data/reid
+ros2 launch dog_patrol_perception_bringup perception_stack.launch.py
 ```
 
-按原有方式启动传感器、定位、导航和感知，准备路线后显式 START。当前导航配置的域是 42；
-如果之后改 ROS_DOMAIN_ID，两套进程必须保持一致。源码和 main install 都已切到此测试版本，
-合并后可在本地 merge 分支继续使用，运行方式不变。
+此方式与控制台的感知按钮二选一，需要已有相机和 supervisor/导航链。所有进程的
+ROS_DOMAIN_ID 必须一致。关闭完整感知 launch 会一起关闭 ReID，正常退出保存当日库；
+ReID 关键进程意外退出也会关闭感知组。READY 是启动锁存，PAUSE/RESUME 不重新做模型检查。
+
+## 统一启动与 READY 改动的验证（2026-10-12）
+
+资源整理已先单独提交为 `75697a4`；本版在此基础上增加感知统一启动和 ReID READY 门控。
+使用系统 `/usr/bin/colcon` 编译 provider、orchestrator 和 bringup 均成功。正式注册测试结果：
+provider 6 项、orchestrator 50 项、bringup 2 项，均为 0 errors / 0 failures / 0 skipped；
+另有 fake integration 脚本回归通过。provider 计数包含 CTest 及其内嵌 Python 节点用例，
+不等同于独立业务场景数量。
+
+真实 Orin GPU 节点测试覆盖缺失模型阻止整体 READY、在同一 STARTUP 补齐模型后重试成功、
+reset 后新序号重新聚合、READY 后迟到旧 STARTUP 不生效、heartbeat 超时停止发布、同序号
+冲突锁止及新序号恢复。生产 launch action 的实际退出测试验证 ReID 结束时关闭其同组进程。
+所有测试均使用隔离域和独立身份库，没有重启现场相机/导航/感知，没有修改生产 `data/reid`。
+
+复跑相关构建与测试（测试域与现场域 42 分开）：
+
+```bash
+cd /mnt/nvme/workspace/dog_patrol
+source /opt/ros/humble/setup.bash
+source install/setup.bash
+export PYTEST_DISABLE_PLUGIN_AUTOLOAD=1
+export ROS_DOMAIN_ID=223 ROS_LOCALHOST_ONLY=1
+export RMW_IMPLEMENTATION=rmw_fastrtps_cpp
+export FASTRTPS_DEFAULT_PROFILES_FILE="$PWD/src/navigation/fast_livo_dog/config/fastdds_udp_only.xml"
+export ROS_LOG_DIR="$PWD/log/reid-acceptance"
+export DOG_PATROL_REID_TEST_ENGINE="$PWD/src/perception/dog_patrol_perception_assets_20260813/reid/reid_clipreid_vitb16_after.fp16.engine"
+/usr/bin/colcon build --packages-select dog_patrol_reid_provider \
+  dog_patrol_perception_orchestrator dog_patrol_perception_bringup --symlink-install \
+  --cmake-args -DREID_TEST_PYTHON=/home/orin/venv/m20_nav/bin/python
+source install/setup.bash
+/usr/bin/colcon test --packages-select dog_patrol_reid_provider \
+  dog_patrol_perception_orchestrator dog_patrol_perception_bringup --executor sequential
+```
+
+关闭额外 pytest 插件自动加载用于避开本机无关插件依赖冲突，业务逻辑不为该环境问题变更。
+日志在 `build/pr51-review-88fa528/unified_reid_final_colcon_tests.log`，GPU 用例和资源校验记录
+同样保留在此目录。测试终端使用隔离域，现场启动请新开终端按前面的域 42 命令操作。
 
 ## 确认新服务实际在用
 
@@ -110,7 +152,7 @@ ros2 topic echo /perception/reid/status --once
 当日库按日期清理，可恢复同日已落盘的身份。当前验收按 tracking/ReID 一起运行使用，不以
 单独重启验证故障恢复。在线 tracking 观察到显式 mission reset 的 STARTUP 转换时，会发送
 handled 清理通知；测试“当天免重复处置”时应区分正常暂停/继续与完整 reset。停止测试时先在控制台
-终止任务并停止感知，再对终端一按 Ctrl+C，使服务正常退出并保存当日库。
+终止任务并停止感知，ReID 随感知组正常退出并保存当日库。
 
 核验未完成时 PAUSE 不会为当前人员新增 handled 标记：可以已经 is_seen=true，但仍是
 handled=false。暂停使业务进入 READY、清除当前 target_id、递增 state_seq 并取消认证；旧

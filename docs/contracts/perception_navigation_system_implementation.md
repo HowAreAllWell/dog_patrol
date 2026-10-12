@@ -170,8 +170,10 @@ RECOVER_PATROL           TRACK_INTRUDER
 - 只有 `/mission/task_command` 的 START 在路线和 home 合法时才发布 `TASK_RUNNING + PATROL`；
 - 旧启动序号的 `READY` 不得让新的启动会话进入巡检。
 
-感知中的 detection/tracking、face、voice 等 capability 可以先分别发布能力状态，再由感知
-就绪协调器汇总为感知侧 `READY`。总控不解析这些内部能力的细节。
+生产感知栈统一启动 tracking、ReID、face、voice。`detection_tracking`、`reid`、`face`、`voice`
+四项 capability 必须匹配当前 STARTUP sequence，再由感知就绪协调器汇总为感知侧 `READY`。
+ReID 的 READY 要求实际模型加载和预热成功、dedup service 已建立；模型缺失时保持 STARTUP，
+不能仅凭进程/服务名存在进入待命。总控不解析这些内部能力的细节，暂停和任务终态不重做握手。
 
 ## 3. 状态序号、目标 ID 和事件校验
 

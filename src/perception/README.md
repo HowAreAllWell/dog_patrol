@@ -1,6 +1,6 @@
 # 感知模块
 
-感知团队的实现入口。tracking、face、voice、readiness 与授权 orchestrator 均已接入；最终整体验收
+感知团队的实现入口。tracking、ReID、face、voice、readiness 与授权 orchestrator 均已接入；最终整体验收
 只替换导航为 fake，其余感知和主状态机节点使用真实实现。
 整个感知域的 Orin 平台、SDK、资产、参数、模块状态和统一环境检查见
 [`requirements.md`](requirements.md)。该入口不替代各 ROS package manifest 或模块内部配置。
@@ -57,8 +57,8 @@ provider 保留的当前状态。授权证据是离散、reliable、volatile 事
 - 不依赖 ROS 2、具体人脸算法或语音算法的纯 Python 测试面。
 - `perception_authorization` 节点：发布阶段命令，只在有效的 `VERIFY_IDENTITY` 会话接受匹配 evidence，将最终结果
   映射为 `AUTHORIZED`、`UNAUTHORIZED` 或 `EXECUTION_ERROR`；`CANCELLED` 不发布任务事件。
-- `ReadinessCoordinator`：将 `detection_tracking`、`face`、`voice` 固定为 required capability；
-- `perception_readiness` 节点：只在三者状态都匹配当前 STARTUP sequence 时发布一次
+- `ReadinessCoordinator`：将 `detection_tracking`、`reid`、`face`、`voice` 固定为 required capability；
+- `perception_readiness` 节点：只在四者状态都匹配当前 STARTUP sequence 时发布一次
   `SOURCE_PERCEPTION/READY`。
 
 感知节点均使用 uint32 `state_seq` 的半区间比较。旧状态、同序号冲突快照、旧 target/stage evidence
@@ -67,7 +67,7 @@ provider 保留的当前状态。授权证据是离散、reliable、volatile 事
 生产 launch 显式设置 `state_timeout=0.75 s`；MissionState heartbeat 超时后 tracking 清空 primary，
 face/voice/authorization 取消会话，readiness 使在途 preflight 失效，恢复 heartbeat 后只按当前合法
 快照重新建立处理门。
-感知 production launch 对 tracking、face、voice、aggregate readiness 和 authorization 使用整组
+感知 production launch 对 tracking、ReID、face、voice、aggregate readiness 和 authorization 使用整组
 退出语义；任一关键节点结束都会关闭该 launch，console 随后停止旧导航链并 reset 会话。
 
 tracking 只发布自身 `detection_tracking` 状态，不再聚合或发布整体 READY。face/voice provider 只发布
@@ -75,6 +75,11 @@ tracking 只发布自身 `detection_tracking` 状态，不再聚合或发布整�
 流程决定。与主状态机
 交互只使用 `dog_patrol_interfaces`，感知内部 capability transport 使用
 `dog_patrol_perception_interfaces`。
+
+控制台的感知按钮使用 `dog_patrol_perception_bringup perception_stack.launch.py`，已自动启动
+ReID，无需另开服务终端。ReID 配置来自资产包的 `runtime/reid.yaml`，engine 路径随
+`assets_root` 覆盖；模型实际加载/预热成功后才报告当前 STARTUP 的 `reid` capability。
+缺失模型会阻止整体 READY，当前 STARTUP 中可重试；暂停、继续和任务终态不重复握手。
 
 感知内部状态、目标生命周期、认证阶段、总状态机、导航协调和任务级目标丢失规则统一以
 [`../../docs/contracts/perception_navigation_system_implementation.md`](../../docs/contracts/perception_navigation_system_implementation.md)
@@ -92,6 +97,7 @@ source /opt/ros/humble/setup.bash
 colcon build --packages-select \
   dog_patrol_interfaces dog_patrol_perception_interfaces \
   dog_patrol_manager \
+  dog_patrol_reid_provider dog_patrol_perception_bringup \
   dog_patrol_perception_orchestrator \
   dog_patrol_perception_face \
   dog_patrol_perception_voice \
@@ -101,6 +107,7 @@ source install/setup.bash
 colcon test --packages-select \
   dog_patrol_interfaces dog_patrol_perception_interfaces \
   dog_patrol_manager \
+  dog_patrol_reid_provider dog_patrol_perception_bringup \
   dog_patrol_perception_orchestrator \
   dog_patrol_perception_face \
   dog_patrol_perception_voice \

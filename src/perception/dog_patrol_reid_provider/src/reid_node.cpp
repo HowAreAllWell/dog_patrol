@@ -13,6 +13,7 @@
 // 端侧库：单身份库 + 运行均值模板，每日清零；命中立即应答（云端后台回推），
 // 未命中发 search_and_upsert 并限时等待（默认 3s）超时降级为仅端侧结论。
 // 执行器必须用 MultiThreadedExecutor：service 等待云端期间响应回调要能并发执行。
+#include <algorithm>
 #include <atomic>
 #include <chrono>
 #include <cmath>
@@ -36,6 +37,8 @@
 #include "rclcpp/rclcpp.hpp"
 #include "sensor_msgs/msg/image.hpp"
 #include "std_msgs/msg/string.hpp"
+#include "dog_patrol_interfaces/msg/mission_state.hpp"
+#include "dog_patrol_perception_interfaces/msg/capability_status.hpp"
 
 #include "dog_patrol_reid_provider/msg/re_id_library_update.hpp"
 #include "dog_patrol_reid_provider/msg/re_id_handled.hpp"
@@ -46,6 +49,7 @@
 #include "dog_patrol_reid_provider/feature_extractor.hpp"
 #include "dog_patrol_reid_provider/reid_gallery.hpp"
 #include "dog_patrol_reid_provider/request_tracker.hpp"
+#include "dog_patrol_reid_provider/reid_readiness.hpp"
 
 namespace {
 
@@ -288,6 +292,22 @@ class ReidNode : public rclcpp::Node {
                                                           rclcpp::QoS(10));
     tick_timer_ = create_wall_timer(
         std::chrono::seconds(1), [this] { on_tick(); });
+
+    // Native readiness uses the actual preloaded extractor and service, rather
+    // than inferring readiness from a process name or a diagnostic JSON topic.
+    readiness_ = std::make_unique<ReidReadiness>(std::max(
+        0.1, declare_parameter<double>("state_timeout", 0.75)));
+    capability_pub_ = create_publisher<dog_patrol_perception_interfaces::msg::CapabilityStatus>(
+        declare_parameter<std::string>("capability_status_topic", "/perception/capability_status"),
+        rclcpp::QoS(16).reliable().transient_local());
+    mission_sub_ = create_subscription<dog_patrol_interfaces::msg::MissionState>(
+        declare_parameter<std::string>("mission_state_topic", "/mission/state"),
+        rclcpp::QoS(1).reliable().transient_local(),
+        [this](dog_patrol_interfaces::msg::MissionState::ConstSharedPtr msg) {
+          readiness_->observe(msg->state_seq, msg->state, msg->target_id,
+                              msg->handled_target_id, steady_now());
+          publish_readiness(false);
+        });
 
     RCLCPP_INFO(get_logger(),
                 "perception_reid 就绪（service=%s, model=%s, device=%s, "
@@ -760,6 +780,32 @@ class ReidNode : public rclcpp::Node {
 
   // ---------------------------------------------------------------- 维护
 
+  void publish_readiness(bool retry_load) {
+    const uint32_t seq = readiness_->startup_sequence(steady_now());
+    if (seq == 0) { return; }
+    bool loaded = false;
+    {
+      std::lock_guard<std::mutex> lk(model_mtx_);
+      if (extractor_ && retry_load && !extractor_->loaded()) {
+        extractor_->load();
+        last_use_time_ = steady_now();
+      }
+      loaded = extractor_ && extractor_->loaded();
+    }
+    // Loading may outlast the state heartbeat. A later valid heartbeat can
+    // announce success, but this expired observation cannot do so.
+    if (readiness_->startup_sequence(steady_now()) != seq) { return; }
+    using Status = dog_patrol_perception_interfaces::msg::CapabilityStatus;
+    Status status;
+    status.header.stamp = now();
+    status.capability = "reid";
+    status.observed_startup_state_seq = seq;
+    status.status = !extractor_ ? Status::ERROR : loaded ? Status::READY : Status::NOT_READY;
+    status.diagnostic = loaded ? "ReID model warmup and dedup service ready"
+                               : "ReID model unavailable; waiting for successful initialization";
+    capability_pub_->publish(status);
+  }
+
   void on_tick() {
     const double now = steady_now();
     {
@@ -795,6 +841,7 @@ class ReidNode : public rclcpp::Node {
       }
     }
     publish_status(now);
+    publish_readiness(true);
   }
 
   void publish_status(double now) {
@@ -856,6 +903,9 @@ class ReidNode : public rclcpp::Node {
   rclcpp::Subscription<ReIDHandled>::SharedPtr handled_sub_;
   rclcpp::Publisher<std_msgs::msg::String>::SharedPtr status_pub_;
   rclcpp::TimerBase::SharedPtr tick_timer_;
+  std::unique_ptr<ReidReadiness> readiness_;
+  rclcpp::Publisher<dog_patrol_perception_interfaces::msg::CapabilityStatus>::SharedPtr capability_pub_;
+  rclcpp::Subscription<dog_patrol_interfaces::msg::MissionState>::SharedPtr mission_sub_;
 };
 
 }  // namespace dog_patrol_reid_provider

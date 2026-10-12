@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
-"""Run the fixed local integration scenario with fake navigation only.
+"""Run local mission integration with synthetic navigation and ReID readiness.
 
 Supervisor, tracking, face, voice, readiness and authorization are production
-executables. The fake node only provides navigation READY/transitions.
+executables. ReID capability readiness is synthetic here; model/service
+acceptance is covered separately by the provider's real-node GPU tests.
 """
 
 from __future__ import annotations
@@ -626,13 +627,15 @@ def main() -> int:
                       "--state-topic", f"{prefix}/mission/state",
                       "--event-topic", f"{prefix}/mission/event",
                       "--bbox-topic", f"{prefix}/perception/selected_target_bbox"]
-        if args.scenario not in perception_scenarios:
-            face = fake + ["--role", "capabilities",
-                           "--state-topic", f"{prefix}/mission/state",
-                           "--capability-topic", f"{prefix}/perception/capability_status"]
+        capabilities = fake + ["--role", "capabilities",
+                               "--state-topic", f"{prefix}/mission/state",
+                               "--capability-topic", f"{prefix}/perception/capability_status"]
+        if args.scenario in perception_scenarios:
+            # These scenarios exercise real face/voice; only the new ReID
+            # prerequisite is synthetic. ReID inference has separate GPU tests.
+            capabilities += ["--capabilities", "reid"]
         processes.append(spawn(nav, root / "fake_navigation.log"))
-        if args.scenario not in perception_scenarios:
-            processes.append(spawn(face, root / "fake_capabilities.log"))
+        processes.append(spawn(capabilities, root / "fake_capabilities.log"))
 
         rclpy.init()
         observer = Observer(prefix)

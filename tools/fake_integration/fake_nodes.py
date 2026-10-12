@@ -237,11 +237,13 @@ class FakeFace(Node):
 
 
 class FakeCapabilities(Node):
-    """Publish only face/voice READY so tracking can exercise mission states."""
+    """Publish test-only capability READY; this does not test ReID inference."""
 
-    def __init__(self, state_topic: str, capability_topic: str) -> None:
+    def __init__(self, state_topic: str, capability_topic: str,
+                 capabilities=("face", "voice", "reid")) -> None:
         super().__init__("fake_capabilities")
         self._last_startup = 0
+        self._capabilities = tuple(capabilities)
         self._state_seq = 0
         self._state_signature = None
         self._state_conflicted = False
@@ -267,7 +269,7 @@ class FakeCapabilities(Node):
         if msg.state != MissionState.STARTUP or seq == self._last_startup:
             return
         self._last_startup = seq
-        for capability in ("face", "voice"):
+        for capability in self._capabilities:
             status = CapabilityStatus()
             status.header.stamp = self.get_clock().now().to_msg()
             status.capability = capability
@@ -286,6 +288,8 @@ def main() -> None:
     parser.add_argument("--bbox-topic", default="/perception/selected_target_bbox")
     parser.add_argument("--capability-topic", default="/perception/capability_status")
     parser.add_argument("--image-topic", default="/perception/tracked_target_image")
+    parser.add_argument("--capabilities", nargs="+", choices=("face", "voice", "reid"),
+                        default=("face", "voice", "reid"))
     args = parser.parse_args()
     rclpy.init()
     if args.role == "navigation":
@@ -293,7 +297,7 @@ def main() -> None:
     elif args.role == "face":
         node = FakeFace(args.state_topic, args.capability_topic, args.image_topic)
     else:
-        node = FakeCapabilities(args.state_topic, args.capability_topic)
+        node = FakeCapabilities(args.state_topic, args.capability_topic, args.capabilities)
     try:
         rclpy.spin(node)
     finally:

@@ -81,7 +81,7 @@ python3 src/perception/scripts/check_perception_environment.py \
 
 检查通过后，用 `tools/fake_integration/README.md` 的真实节点命令进行感知整流程验收。导航接入时保持合同中的 topic、QoS、`state_seq`、`target_id` 和 bbox 新鲜度约束。
 
-新增 ReID 服务按 [reid/README.md](reid/README.md) 使用 `runtime/reid.yaml` 启动；完整现场操作
+ReID 服务已随完整感知 launch 自动启动，读取 `runtime/reid.yaml`；用法见 [reid/README.md](reid/README.md)，完整现场操作
 见 [PR #51 测试指南](../../../docs/integration/reid_pr51_robot_test_guide.md)。模型资源整理不会
 自动重启服务；当日身份库继续保存在工作区 `data/reid`，不放入本静态资产目录。
 

@@ -1,11 +1,12 @@
 # 本机 fake 联调脚本
 
-该目录提供本机联调入口。最终 `normal` 场景只 fake 导航；supervisor、tracking、face、voice、
-readiness 和授权 orchestrator 都运行安装产物中的真实节点：
+该目录提供本机联调入口。`normal` 场景的 supervisor、tracking、face、voice、readiness 和
+授权 orchestrator 都运行安装产物中的真实节点，导航和 ReID capability 前置条件为模拟：
 
 - `fake_nodes.py --role navigation`：只发布导航 `READY`、`TARGET_POSITION_READY`、`ARRIVED_AND_STOPPED`；不连接底盘、雷达或控制器。
-- `fake_nodes.py --role capabilities`：仅供 tracking-only 回归场景补齐 capability，不参与最终
-  `normal` 验收。
+- `fake_nodes.py --role capabilities`：tracking-only 回归补齐 face/voice/reid；真实 face/voice
+  场景只用 `--capabilities reid` 补齐新增前置条件，不会伪造 face/voice 的 READY。该脚本不验证
+  ReID 模型或去重效果；它们由 provider 的真实 GPU 节点测试和生产完整感知栈另行验收。
 - `run_fake_integration.py`：启动上述真实主流程与感知节点，加上 fake navigation，记录状态、事件、
   分阶段 evidence、流程耗时、进程资源和 `tegrastats`。
 
@@ -87,10 +88,10 @@ ros2 launch move navigation.launch.py \
   use_sim_time:=false \
   params_file:=$DOG_PATROL_NAV_ROOT/config/nav_parameters.yaml
 
-# 终端 3：只补 face/voice READY，不运行 face/voice 算法
+# 终端 3：补 face/voice/reid READY，仅用于测试，不运行对应算法
 python3 tools/fake_integration/fake_nodes.py --role capabilities
 
-# 终端 4：感知 READY 聚合，只会等待 detection_tracking、face、voice 三个 READY
+# 终端 4：感知 READY 聚合，等待 detection_tracking、face、voice、reid 四个 READY
 ros2 run dog_patrol_perception_orchestrator perception_readiness
 
 # 终端 5：真实人像检测和跟踪，使用导航相机的原始 1280x1024 图像

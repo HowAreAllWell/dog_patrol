@@ -16,7 +16,7 @@ from dog_patrol_perception_orchestrator.readiness import CapabilitySample, Readi
 
 
 class PerceptionReadinessNode(Node):
-    REQUIRED_CAPABILITIES = ("detection_tracking", "face", "voice")
+    REQUIRED_CAPABILITIES = ("detection_tracking", "face", "voice", "reid")
 
     def __init__(self, *, parameter_overrides: Optional[Sequence[Parameter]] = None) -> None:
         super().__init__("perception_readiness", parameter_overrides=parameter_overrides)

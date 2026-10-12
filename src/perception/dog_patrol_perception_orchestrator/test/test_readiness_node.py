@@ -29,6 +29,22 @@ def volatile_qos(depth=10):
     )
 
 
+def test_production_aggregate_requires_reid_model_readiness():
+    node = PerceptionReadinessNode
+    assert "reid" in node.REQUIRED_CAPABILITIES
+    from dog_patrol_perception_orchestrator.readiness import (
+        CapabilitySample, ReadinessCoordinator, READY,
+    )
+    coordinator = ReadinessCoordinator(node.REQUIRED_CAPABILITIES,
+                                       startup_state=MissionState.STARTUP)
+    assert coordinator.observe_mission(90, MissionState.STARTUP) is None
+    for capability in ("detection_tracking", "face", "voice"):
+        assert coordinator.observe_capability(CapabilitySample(capability, READY, 90)) is None
+    assert coordinator.observe_capability(CapabilitySample("reid", 0, 90)) is None
+    assert coordinator.observe_capability(CapabilitySample("reid", READY, 89)) is None
+    assert coordinator.observe_capability(CapabilitySample("reid", READY, 90)) == 90
+
+
 def test_late_orchestrator_applies_retained_adapter_error_and_not_ready_before_recovery():
     rclpy.init()
     suffix = f"t{time.monotonic_ns()}"
@@ -154,7 +170,7 @@ def test_ready_state_blocks_late_startup_capabilities_and_old_startup_snapshot()
         startup.state_seq = 80
         startup.state = MissionState.STARTUP
         state_pub.publish(startup)
-        for capability in ("detection_tracking", "face"):
+        for capability in ("detection_tracking", "face", "reid"):
             status = CapabilityStatus()
             status.capability = capability
             status.status = CapabilityStatus.READY

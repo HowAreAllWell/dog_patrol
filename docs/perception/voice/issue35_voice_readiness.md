@@ -18,7 +18,7 @@
 | 配置、模型加载或 helper 校验失败 | `ERROR` | 当前资产/运行时不可信，需要排错或更换 |
 
 旧 sequence 的 retained status 不会满足新的 STARTUP；非 STARTUP 和 `state_seq == 0` 不触发发布。
-`ReadinessCoordinator` 仍负责整体 `detection_tracking + face + voice` 聚合，voice 节点不发布整体
+`ReadinessCoordinator` 负责当前生产的 `detection_tracking + reid + face + voice` 聚合，voice 节点不发布整体
 `MissionEvent`。
 
 当前父任务生命周期以

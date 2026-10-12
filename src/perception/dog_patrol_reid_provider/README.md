@@ -115,12 +115,18 @@ TRT 后端与 OpenCV 后端接口/预处理/输出完全一致（IO 保持 fp32�
 source /opt/ros/humble/setup.bash
 source install/setup.bash
 export ROS_DOMAIN_ID=42
-ros2 run dog_patrol_reid_provider reid_node --ros-args \
-  --params-file "$PWD/src/perception/dog_patrol_perception_assets_20260813/runtime/reid.yaml"
+export DOG_PATROL_PYTHON=/home/orin/venv/m20_nav/bin/python
+ros2 launch dog_patrol_perception_bringup perception_stack.launch.py
 ```
 
-该配置选用 TensorRT 和资产目录中的 FP16 engine；当日库继续写入 NVMe 工作区 `data/reid`。
-下方为通用配置示例，迁移到其他机器时填写其实际模型路径。
+感知统一启动（包括控制台感知按钮）自动加载该配置，选用 TensorRT 和资产目录中的 FP16
+engine；当日库继续写入 NVMe 工作区 `data/reid`。ReID 在当前合法 STARTUP 中发布内部
+`CapabilityStatus(reid)`；只有真实模型加载及预热成功、dedup service 已建立才报告 READY。
+模型不可用阻止整体感知 READY；当前 STARTUP 中每秒重试加载，离开 STARTUP/heartbeat
+超时停止报告，不在 PAUSE/RESUME 重新执行握手。感知退出会同时停止 ReID，不独立 respawn。
+单模块调试可用 `ros2 run dog_patrol_reid_provider reid_node --ros-args --params-file
+src/perception/dog_patrol_perception_assets_20260813/runtime/reid.yaml`，不能与完整感知栈重复启动。
+下方为通用独立调试示例，迁移到其他机器时填写其实际模型路径。
 
 ```bash
 ros2 launch dog_patrol_reid_provider reid.launch.py
