@@ -12,6 +12,7 @@ find_package(sensor_msgs REQUIRED)
 find_package(std_msgs REQUIRED)
 find_package(dog_patrol_interfaces REQUIRED)
 find_package(dog_patrol_perception_interfaces REQUIRED)
+find_package(dog_patrol_reid_provider REQUIRED)
 find_package(OpenCV REQUIRED)
 option(
   TRACKING_ENABLE_ORIN_RUNTIME
@@ -80,13 +81,16 @@ target_link_libraries(${PROJECT_NAME}_core PUBLIC ${OpenCV_LIBS})
 
 add_library(${PROJECT_NAME}_ros_adapter
   src/modules/mission_ros_adapter.cpp
+  src/modules/mission_tracking_runtime.cpp
+  src/modules/reid_confirm_gate.cpp
   src/modules/target_image_ros_adapter.cpp)
 target_include_directories(${PROJECT_NAME}_ros_adapter PUBLIC
   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
   $<INSTALL_INTERFACE:include>)
 target_compile_features(${PROJECT_NAME}_ros_adapter PUBLIC cxx_std_17)
 ament_target_dependencies(${PROJECT_NAME}_ros_adapter
-  rclcpp dog_patrol_interfaces dog_patrol_perception_interfaces)
+  rclcpp dog_patrol_interfaces dog_patrol_perception_interfaces
+  dog_patrol_reid_provider)
 target_link_libraries(${PROJECT_NAME}_ros_adapter ${PROJECT_NAME}_core)
 
 # Deterministic, headless transport fixture for the issue #84 deployment
@@ -195,7 +199,8 @@ if(TRACKING_ENABLE_ORIN_RUNTIME)
   add_executable(dog_patrol_perception_tracking_node src/perception_tracking_node.cpp)
   target_compile_features(dog_patrol_perception_tracking_node PUBLIC cxx_std_17)
   ament_target_dependencies(dog_patrol_perception_tracking_node
-    rclcpp cv_bridge sensor_msgs std_msgs dog_patrol_interfaces dog_patrol_perception_interfaces)
+    rclcpp cv_bridge sensor_msgs std_msgs dog_patrol_interfaces
+    dog_patrol_perception_interfaces dog_patrol_reid_provider)
   target_link_libraries(dog_patrol_perception_tracking_node
     ${PROJECT_NAME}_core
     ${PROJECT_NAME}_ros_adapter
@@ -310,6 +315,42 @@ if(BUILD_TESTING)
     target_include_directories(test_primary_target_manager PRIVATE include)
     target_link_libraries(test_primary_target_manager ${PROJECT_NAME}_core)
     ament_target_dependencies(test_primary_target_manager rclcpp)
+  endif()
+
+  # ReID 去重排除与选人边界（评审 N01/N03/N04）：纯 manager 级，无 ROS。
+  ament_add_gtest(test_reid_dedup_exclusion test/test_reid_dedup_exclusion.cpp)
+  if(TARGET test_reid_dedup_exclusion)
+    target_compile_features(test_reid_dedup_exclusion PUBLIC cxx_std_17)
+    target_include_directories(test_reid_dedup_exclusion PRIVATE include)
+    target_link_libraries(test_reid_dedup_exclusion ${PROJECT_NAME}_core)
+    ament_target_dependencies(test_reid_dedup_exclusion rclcpp)
+  endif()
+
+  # 真实 ReidConfirmGate + mock service（评审 N02/N03）：迟到响应/跨天失效。
+  ament_add_gtest(test_reid_confirm_gate test/test_reid_confirm_gate.cpp)
+  if(TARGET test_reid_confirm_gate)
+    target_compile_features(test_reid_confirm_gate PUBLIC cxx_std_17)
+    target_include_directories(test_reid_confirm_gate PRIVATE include)
+    target_link_libraries(test_reid_confirm_gate ${PROJECT_NAME}_ros_adapter)
+    ament_target_dependencies(test_reid_confirm_gate
+      rclcpp dog_patrol_interfaces dog_patrol_perception_interfaces
+      dog_patrol_reid_provider)
+    set_tests_properties(test_reid_confirm_gate PROPERTIES
+      ENVIRONMENT "ROS_DOMAIN_ID=188;ROS_LOCALHOST_ONLY=1")
+  endif()
+
+  # 生产 MissionTrackingRuntime 的 handled 转发回归（评审 N06）：真实
+  # adapter（StoreMissionState 直喂快照）+ 真实 gate，订阅 handled 通道计数。
+  ament_add_gtest(test_reid_handled_forwarding test/test_reid_handled_forwarding.cpp)
+  if(TARGET test_reid_handled_forwarding)
+    target_compile_features(test_reid_handled_forwarding PUBLIC cxx_std_17)
+    target_include_directories(test_reid_handled_forwarding PRIVATE include)
+    target_link_libraries(test_reid_handled_forwarding ${PROJECT_NAME}_ros_adapter)
+    ament_target_dependencies(test_reid_handled_forwarding
+      rclcpp dog_patrol_interfaces dog_patrol_perception_interfaces
+      dog_patrol_reid_provider)
+    set_tests_properties(test_reid_handled_forwarding PROPERTIES
+      ENVIRONMENT "ROS_DOMAIN_ID=189;ROS_LOCALHOST_ONLY=1")
   endif()
 
   ament_add_gtest(test_primary_target_observer test/test_primary_target_observer.cpp)

@@ -287,7 +287,8 @@ void MissionRosAdapter::PublishCapabilityStatus() {
 MissionFrameTransaction::Output MissionRosAdapter::ProcessFrame(
     const std::vector<IdentityObservation> &identities,
     const MissionCoordinator::TimePoint source_time,
-    const SourceFrameMetadata &metadata) {
+    const SourceFrameMetadata &metadata,
+    const std::function<bool(int target_id)> *confirm_gate) {
   // Keep frame-transaction stateful one-shot decisions and publication in one
   // short mission-state critical section. Detector/tracker/identity work has
   // already completed in the live pipeline; this only serializes transaction
@@ -299,6 +300,15 @@ MissionFrameTransaction::Output MissionRosAdapter::ProcessFrame(
   MissionFrameTransaction::Output output = frame_transaction_.Update(
       {current_mission, previous_mission_, identities, source_time, metadata});
   for (const auto &event : output.events) {
+    if (event.event == PerceptionMissionEvent::kTargetConfirmed &&
+        confirm_gate != nullptr && !(*confirm_gate)(event.target_id)) {
+      // 短时 ReID 去重闸门判定"今天已见过"：抑制本次确认事件发布。
+      RCLCPP_INFO_THROTTLE(node_.get_logger(), *node_.get_clock(), 5000,
+                           "reid gate: semantic_id=%d seen today, "
+                           "confirm_target suppressed",
+                           event.target_id);
+      continue;
+    }
     mission_event_publisher_->publish(
         EventMessage(event.event, event.target_id, event.observed_state_seq,
                      metadata.source_timestamp_ns));
@@ -311,6 +321,16 @@ MissionFrameTransaction::Output MissionRosAdapter::ProcessFrame(
     target_bbox_publisher_->publish(message.value());
   }
   return output;
+}
+
+void MissionRosAdapter::ExcludeForReidDedup(const int semantic_id) {
+  std::lock_guard<std::mutex> lock(mission_mutex_);
+  frame_transaction_.ExcludeForReidDedup(semantic_id);
+}
+
+void MissionRosAdapter::ClearReidDedupExclusions() {
+  std::lock_guard<std::mutex> lock(mission_mutex_);
+  frame_transaction_.ClearReidDedupExclusions();
 }
 
 }  // namespace dog_patrol_perception_tracking

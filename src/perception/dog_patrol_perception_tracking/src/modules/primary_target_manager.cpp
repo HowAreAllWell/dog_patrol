@@ -83,8 +83,19 @@ void PrimaryTargetManager::ResetForPatrolCycle(const int handled_semantic_id) {
   ResetCurrentPrimary();
 }
 
+void PrimaryTargetManager::ExcludeForReidDedup(const int semantic_id) {
+  if (semantic_id > 0) {
+    reid_dedup_excluded_ids_.insert(semantic_id);
+  }
+}
+
+void PrimaryTargetManager::ClearReidDedupExclusions() {
+  reid_dedup_excluded_ids_.clear();
+}
+
 void PrimaryTargetManager::ResetMissionHistory() {
   handled_identity_absence_started_at_.clear();
+  reid_dedup_excluded_ids_.clear();
   last_mission_for_primary_.reset();
   ResetCurrentPrimary();
 }
@@ -103,12 +114,21 @@ void PrimaryTargetManager::ResetCurrentPrimary() {
 
 bool PrimaryTargetManager::IsMissionEligible(const IdentityObservation &identity) const {
   return identity.semantic_id > 0 &&
-         handled_identity_absence_started_at_.find(identity.semantic_id) == handled_identity_absence_started_at_.end();
+         handled_identity_absence_started_at_.find(identity.semantic_id) == handled_identity_absence_started_at_.end() &&
+         reid_dedup_excluded_ids_.find(identity.semantic_id) == reid_dedup_excluded_ids_.end();
 }
 
 void PrimaryTargetManager::UpdateHandledIdentityAbsence(const std::vector<IdentityObservation> &identities,
                                                         const TimePoint now) {
-  for (auto it = handled_identity_absence_started_at_.begin(); it != handled_identity_absence_started_at_.end();) {
+  // ReID 排除项当日有效（N04 契约：处置过=当天免处置），不随不可见释放
+  UpdateAbsenceTable(handled_identity_absence_started_at_, identities, now);
+}
+
+// 可见即重置计时；持续不可见超过 handled_ignore_absence 后释放（重新可选）
+void PrimaryTargetManager::UpdateAbsenceTable(
+    std::unordered_map<int, std::optional<TimePoint>> &table,
+    const std::vector<IdentityObservation> &identities, const TimePoint now) {
+  for (auto it = table.begin(); it != table.end();) {
     const auto visible_identity = FindVisibleIdentityBySemanticId(identities, it->first);
     if (visible_identity.has_value()) {
       it->second.reset();
@@ -123,7 +143,7 @@ void PrimaryTargetManager::UpdateHandledIdentityAbsence(const std::vector<Identi
     }
 
     if (now >= it->second.value() && now - it->second.value() >= config_.handled_ignore_absence) {
-      it = handled_identity_absence_started_at_.erase(it);
+      it = table.erase(it);
       continue;
     }
     ++it;
@@ -284,6 +304,18 @@ PrimaryTargetResult PrimaryTargetManager::Update(const std::vector<IdentityObser
 PrimaryTargetResult PrimaryTargetManager::UpdateForPatrol(const std::vector<IdentityObservation> &identities,
                                                           const TimePoint now) {
   UpdateHandledIdentityAbsence(identities, now);
+  // 巡逻选人边界重评当前 primary 的资格（N01）：ReID 排除结论可能在持有
+  // 期间异步注入，在位者失去资格时让出 primary 并重选其他有效候选；活动
+  // 目标阶段（UpdateForActiveMissionTarget）仍只绑定 supervisor.target_id，
+  // 不经此路径换人。
+  const int current_primary_id =
+      primary_target_id_ > 0 ? primary_target_id_
+                             : (state_.primary_target_id > 0 ? state_.primary_target_id : -1);
+  if (current_primary_id > 0 &&
+      (handled_identity_absence_started_at_.find(current_primary_id) != handled_identity_absence_started_at_.end() ||
+       reid_dedup_excluded_ids_.find(current_primary_id) != reid_dedup_excluded_ids_.end())) {
+    ResetCurrentPrimary();
+  }
   return UpdateInternal(identities, true);
 }
 

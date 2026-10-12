@@ -4,6 +4,7 @@
 #include <optional>
 #include <string>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 #include "dog_patrol_perception_tracking/modules/mission_coordinator.hpp"
@@ -35,6 +36,16 @@ class PrimaryTargetManager {
   // excluded from patrol-primary selection; perception ownership stays with
   // the detector, tracker, and identity manager.
   void ResetForPatrolCycle(int handled_semantic_id = -1);
+
+  // ReID 去重排除（seen+handled 的外观结论，评审 R04/N04）：仅影响巡逻选人
+  // 资格；当日有效（契约：处置过的人当天免重复处置），不随持续不可见释放，
+  // 仅跨天或 STARTUP/reset 清除；业务 handled 表的 60 秒释放规则不受影响。
+  // 由帧处理路径经 MissionFrameTransaction 注入。
+  void ExcludeForReidDedup(int semantic_id);
+
+  // 跨天失效选人层的 ReID 排除项（评审 N03）：与 gate 锁存/provider 当日库
+  // 的日期清零同步。业务 handled 表按原有规则维护，不在此清理。
+  void ClearReidDedupExclusions();
 
   // Clears all mission-owned primary and handled-target history. This is used
   // only for STARTUP/reset or a full process session boundary.
@@ -70,6 +81,9 @@ class PrimaryTargetManager {
   std::optional<IdentityObservation> SelectLargestValidPersonIdentity(
       const std::vector<IdentityObservation> &identities, bool require_mission_eligibility) const;
   void UpdateHandledIdentityAbsence(const std::vector<IdentityObservation> &identities, TimePoint now);
+  // 业务 handled 表的"持续不可见释放"扫描（ReID 排除项当日有效，不参与）
+  void UpdateAbsenceTable(std::unordered_map<int, std::optional<TimePoint>> &table,
+                          const std::vector<IdentityObservation> &identities, TimePoint now);
   PrimaryTargetResult UpdateInternal(const std::vector<IdentityObservation> &identities,
                                      bool require_mission_eligibility);
   PrimaryTargetResult UpdateForActiveMissionTarget(
@@ -97,6 +111,8 @@ class PrimaryTargetManager {
   std::string last_decision_reason_;
   std::string last_reject_reason_;
   std::unordered_map<int, std::optional<TimePoint>> handled_identity_absence_started_at_;
+  // ReID 去重排除（当日有效）：无需不可见计时，值即"今日已免处置"事实
+  std::unordered_set<int> reid_dedup_excluded_ids_;
   std::optional<MissionSnapshot> last_mission_for_primary_;
 };
 

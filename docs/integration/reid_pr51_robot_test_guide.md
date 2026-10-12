@@ -1,0 +1,193 @@
+# PR #51 工作区实机测试说明
+
+## 测试版本
+
+- 工作区：`/mnt/nvme/workspace/dog_patrol`。
+- 测试分支：`feature/reid-dedup-gate`。
+- 已审查提交：`88fa5286dd3fb04720ae4b193fe74ec7d60b1bc0`。
+- 2026-10-12 已按用户授权合入本地 `merge`，保留合并提交和原测试分支；业务代码与上述测试版本一致。
+- 用户要求先不同步远端，本次没有推送或修改远端 PR 状态。
+- 使用当前工作区的 `install/setup.bash`，无需加载此前 /tmp 审查环境。
+
+## 当前验收结论（2026-10-12）
+
+用户已完成基本实机测试，反馈主要行为正常，可以接受当前 PR。运行范围按用户确认：
+tracking 与 ReID 一起执行，不考虑单侧离线或独立重启；这些场景不列为本轮待修问题。
+
+保留一项用户已接受的低概率限制：处置完成后，如果下一次图像帧前任务已被终止等状态变化
+清掉最新 handled 字段，ReID 可能漏记该次完成，后续可能重复核验。这条漏发不会把未处理
+人员误标为已处理。本轮不为该窗口扩充同步机制，详细证据和验收依据见
+[最新评审结论](../reviews/pr_50_reid_review.md)。验收后的本地合并已完成，远端暂不更新。
+
+本轮新增 CLIP 人体特征用于判断“这个人今天是否已经完成处置”。人员跟踪和 MobileFaceNet
+人脸认证沿用现有实现。新增服务需要单独启动，现有控制台的感知按钮不会启动它；服务未启动
+时 gate 会按设计回退到原有流程。
+
+## 终端一：先启动 ReID 服务
+
+```bash
+cd /mnt/nvme/workspace/dog_patrol
+source /opt/ros/humble/setup.bash
+source install/setup.bash
+export ROS_DOMAIN_ID=42
+export RMW_IMPLEMENTATION=rmw_fastrtps_cpp
+export FASTRTPS_DEFAULT_PROFILES_FILE="$PWD/src/navigation/fast_livo_dog/config/fastdds_udp_only.xml"
+export ROS_LOG_DIR="$PWD/log/reid-runtime"
+mkdir -p data/reid log/reid-runtime
+
+ros2 run dog_patrol_reid_provider reid_node --ros-args \
+  --params-file src/perception/dog_patrol_reid_provider/config/reid.yaml \
+  -p device:=tensorrt \
+  -p model_path:=/home/orin/reid_clipreid_vitb16_after.fp16.engine \
+  -p data_dir:=/mnt/nvme/workspace/dog_patrol/data/reid \
+  -p device_id:=m20-001 \
+  -p cloud.enable:=false
+```
+
+保持此终端运行。应看到 TensorRT engine 就绪和模型预加载完成，使用的特征维度为 1280。
+模型已转换，无需再次转换。数据和日志放在 NVMe 工作区，避免写入系统盘的默认 `/data/reid`。
+直接使用默认 `reid.launch.py` 没有配置此机的模型路径；本次测试使用上述完整命令。
+
+## 终端二：照常启动控制台
+
+```bash
+cd /mnt/nvme/workspace/dog_patrol
+source /opt/ros/humble/setup.bash
+source install/setup.bash
+export DOG_PATROL_VENV=/home/orin/venv/m20_nav
+export ROS_LOG_DIR="$PWD/log/robot-console"
+mkdir -p "$ROS_LOG_DIR"
+/home/orin/venv/m20_nav/bin/python src/orchestration/robot_console/robot_console/app.py
+```
+
+按原有方式启动传感器、定位、导航和感知，准备路线后显式 START。当前导航配置的域是 42；
+如果之后改 ROS_DOMAIN_ID，两套进程必须保持一致。源码和 main install 都已切到此测试版本，
+合并后可在本地 merge 分支继续使用，运行方式不变。
+
+## 确认新服务实际在用
+
+另开终端，加载相同 ROS 环境并设置 `ROS_DOMAIN_ID=42`：
+
+```bash
+cd /mnt/nvme/workspace/dog_patrol
+source /opt/ros/humble/setup.bash
+source install/setup.bash
+export ROS_DOMAIN_ID=42
+export RMW_IMPLEMENTATION=rmw_fastrtps_cpp
+export FASTRTPS_DEFAULT_PROFILES_FILE="$PWD/src/navigation/fast_livo_dog/config/fastdds_udp_only.xml"
+
+ros2 service list --no-daemon --spin-time 2 | grep -Fx '/perception/reid/dedup'
+ros2 param get --no-daemon --spin-time 2 /perception_reid device
+ros2 param get --no-daemon --spin-time 2 /perception_reid model_path
+ros2 topic echo /perception/reid/status --once
+```
+
+预期后端是 `tensorrt`、模型路径是上面的 engine，状态 JSON 中 `model_loaded=1`、
+`cloud_enabled=0`。开启感知时应有 `reid_confirm_gate 已启用` 的日志。
+
+检查命令使用系统自带的 grep，无需安装 rg。若右侧过滤命令不存在，左侧 ros2 service list
+可能因管道接收端退出而报 BrokenPipeError，这不代表 ReID 服务故障。上述 --no-daemon
+绕过 CLI daemon 的图缓存，--spin-time 2 为当前查询留出两秒发现时间。单次 Node not found
+表示这次参数命令的节点发现阶段没有找到目标；应重查服务、参数和状态，不必先重启节点。
+
+2026-10-12 对正在运行的域 42 服务只读复查：服务存在，device=tensorrt，model_path 指向
+已转换的正式 engine，model_loaded=1、cloud_enabled=0；未重启或修改运行节点。
+
+建议按以下顺序观察：
+
+1. READY、未 START 和 PAUSE 时不选业务目标、不发布确认事件。
+2. 新人或见过但未处置的人照常进入核验；取消/失败不能仅凭“见过”免处置。
+3. 完成一次有效处置后，同人再次具备选人资格时，ReID 应识别当天已处置并抑制再次确认。
+4. 已处置 A 和未处置 B 同屏时，A 不能持续占用 primary，B 应能被选择。
+5. PAUSE/RESUME、RETURN、TERMINATE 的原有行为正常。
+
+如果原 semantic ID 仍在基础排除表中，会直接被原有选人逻辑排除，不一定再次出现 ReID
+问询日志；不要只按每帧是否有日志判断功能是否生效。重点观察是否重复核验及同屏新人是否被挡。
+
+当日库按日期清理，可恢复同日已落盘的身份。当前验收按 tracking/ReID 一起运行使用，不以
+单独重启验证故障恢复。在线 tracking 观察到显式 mission reset 的 STARTUP 转换时，会发送
+handled 清理通知；测试“当天免重复处置”时应区分正常暂停/继续与完整 reset。停止测试时先在控制台
+终止任务并停止感知，再对终端一按 Ctrl+C，使服务正常退出并保存当日库。
+
+核验未完成时 PAUSE 不会为当前人员新增 handled 标记：可以已经 is_seen=true，但仍是
+handled=false。暂停使业务进入 READY、清除当前 target_id、递增 state_seq 并取消认证；旧
+认证结果不能在暂停后补记完成。若 supervisor 在暂停之前已经接受有效处置结果，则原有
+handled 会保留，暂停不会撤销已经成立的处置结果。
+
+## 红绿框与“处理完成”标记
+
+当前人体框色按画面中该人的 semantic_id 是否等于 primary_target_id 绘制：匹配主目标 ID
+画红框，其余画绿框。绘制函数没有读取 ReID handled，也没有单独检查认证是否通过；保留
+绑定 ID 的恢复状态也可能继续画红框。因此红框表示当前主目标身份，绿框表示非主目标，
+不能从颜色直接得出这个人已经完成处置。
+
+未处理的人恢复到 PATROL 后仍可被重新选择；再次成为主目标就会变红。PAUSE 的 READY、
+暂停后 RECOVER_PATROL、另一个人成为主目标等情况下，他可以是绿框，handled 仍为 false。
+当前图上没有独立的“已处理”文字或图标。
+
+处理完成由 supervisor 的有效业务结果产生：
+
+| 业务情况 | 当前人员是否产生新 handled 标记 |
+| --- | --- |
+| VERIFY_IDENTITY 接受有效 AUTHORIZED | 是 |
+| UNAUTHORIZED 进入 TRACK_INTRUDER | 暂不标记，追踪仍在进行 |
+| TRACK_INTRUDER 接受最终 TARGET_LOST 并进入恢复 | 是 |
+| CONFIRM/APPROACH/VERIFY 提前 TARGET_LOST | 否 |
+| 普通 EXECUTION_ERROR 退出当前处置 | 否 |
+| PAUSE/RESUME | 不新增；保留此前已经成立的结果 |
+
+supervisor 发布 handled_target_id 后，生产 runtime 将新结果通过 /perception/reid/handled
+转发，provider 按 track 绑定或可信外观匹配找到记录并置 handled=true。之后问询必须同时
+满足 is_seen=true、handled=true 才免重复处置。这里的写入标记、选人排除和红绿框是不同
+层次；/mission/state 的 handled_target_id 只表示最近的结论，不是所有已处理人员的列表。
+
+## 重新构建
+
+感知使用系统 colcon，生产 runtime 和 TensorRT 均开启：
+
+```bash
+cd /mnt/nvme/workspace/dog_patrol
+source /opt/ros/humble/setup.bash
+CMAKE_BUILD_PARALLEL_LEVEL=3 /usr/bin/colcon build \
+  --packages-up-to dog_patrol_reid_provider dog_patrol_perception_tracking \
+  --symlink-install \
+  --cmake-args -DREID_BUILD_TENSORRT=ON -DTRACKING_ENABLE_ORIN_RUNTIME=ON -DBUILD_TESTING=ON
+source install/setup.bash
+```
+
+该命令也会构建接口和 manager 依赖。工作区准备日志位于
+`build/pr51-review-88fa528/workspace_build.log`；PR 复审证据见
+[评审文档](../reviews/pr_50_reid_review.md)。
+
+## 本次工作区准备结果（2026-10-11）
+
+| 检查 | 结果 |
+| --- | --- |
+| 系统 colcon 构建 | 5 包成功：dog_patrol_interfaces、dog_patrol_perception_interfaces、dog_patrol_manager、dog_patrol_reid_provider、dog_patrol_perception_tracking |
+| 生产配置 | REID_BUILD_TENSORRT=ON、TRACKING_ENABLE_ORIN_RUNTIME=ON，产物安装到当前工作区 install |
+| manager | 70 项通过 |
+| ReID provider | 2/2 CTest 通过 |
+| tracking | 最后一次完整正式运行 58/58 CTest 通过，包含新增 19 项和原 adapter 19 项 gtest |
+| 两个接口包 | 构建成功；m20_nav 的消息/service/supervisor 导入检查通过；接口包本身无注册测试 |
+| 控制台 | m20_nav 执行 app.py --check-environment 成功，TASK_RUNNING=1、START=0 |
+| 安装路径 | provider、tracking 均解析到 /mnt/nvme/workspace/dog_patrol/install；控制台、感知、导航和 supervisor 入口文件存在 |
+| 真实模型服务 | 当前安装的 reid_node 在隔离 ROS_DOMAIN_ID=216 下实际加载正式 TensorRT 引擎，查询/handled/clear 通道验证通过 |
+| 构建测试时分支 | feature/reid-dedup-gate=88fa528；当时 merge=47f7d48。验收后已本地合并，业务代码一致，远端暂未同步 |
+
+tracking 初次整包测试中，既有 test_target_image_ros_smoke 失败；单项复跑通过后，再执行
+一次完整 tracking 正式测试，58/58 通过，test-result 为 0 errors、0 failures。保留初跑和
+重跑日志，没有修改测试或业务源码来绕过失败。其余包的 test-result 均为零失败；CTest
+包装层与 gtest XML 不重复累计为业务用例总数。
+
+真实服务检查使用合成人体 crop 和独立测试库：首次查询 false/false，再次见过但未处置
+true/false，标记处置并换 track 后 true/true，清除处置标记后 true/false。它验证部署链路，
+不代表真实人员精度。测试库放在 build/pr51-review-88fa528 下，未写入实机使用的 data/reid；
+该隔离服务已经正常停止并退出落盘。相机、导航和巡检由用户实机测试时启动。
+
+主要日志均在 `build/pr51-review-88fa528/`：
+
+- `workspace_build.log`：主工作区 5 包构建。
+- `workspace_test.log`、`workspace_tracking_result.log`：首次测试及原始失败记录。
+- `workspace_target_image_retry.log`：失败单项复跑。
+- `workspace_tracking_retry.log`、`workspace_tracking_result_final.log`：tracking 最终完整测试及零失败结果。
+- `workspace_service_smoke.log`、`workspace_service_smoke_node.log`：真实服务四步查询、GPU 加载和正常退出记录。
