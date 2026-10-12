@@ -34,9 +34,11 @@ reset、完成结果已被帧消费后再终止，均通过；完成与终止落
 `consistency_online.log` 和 `consistency_online.xml`。较早的 `consistency_review.xml`
 包含已被用户排除的离线/独立重启场景，不能据其失败数量增加本轮合并阻断意见。
 
-2026-10-12 用户授权将已验收版本合入本地 `merge`，随后明确要求“先不同步远端”。本地合并
-保留双父提交，业务代码与测试提交 `88fa528` 一致，`feature/reid-dedup-gate` 分支保留。
-验收记录和实机指南随此次本地合并归档；不推送，也不修改远端 PR 状态。
+2026-10-12 先按用户要求完成本地合并，随后用户明确授权接收远端 PR 并同步分支。现已将
+合并提交 `1cffd2406ac9a97767d8433a3ddfc0c2ceace1e9` 推送到 `origin/merge`，GitHub API
+确认 PR #51 为 closed、merged=true，目标分支为 merge，PR head 仍为已验收的 `88fa528`。
+合并保留双父提交，业务代码与测试版本一致；本地 `feature/reid-dedup-gate` 分支保留。
+验收记录和实机指南已归档，后续工作区使用 merge 分支。
 
 ## 历史复审：2026-10-11，PR #51，88fa528
 

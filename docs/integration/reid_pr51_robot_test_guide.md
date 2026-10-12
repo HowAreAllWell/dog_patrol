@@ -5,8 +5,8 @@
 - 工作区：`/mnt/nvme/workspace/dog_patrol`。
 - 测试分支：`feature/reid-dedup-gate`。
 - 已审查提交：`88fa5286dd3fb04720ae4b193fe74ec7d60b1bc0`。
-- 2026-10-12 已按用户授权合入本地 `merge`，保留合并提交和原测试分支；业务代码与上述测试版本一致。
-- 用户要求先不同步远端，本次没有推送或修改远端 PR 状态。
+- 2026-10-12 已按用户授权合入本地及远端 `merge`，合并提交为 `1cffd24`，原测试分支保留；业务代码与上述测试版本一致。
+- GitHub PR #51 已确认 merged；后续在 merge 分支使用和修改。
 - 使用当前工作区的 `install/setup.bash`，无需加载此前 /tmp 审查环境。
 
 ## 当前验收结论（2026-10-12）
@@ -17,7 +17,7 @@ tracking 与 ReID 一起执行，不考虑单侧离线或独立重启；这些�
 保留一项用户已接受的低概率限制：处置完成后，如果下一次图像帧前任务已被终止等状态变化
 清掉最新 handled 字段，ReID 可能漏记该次完成，后续可能重复核验。这条漏发不会把未处理
 人员误标为已处理。本轮不为该窗口扩充同步机制，详细证据和验收依据见
-[最新评审结论](../reviews/pr_50_reid_review.md)。验收后的本地合并已完成，远端暂不更新。
+[最新评审结论](../reviews/pr_50_reid_review.md)。验收后的合并已完成并同步远端，PR #51 已接收。
 
 本轮新增 CLIP 人体特征用于判断“这个人今天是否已经完成处置”。人员跟踪和 MobileFaceNet
 人脸认证沿用现有实现。新增服务需要单独启动，现有控制台的感知按钮不会启动它；服务未启动
@@ -172,7 +172,7 @@ source install/setup.bash
 | 控制台 | m20_nav 执行 app.py --check-environment 成功，TASK_RUNNING=1、START=0 |
 | 安装路径 | provider、tracking 均解析到 /mnt/nvme/workspace/dog_patrol/install；控制台、感知、导航和 supervisor 入口文件存在 |
 | 真实模型服务 | 当前安装的 reid_node 在隔离 ROS_DOMAIN_ID=216 下实际加载正式 TensorRT 引擎，查询/handled/clear 通道验证通过 |
-| 构建测试时分支 | feature/reid-dedup-gate=88fa528；当时 merge=47f7d48。验收后已本地合并，业务代码一致，远端暂未同步 |
+| 构建测试时分支 | feature/reid-dedup-gate=88fa528；当时 merge=47f7d48。验收后已合并并同步 origin/merge，业务代码一致 |
 
 tracking 初次整包测试中，既有 test_target_image_ros_smoke 失败；单项复跑通过后，再执行
 一次完整 tracking 正式测试，58/58 通过，test-result 为 0 errors、0 failures。保留初跑和
