@@ -9,11 +9,17 @@
 ```text
 perception_assets/
 ├── runtime/
-│   └── face.yaml
+│   ├── face.yaml
+│   └── reid.yaml
 ├── tracking/
 │   ├── yolo26n_fp16_640.engine
 │   ├── perception_tracking.yaml
 │   └── bot_sort.yaml
+├── reid/
+│   ├── reid_clipreid_vitb16_after.onnx
+│   ├── reid_clipreid_vitb16_after.fp16.engine
+│   ├── reid_clipreid_vitb16_after.fp16.engine.json
+│   └── README.md
 ├── face/
 │   ├── detector.engine
 │   ├── mobilefacenet_fp16.engine
@@ -30,6 +36,7 @@ perception_assets/
 ## 必需资产
 
 - tracking：目标 Orin 本机生成的 YOLO26n FP16 TensorRT engine、相机序列号参数和 tracker YAML。
+- reid：CLIP ViT-B/16 after 原始 ONNX、已在当前 Orin 验证的 FP16 engine 和转换记录；用于当日已处置人员去重，输出 1280 维。
 - face：YOLO/TensorRT detector engine、MobileFaceNet recognition engine、YuNet 注册模型，以及 512 维 MobileFaceNet whitelist embedding 目录。
 - voice：Vosk 模型目录、目标 R818 的 ADB serial、实际 ALSA 播放设备和 mixer 配置。
 
@@ -50,6 +57,7 @@ cp src/perception/dog_patrol_perception_voice/config/voice.yaml voice/voice.yaml
 
 - `tracking/perception_tracking.yaml` 的 `camera.mvs_serial` 和 `detector.runtime_path`；默认 `light` ReID 不需要 ONNX。
 - `runtime/face.yaml` 的 `detector_engine`、`recognition_engine` 和 `whitelist_dir`；生产默认是MobileFaceNet。
+- `runtime/reid.yaml` 的 `model_path` 和 `data_dir`；本机已配置为本资产包下的 TRT engine，以及 NVMe 工作区的 `data/reid`。
 - `voice/voice.yaml` 的 `device_serial`、`prompt_device`、`prompt_mixer_card` 和 `prompt_mixer_control`。
 
 不要把这些现场配置提交回公开仓库。
@@ -73,11 +81,15 @@ python3 src/perception/scripts/check_perception_environment.py \
 
 检查通过后，用 `tools/fake_integration/README.md` 的真实节点命令进行感知整流程验收。导航接入时保持合同中的 topic、QoS、`state_seq`、`target_id` 和 bbox 新鲜度约束。
 
+新增 ReID 服务按 [reid/README.md](reid/README.md) 使用 `runtime/reid.yaml` 启动；完整现场操作
+见 [PR #51 测试指南](../../../docs/integration/reid_pr51_robot_test_guide.md)。模型资源整理不会
+自动重启服务；当日身份库继续保存在工作区 `data/reid`，不放入本静态资产目录。
+
 生成校验和示例：
 
 ```bash
 cd /path/to/perception_assets
-find runtime tracking face voice -type f \
+find runtime tracking reid face voice -type f \
   -not -path '*/whitelist_mobilefacenet/*' \
   -print0 | sort -z | xargs -0 sha256sum > SHA256SUMS
 ```

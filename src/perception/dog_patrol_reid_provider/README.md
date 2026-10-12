@@ -107,6 +107,21 @@ TRT 后端与 OpenCV 后端接口/预处理/输出完全一致（IO 保持 fp32�
 
 ## 运行
 
+本仓当前 Orin 的模型与转换记录统一存放在
+`src/perception/dog_patrol_perception_assets_20260813/reid/`，本机完整运行配置在
+`src/perception/dog_patrol_perception_assets_20260813/runtime/reid.yaml`。从仓库根目录执行：
+
+```bash
+source /opt/ros/humble/setup.bash
+source install/setup.bash
+export ROS_DOMAIN_ID=42
+ros2 run dog_patrol_reid_provider reid_node --ros-args \
+  --params-file "$PWD/src/perception/dog_patrol_perception_assets_20260813/runtime/reid.yaml"
+```
+
+该配置选用 TensorRT 和资产目录中的 FP16 engine；当日库继续写入 NVMe 工作区 `data/reid`。
+下方为通用配置示例，迁移到其他机器时填写其实际模型路径。
+
 ```bash
 ros2 launch dog_patrol_reid_provider reid.launch.py
 # 或手工传参

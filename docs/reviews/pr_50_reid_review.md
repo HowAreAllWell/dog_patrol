@@ -37,8 +37,10 @@ reset、完成结果已被帧消费后再终止，均通过；完成与终止落
 2026-10-12 先按用户要求完成本地合并，随后用户明确授权接收远端 PR 并同步分支。现已将
 合并提交 `1cffd2406ac9a97767d8433a3ddfc0c2ceace1e9` 推送到 `origin/merge`，GitHub API
 确认 PR #51 为 closed、merged=true，目标分支为 merge，PR head 仍为已验收的 `88fa528`。
-合并保留双父提交，业务代码与测试版本一致；本地 `feature/reid-dedup-gate` 分支保留。
-验收记录和实机指南已归档，后续工作区使用 merge 分支。
+合并保留双父提交，业务代码与测试版本一致；验收记录和实机指南已归档，后续工作区使用 merge。
+随后按用户要求清理本次 ReID PR 的本地测试分支及五个审查引用，其他功能分支和远端分支未动。
+旧审查版本在 `build/pr51-review-88fa528/reid_old_review_refs_20261012.bundle` 归档，引用名和
+提交 ID 见同目录 `local_reid_pr_refs_before_cleanup_20261012.json`；测试提交仍在 merge 历史中。
 
 ## 历史复审：2026-10-11，PR #51，88fa528
 

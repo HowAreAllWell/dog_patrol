@@ -1,0 +1,38 @@
+{
+  "source_onnx": "/home/orin/reid_clipreid_vitb16_after.onnx",
+  "source_sha256": "905c3072d73dfd4d8cf92884c9a90af83ca7ac4d5fab9ddcc14369d07c3ec98f",
+  "engine": "/home/orin/reid_clipreid_vitb16_after.fp16.engine",
+  "engine_sha256": "0d7a307f7a5dea7e97380e3ea9e648695229bb22e828daff3a6f2e7317ef9d9f",
+  "engine_size_bytes": 175199364,
+  "tensorrt_version": "10.3.0.30",
+  "device": "Orin",
+  "precision": "FP16 enabled, FP32 input/output",
+  "builder_optimization_level": 3,
+  "workspace_mib": 2048,
+  "input": {
+    "name": "image_rgb_f32",
+    "shape": [
+      1,
+      3,
+      256,
+      128
+    ],
+    "dtype": "float32"
+  },
+  "output": {
+    "name": "feature",
+    "shape": [
+      1,
+      1280
+    ],
+    "dtype": "float32"
+  },
+  "verification": {
+    "pr_native_extractor": "passed",
+    "feature_l2_norm": 1.0,
+    "zero_input_cosine_to_onnxruntime_cpu": 0.9999861717224121,
+    "max_abs_diff_to_reference": 0.000487007200717926,
+    "recognition_accuracy": "not evaluated"
+  },
+  "created_at": "2026-10-10T19:50:48.618484+08:00"
+}

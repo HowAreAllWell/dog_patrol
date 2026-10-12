@@ -1,0 +1,55 @@
+# Orin 本机 ReID 运行配置；启动时加载，修改后由用户重新启动服务。
+/perception_reid:
+  ros__parameters:
+    # ---- 接口 ----
+    service_name: /perception/reid/dedup
+    status_topic: /perception/reid/status
+    handled_topic: /perception/reid/handled   # 任务侧 handled 结论下发（gate 转发）
+    cloud_request_topic: /reid/cloud/request
+    cloud_response_topic: /reid/cloud/response
+    cloud_qos_depth: 200          # 负责人接口约定 3.5
+
+    # ---- 云端交互 ----
+    cloud.enable: false           # 当前阶段（检测对接期）关闭；代理部署后改 true
+                                   # 关闭时未命中立即返回"新人"，不等待云端
+    cloud.timeout_ms: 3000        # 未命中时等待云端响应上限
+    cloud.grace_sec: 60.0         # 超时后迟到响应仍可绑定全局身份的窗口
+    cloud.apply_library_updates: true  # false = 不接收云端扇出库更新
+    cloud.max_results: 3
+    library_update_topic: /reid/cloud/library_update   # 扇出订阅（我们的扩展接口）
+    device_id: "m20-001"          # 多狗部署时每台必须唯一！
+    api_version: "1.0"
+    model_name: "clipreid_vitb16_after"   # 云端按此+版本做兼容校验，全狗队必须一致
+    model_version: "1.0.0"
+    data_dir: /mnt/nvme/workspace/dog_patrol/data/reid  # 当日库与载荷放 NVMe，不写入静态资源包
+
+    # ---- 模型 ----
+    model_path: "/mnt/nvme/workspace/dog_patrol/src/perception/dog_patrol_perception_assets_20260813/reid/reid_clipreid_vitb16_after.fp16.engine"
+    device: tensorrt              # 已在当前 Orin / TensorRT 10.3.0.30 验证
+    input_height: 256
+    input_width: 128
+
+    # ---- 端侧库 ----
+    threshold: 0.70               # 身份命中余弦阈值（ViT-B/16 after 标定）
+    track_assoc_threshold: 0.50   # 同 track 兜底关联阈值（防 track 裂化）
+    max_identities: 10000
+    track_ttl_sec: 300.0          # track 映射有效期
+    update_min_delta: 0.01        # 模板移动小于该值不回推云端（防抖）
+    min_det_conf: 0.0             # 检测置信度下限（0=不启用，质量把关交检测侧）
+
+    # ---- 当日库持久化 ----
+    persist.enable: true            # 重启/开关机后从 data_dir/library.bin 恢复当日库；
+                                    #   跨天文件自动作废（每日清零语义不变）；
+                                    #   模型/版本不符或损坏的文件不加载（从空库开始）
+    persist.save_interval_sec: 10.0 # 防抖落盘间隔；异常断电最多丢该窗口内的更新，
+                                    #   正常退出时兜底落盘一次
+
+    # ---- 载荷 ----
+    thumb_width: 96               # 96x192 webp q60 约 3~4KB；1280 维 float32=5120B
+    thumb_height: 192             # 两者合计 < 10240B（接口约定 3.3）
+    thumb_quality: 60
+
+    # ---- 模型驻留 ----
+    model_idle_unload_sec: 0.0    # 0=常驻（推荐：启动即预加载，巡逻全日问询，
+                                  #   卸载再加载只会让空闲后的第一人多等）；
+                                  #   >0 = 空闲 N 秒后卸载（内存/显存紧张时用）

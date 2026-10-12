@@ -3,9 +3,9 @@
 ## 测试版本
 
 - 工作区：`/mnt/nvme/workspace/dog_patrol`。
-- 测试分支：`feature/reid-dedup-gate`。
+- 当前使用分支：`merge`；原测试分支 `feature/reid-dedup-gate` 已在合并后按用户要求清理。
 - 已审查提交：`88fa5286dd3fb04720ae4b193fe74ec7d60b1bc0`。
-- 2026-10-12 已按用户授权合入本地及远端 `merge`，合并提交为 `1cffd24`，原测试分支保留；业务代码与上述测试版本一致。
+- 2026-10-12 已按用户授权合入本地及远端 `merge`，合并提交为 `1cffd24`；测试提交保留在合并历史中。
 - GitHub PR #51 已确认 merged；后续在 merge 分支使用和修改。
 - 使用当前工作区的 `install/setup.bash`，无需加载此前 /tmp 审查环境。
 
@@ -36,17 +36,20 @@ export ROS_LOG_DIR="$PWD/log/reid-runtime"
 mkdir -p data/reid log/reid-runtime
 
 ros2 run dog_patrol_reid_provider reid_node --ros-args \
-  --params-file src/perception/dog_patrol_reid_provider/config/reid.yaml \
-  -p device:=tensorrt \
-  -p model_path:=/home/orin/reid_clipreid_vitb16_after.fp16.engine \
-  -p data_dir:=/mnt/nvme/workspace/dog_patrol/data/reid \
-  -p device_id:=m20-001 \
-  -p cloud.enable:=false
+  --params-file "$PWD/src/perception/dog_patrol_perception_assets_20260813/runtime/reid.yaml"
 ```
 
 保持此终端运行。应看到 TensorRT engine 就绪和模型预加载完成，使用的特征维度为 1280。
-模型已转换，无需再次转换。数据和日志放在 NVMe 工作区，避免写入系统盘的默认 `/data/reid`。
-直接使用默认 `reid.launch.py` 没有配置此机的模型路径；本次测试使用上述完整命令。
+模型已转换并放入感知资产包的 `reid/`，无需再次转换；配置中的 model_path 指向该目录的
+`reid_clipreid_vitb16_after.fp16.engine`。数据和日志放在 NVMe 工作区，避免写入系统盘的默认 `/data/reid`。
+直接使用默认 `reid.launch.py` 没有配置此机的模型路径；本次测试使用上述资产配置命令。
+现有运行进程不会自动改用新路径，下次启动时由用户加载新配置。
+
+2026-10-12 资源整理后已验证：资产包 `SHA256SUMS` 全部 31 项通过；使用上述 runtime
+配置在隔离 ROS domain 223、独立测试身份库中实际加载新路径 engine，依次验证新人、
+已见未处置、跨 track 已处置、清除处置但保留已见四种结果，均通过。验证未重启生产节点，
+未修改 `data/reid`。记录见 `build/pr51-review-88fa528/resources_service_smoke.log` 和
+`resources_service_smoke_node.log`。
 
 ## 终端二：照常启动控制台
 
