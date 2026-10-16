@@ -13,10 +13,10 @@ uint8 state
 uint32 target_id
 string detail
 
-# Business disposition, not the target released by navigation recovery.
-# Nonzero only after AUTHORIZED or final TARGET_LOST in TRACK_INTRUDER.
+# Successfully verified target, not the target released by navigation recovery.
+# Set to the current target only when VERIFY_IDENTITY accepts AUTHORIZED.
 # Retained in RECOVER_PATROL, PAUSED+READY and the following PATROL; cleared
-# for a new target task or session. Failures before completion must leave this
-# zero. In PAUSED+READY and pause-recovery RECOVER_PATROL, target_id is zero
-# and this field may retain the last completed target.
+# for a new target task or session. TARGET_LOST and EXECUTION_ERROR never add
+# a handled target. In PAUSED+READY and pause-recovery RECOVER_PATROL, target_id
+# is zero and this field may retain the last successfully verified target.
 uint32 handled_target_id

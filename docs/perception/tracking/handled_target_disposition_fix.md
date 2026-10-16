@@ -7,12 +7,13 @@
 ## 行为变更
 
 在 `MissionState` 中增加 `uint32 handled_target_id`，总控明确提供业务处理结果，
-感知不再从上一任务阶段推断结果。
+感知不再从上一任务阶段推断结果。当前规则仅允许核验通过新增已处理标记；
+核验失败后的跟踪结束不再授予排除资格。下列历史验证记录仍保留其当时的结果。
 
 | 结束条件 | `handled_target_id` | 返回巡逻时 |
 |---|---|---|
 | `VERIFY_IDENTITY` 接受 `AUTHORIZED` | 当前目标 ID | 排除该目标 |
-| `TRACK_INTRUDER` 接受最终 `TARGET_LOST` | 当前目标 ID | 保留原有跟踪结束后的排除 |
+| `TRACK_INTRUDER` 接受最终 `TARGET_LOST` | 0 | 同人恢复可见后仍可再次核验 |
 | 位置确认超时 | 0 | 目标保持可选 |
 | 确认/接近/核验阶段丢失 | 0 | 目标恢复可见后仍可选 |
 | 执行错误，包括持续跟踪中的技术错误 | 0 | 不授予业务处理豁免 |
@@ -32,7 +33,8 @@
 
 ## 验证场景
 
-- A 被明确处理后，B/C 仍可选；B/C 确认失败不能累计为全部排除。
+- A 核验通过后，B/C 仍可选；B/C 确认失败不能累计为全部排除。
+- 两轮核验失败进入 TRACK 后，最终 TARGET_LOST 也不新增已处理标记；同人再次出现仍可核验。
 - 单独出现 VERIFY、TRACK、RECOVER 阶段不构成已处理证据。
 - 只收到返回巡逻的快照，也能正确应用 A 的结果。
 - 重复巡逻心跳不延长 60 秒连续离场阈值；已到期项不会被同一快照重新添加。
@@ -88,6 +90,12 @@ WSL 的图像传输 smoke 仍存在环境差异：独立诊断副本中，110 �
 在部署前保留现有版本和实际生效参数。回退也应整套恢复接口与相关节点，不能只回退
 其中一端。已运行旧实现的进程应重启，避免旧内存排除名单残留。
 
+仅核验通过才标记的新规则不会自动修正旧 ReID 持久化数据：旧 handled 记录没有保存
+核验通过或跟踪结束的来源。升级时应让 tracking/ReID 一起运行，待 tracking 已观察到 READY
+后，通过 `/mission/reset` 显式重进 STARTUP，同时清除 tracking 内存排除表和 ReID handled
+标记，并保留外观库；确认 ReID 输出“任务 reset：清除 handled 标记”日志。
+单纯重启会重新加载已落盘标记，不能替代清理；仅清 ReID 也不能清除 tracking 的旧排除项。
+
 使用控制台启动时，先退出整个 `robot_console/app.py`；仅点击停止导航/感知节点
 会留下常驻任务管理器。重建后从新终端加载新工作区的 `install/setup.bash`，用
 `ros2 interface show dog_patrol_interfaces/msg/MissionState` 确认新字段存在，并用
@@ -102,6 +110,8 @@ WSL 的图像传输 smoke 仍存在环境差异：独立诊断副本中，110 �
    `CONFIRM_TARGET → RECOVER_PATROL → PATROL` 的 `state_seq`、`target_id` 和
    `handled_target_id`；返回巡逻时处理结果应为 0，失败对象应可再次成为红框。
    仅凭框色无法确认失败是否走过预期路径。
+   另验证两轮核验失败后的 `TRACK_INTRUDER → TARGET_LOST → RECOVER_PATROL → PATROL`：
+   `handled_target_id` 应始终为 0，同人再次出现并具备选人资格时应重新核验。
 3. 若 B 一直是最大框，它可能反复被选中；需让 B 暂时离开或调整位置，使 C 也被
    选中并单独验收，不能将 C 没有获得选择机会误判为补丁失效。
 4. 对已处理的 A 分别测试连续离场不足 60 秒返回、连续离场超过 60 秒后返回。

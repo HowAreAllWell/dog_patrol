@@ -590,9 +590,10 @@ uint32 handled_target_id
 - `state`：公共任务状态；
 - `target_id`：当前活动目标，0 表示无目标；
 - `detail`：日志和 UI 说明，不能作为程序业务判断条件。
-- `handled_target_id`：已完成业务处理、应新增排除的目标，0 表示无新增排除。
-  总控仅在 `AUTHORIZED` 或 `TRACK_INTRUDER` 最终 `TARGET_LOST` 后设置，
-  保留到恢复后的巡逻；下一目标或会话重置时清零。技术失败返回巡逻不产生该结果。
+- `handled_target_id`：已核验通过、应新增排除的目标，0 表示无新增排除。
+  总控仅在 `VERIFY_IDENTITY` 接受有效 `AUTHORIZED` 后设置，保留到恢复后的巡逻；
+  下一目标或会话重置时清零。核验失败后跟踪结束，以及任何阶段的 `TARGET_LOST` 或
+  `EXECUTION_ERROR`，均不新增该结果。
 
 感知根据新巡逻状态中的显式结果执行排除，不根据上一阶段推断结果。消息接口升级时，
 所有使用 `MissionState` 的节点须与 `dog_patrol_interfaces` 一同重新构建部署。
