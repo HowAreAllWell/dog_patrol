@@ -73,6 +73,7 @@ class EnvironmentCheckTest(unittest.TestCase):
             MODULE.parse_module_statuses(path),
             {
                 "tracking": "implemented",
+                "reid": "implemented",
                 "face": "implemented",
                 "voice": "implemented",
                 "orchestrator": "implemented",
