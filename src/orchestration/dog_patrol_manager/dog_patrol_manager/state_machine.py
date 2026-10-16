@@ -284,6 +284,7 @@ class MissionStateMachine:
             self._target_id = target_id
             self._handled_target_id = 0
         elif event == EventType.AUTHORIZED:
+            # Only successful verification grants the handled exemption.
             self._handled_target_id = target_id
         if next_state == GlobalState.PATROL:
             self._target_id = 0
@@ -321,7 +322,7 @@ class MissionStateMachine:
         snapshot = self._finish_task(TaskOutcome.TASK_OUTCOME_COMPLETED, "waypoint sequence completed")
         return EventResult(True, True, False, snapshot.detail, snapshot)
 
-    def begin_patrol_recovery(self, detail: str, *, target_handled: bool = False) -> EventResult:
+    def begin_patrol_recovery(self, detail: str) -> EventResult:
         if self._task_state != ParentTaskState.TASK_RUNNING:
             return self._reject("patrol recovery requires TASK_RUNNING")
         if self._state not in {
@@ -333,7 +334,7 @@ class MissionStateMachine:
             return self._reject(f"patrol recovery is invalid in {self._state.name}")
         previous_state = self._state
         previous_target = self._target_id
-        self._handled_target_id = previous_target if target_handled else 0
+        self._handled_target_id = 0
         self._recovery_from_pause = False
         self._state = GlobalState.RECOVER_PATROL
         self._navigation_mode = NavigationMode.NAVIGATION_MISSION
@@ -485,7 +486,6 @@ class MissionStateMachine:
         detail = str(raw_event.detail).strip() or "target lost"
         return self.begin_patrol_recovery(
             f"{source.name}/TARGET_LOST: {detail}",
-            target_handled=self._state == GlobalState.TRACK_INTRUDER,
         )
 
     def _handle_execution_error(self, source: EventSource, raw_event: MissionEventData, key: EventKey) -> EventResult:

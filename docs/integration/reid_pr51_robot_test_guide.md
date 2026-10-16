@@ -141,10 +141,12 @@ ros2 topic echo /perception/reid/status --once
 建议按以下顺序观察：
 
 1. READY、未 START 和 PAUSE 时不选业务目标、不发布确认事件。
-2. 新人或见过但未处置的人照常进入核验；取消/失败不能仅凭“见过”免处置。
-3. 完成一次有效处置后，同人再次具备选人资格时，ReID 应识别当天已处置并抑制再次确认。
-4. 已处置 A 和未处置 B 同屏时，A 不能持续占用 primary，B 应能被选择。
+2. 新人或见过但未核验通过的人照常进入核验；取消/失败不能仅凭“见过”免核验。
+3. 核验通过后，同人再次具备选人资格时，ReID 应识别当天已处理并抑制再次确认。
+4. 已核验通过的 A 和未通过的 B 同屏时，A 不能持续占用 primary，B 应能被选择。
 5. PAUSE/RESUME、RETURN、TERMINATE 的原有行为正常。
+6. 两轮核验失败进入 TRACK_INTRUDER，再因 TARGET_LOST 恢复巡逻后，handled_target_id
+   应保持为 0；同人重新出现并具备选人资格时，应再次触发核验。
 
 如果原 semantic ID 仍在基础排除表中，会直接被原有选人逻辑排除，不一定再次出现 ReID
 问询日志；不要只按每帧是否有日志判断功能是否生效。重点观察是否重复核验及同屏新人是否被挡。
@@ -156,8 +158,8 @@ handled 清理通知；测试“当天免重复处置”时应区分正常暂停
 
 核验未完成时 PAUSE 不会为当前人员新增 handled 标记：可以已经 is_seen=true，但仍是
 handled=false。暂停使业务进入 READY、清除当前 target_id、递增 state_seq 并取消认证；旧
-认证结果不能在暂停后补记完成。若 supervisor 在暂停之前已经接受有效处置结果，则原有
-handled 会保留，暂停不会撤销已经成立的处置结果。
+认证结果不能在暂停后补记完成。若 supervisor 在暂停之前已经接受有效 AUTHORIZED，则原有
+handled 会保留，暂停不会撤销已经成立的核验通过结果。
 
 ## 红绿框与“处理完成”标记
 
@@ -170,15 +172,15 @@ handled 会保留，暂停不会撤销已经成立的处置结果。
 暂停后 RECOVER_PATROL、另一个人成为主目标等情况下，他可以是绿框，handled 仍为 false。
 当前图上没有独立的“已处理”文字或图标。
 
-处理完成由 supervisor 的有效业务结果产生：
+只有 supervisor 在 VERIFY_IDENTITY 接受有效 AUTHORIZED，才为当前人员新增已处理标记：
 
 | 业务情况 | 当前人员是否产生新 handled 标记 |
 | --- | --- |
 | VERIFY_IDENTITY 接受有效 AUTHORIZED | 是 |
-| UNAUTHORIZED 进入 TRACK_INTRUDER | 暂不标记，追踪仍在进行 |
-| TRACK_INTRUDER 接受最终 TARGET_LOST 并进入恢复 | 是 |
+| UNAUTHORIZED 进入 TRACK_INTRUDER | 否 |
+| TRACK_INTRUDER 接受最终 TARGET_LOST 并进入恢复 | 否；恢复巡逻后同人仍可再次核验 |
 | CONFIRM/APPROACH/VERIFY 提前 TARGET_LOST | 否 |
-| 普通 EXECUTION_ERROR 退出当前处置 | 否 |
+| 任何阶段的 EXECUTION_ERROR | 不新增；恢复阶段保留此前核验通过的结果 |
 | PAUSE/RESUME | 不新增；保留此前已经成立的结果 |
 
 supervisor 发布 handled_target_id 后，生产 runtime 将新结果通过 /perception/reid/handled
@@ -187,6 +189,12 @@ supervisor 发布 handled_target_id 后，生产 runtime 将新结果通过 /per
 层次；/mission/state 的 handled_target_id 只表示最近的结论，不是所有已处理人员的列表。
 
 ## 重新构建
+
+部署“仅核验通过才标记”的规则时，旧 ReID handled 记录只有布尔值，无法区分核验通过
+和跟踪结束。重建并统一重启后，应让 tracking/ReID 一起运行，待 tracking 已观察到 READY
+后，通过 `/mission/reset` 显式重进 STARTUP，同时清理 tracking 内存排除表与 ReID handled
+标记，保留外观库；确认 ReID 输出“任务 reset：清除 handled 标记”日志。
+单纯重启会恢复已落盘标记；只清 ReID 不能清除 tracking 的旧排除项。
 
 感知使用系统 colcon，生产 runtime 和 TensorRT 均开启：
 

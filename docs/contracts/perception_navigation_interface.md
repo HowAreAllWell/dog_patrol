@@ -112,7 +112,7 @@ ARRIVED_AND_STOPPED
 
 - `state_seq`：区分不同的全局状态版本；
 - `target_id`：区分不同目标；
-- `handled_target_id`：记录已形成最终业务结果、供感知建立排除表的目标；
+- `handled_target_id`：记录已核验通过、供感知建立排除表的目标；
 - `header.stamp`：判断连续数据是否过期。
 
 父任务控制使用 `PatrolTaskState` 和 `PatrolTaskCommand`，不通过状态 Topic 或 waypoint
@@ -358,13 +358,14 @@ uint32 handled_target_id
 - `state`：当前全局状态；
 - `target_id`：当前目标，`0` 表示没有活动目标；
 - `detail`：供日志和界面显示的说明，程序不能解析该字符串决定业务逻辑。
-- `handled_target_id`：总控明确判定已完成业务处理、应进入感知排除名单的目标；
+- `handled_target_id`：总控接受核验通过结果、应进入感知排除名单的目标；
   `0` 表示本轮没有新增排除。它不是“刚结束任务的目标”，不能由恢复阶段推断。
 
-`handled_target_id` 仅在接受 `AUTHORIZED`，或在 `TRACK_INTRUDER` 接受最终
-`TARGET_LOST` 时设置为当前目标。位置确认超时、接近/核验期间丢失、执行错误等失败
-保持为 `0`。该结果保留在 `RECOVER_PATROL` 及其后的 `PATROL` 中，即使后者的
-`target_id` 已清零；接受下一目标的 `TARGET_CONFIRMED` 或重置会话时清零。
+`handled_target_id` 仅在 `VERIFY_IDENTITY` 接受有效 `AUTHORIZED` 时设置为当前目标。
+两轮核验失败进入 `TRACK_INTRUDER` 后，即使最终 `TARGET_LOST` 返回巡逻，也保持为 `0`；
+任何阶段的目标丢失、位置确认超时和执行错误均不新增已处理标记。核验通过的结果保留在
+`RECOVER_PATROL` 及其后的 `PATROL` 中，即使后者的 `target_id` 已清零；
+接受下一目标的 `TARGET_CONFIRMED` 或重置会话时清零。
 恢复阶段的错误和恢复 watchdog 不得覆盖已经确定的业务结果。
 
 感知仅在首次处理新的 `PATROL state_seq` 时消费当前快照的 `handled_target_id`，

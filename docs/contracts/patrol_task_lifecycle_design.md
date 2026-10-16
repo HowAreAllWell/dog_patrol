@@ -387,7 +387,7 @@ supervisor 同一互斥锁中的实际线性顺序为准；正式客户端仍必
 两个字段职责不同：
 
 - `target_id` 是当前实时目标上下文，只在正在处置目标或普通目标恢复时为非零；
-- `handled_target_id` 是最近一次已经形成最终业务结果的目标 ID，用于恢复 PATROL 后通知
+- `handled_target_id` 是最近一次核验通过的目标 ID，用于恢复 PATROL 后通知
   感知暂时不要再次选择该目标；
 - supervisor 只保存最近一次 handled ID；多个已处理目标及各自过期时间由感知侧
   PrimaryTargetManager 的内部排除表保存。
@@ -399,7 +399,7 @@ supervisor 同一互斥锁中的实际线性顺序为准；正式客户端仍必
 | 新 TARGET_CONFIRMED | 新目标 ID | 0 |
 | AUTHORIZED | 当前目标 ID | 当前目标 ID |
 | UNAUTHORIZED 进入 TRACK | 当前目标 ID | 0 |
-| TRACK_INTRUDER 最终 TARGET_LOST | 当前目标 ID | 当前目标 ID |
+| TRACK_INTRUDER 最终 TARGET_LOST | 当前目标 ID | 0 |
 | CONFIRM/APPROACH/VERIFY 提前 TARGET_LOST | 当前目标 ID，进入普通恢复时暂留 | 0 |
 | 普通 EXECUTION_ERROR 进入恢复 | 当前目标 ID | 0 |
 | 普通 RECOVER 完成进入 PATROL | 0 | 保留原值 |
@@ -415,7 +415,7 @@ MissionState 合法字段组合：
 | STARTUP | 0 | 0 |
 | READY + NO_TASK/RETURNING | 0 | 0 |
 | READY + PAUSED | 0 | 0 或暂停前已经成立的 handled ID |
-| PATROL | 0 | 0 或最近处理完成的 ID |
+| PATROL | 0 | 0 或最近核验通过的 ID |
 | CONFIRM/APPROACH/VERIFY/TRACK | 必须大于 0 | 0 |
 | 普通 RECOVER_PATROL | 必须大于 0 | 0 或等于 target_id |
 | 暂停恢复 RECOVER_PATROL | 0 | 0 或暂停前已经成立的 handled ID |
@@ -426,7 +426,7 @@ primary target 时跳过表中所有 ID。
 
 插入必须是“仅不存在时新增”：如果同一个 handled ID 已在排除表中，PAUSE/RESUME 或其他
 PATROL 重入不得覆盖其已有 absence 起始时间。目标过期后会从表中删除；将来同一 semantic ID
-再次被完整处置时，才会作为新条目重新开始排除周期。
+再次核验通过时，才会作为新条目重新开始排除周期。
 
 当前排除时限语义保持为“目标持续离开画面 60 秒”：目标仍可见时不开始或重置 absence timer；
 只有持续不可见达到 `handled_ignore_absence` 后才从排除表删除并重新具备选择资格。这个计时属于
@@ -453,10 +453,10 @@ MissionState.target_id 仍为 0，face、voice、tracking 不得创建目标会�
 连续处理目标的示例：
 
 ~~~text
-目标 87 处理完成 -> supervisor 发布 handled_target_id=87
+目标 87 核验通过 -> supervisor 发布 handled_target_id=87
 回到 PATROL      -> 感知排除表加入 87
 开始处理目标 99  -> supervisor 字段清为 0；感知表中的 87 仍保留
-目标 99 处理完成 -> supervisor 发布 handled_target_id=99
+目标 99 核验通过 -> supervisor 发布 handled_target_id=99
 回到 PATROL      -> 感知排除表加入 99
 
 最终：supervisor 字段只保存 99
@@ -2086,8 +2086,9 @@ internal_error
 26. `sequence_done` 与目标事件两种回调顺序都只能完成一次父任务；
 27. PAUSE 与最后 waypoint 到达并发时，持久完成快照仍能从 PAUSED 完成父任务；
 28. RESUME 不会重新打开 `sequence_done=true` 的路线；
-29. AUTHORIZED 和 TRACK 最终 TARGET_LOST 设置 handled_target_id；
-30. 提前 TARGET_LOST 和 EXECUTION_ERROR 不设置 handled_target_id；
+29. 只有 VERIFY_IDENTITY 接受有效 AUTHORIZED 才新增 handled_target_id；
+30. 任何阶段的 TARGET_LOST 和 EXECUTION_ERROR 均不新增 handled_target_id，
+    包含核验失败后的 TRACK 最终丢失；
 31. PAUSE/RESUME 保留已经成立的 handled_target_id；
 32. RETURN、TERMINATE、COMPLETED、FAILED 和 reset 清除 handled_target_id；
 33. state_seq 从 `0xFFFFFFFF` 回绕到 1 时，各状态消费者仍接受新状态并拒绝真正旧状态；
@@ -2239,7 +2240,7 @@ PATROL 到 RECOVER_PATROL 流程持续通过测试。
 7. PAUSE/RESUME 不恢复旧目标和认证会话；
 8. 已形成中断点的目标阶段暂停后，RESUME 先恢复中断点；
 9. 暂停恢复型 RECOVER 的 target_id 为 0，普通目标恢复继续使用原非零 target_id；
-10. handled_target_id 只表示最近形成最终结果的目标，多个排除目标由感知内部表保存；
+10. handled_target_id 只表示最近核验通过的目标，多个排除目标由感知内部表保存；
 11. PAUSE/RESUME 保留 handled_target_id，但不恢复实时目标或认证会话；
 12. RETURN、TERMINATE、COMPLETED、FAILED、reset 和新 START 清除消息中的 handled_target_id；
 13. 普通任务边界不清空感知内部未过期排除表，STARTUP reset 和整套重启必须清空；

@@ -156,7 +156,10 @@ def test_authorized_flow_restores_patrol_before_clearing_target():
     assert result.snapshot.handled_target_id == 87
 
 
-def test_unauthorized_flow_recovers_when_target_is_lost():
+@pytest.mark.parametrize("recovery_completion", ["navigation", "watchdog"])
+def test_unauthorized_target_can_be_verified_again_after_patrol_recovery(
+    recovery_completion,
+):
     machine = MissionStateMachine()
     advance_to_verify(machine)
 
@@ -172,18 +175,41 @@ def test_unauthorized_flow_recovers_when_target_is_lost():
     )
     assert result.snapshot.state == GlobalState.RECOVER_PATROL
     assert result.snapshot.target_id == 87
-    assert result.snapshot.handled_target_id == 87
+    assert result.snapshot.handled_target_id == 0
 
-    result = machine.handle_event(
-        event(
-            machine,
-            EventSource.NAVIGATION,
-            EventType.PATROL_RECOVERY_COMPLETE,
-            87,
+    if recovery_completion == "navigation":
+        result = machine.handle_event(
+            event(
+                machine,
+                EventSource.NAVIGATION,
+                EventType.PATROL_RECOVERY_COMPLETE,
+                87,
+            )
         )
-    )
+    else:
+        result = machine.complete_patrol_recovery("recovery watchdog expired")
+    assert result.accepted
     assert result.snapshot.state == GlobalState.PATROL
     assert result.snapshot.target_id == 0
+    assert result.snapshot.handled_target_id == 0
+
+    # The same person must be eligible for a fresh verification session. Only
+    # a successful result in that session grants the handled exemption.
+    for source, event_type, expected_state in (
+        (EventSource.PERCEPTION, EventType.TARGET_CONFIRMED, GlobalState.CONFIRM_TARGET),
+        (EventSource.NAVIGATION, EventType.TARGET_POSITION_READY, GlobalState.APPROACH_TARGET),
+        (EventSource.NAVIGATION, EventType.ARRIVED_AND_STOPPED, GlobalState.VERIFY_IDENTITY),
+    ):
+        result = machine.handle_event(event(machine, source, event_type, 87))
+        assert result.accepted
+        assert result.snapshot.state == expected_state
+        assert result.snapshot.handled_target_id == 0
+
+    result = machine.handle_event(
+        event(machine, EventSource.PERCEPTION, EventType.AUTHORIZED, 87)
+    )
+    assert result.accepted
+    assert result.snapshot.state == GlobalState.RECOVER_PATROL
     assert result.snapshot.handled_target_id == 87
 
 
@@ -531,13 +557,14 @@ def test_intruder_execution_error_does_not_count_as_completed_pursuit(source):
 
 
 @pytest.mark.parametrize(
-    "target_state", [GlobalState.VERIFY_IDENTITY, GlobalState.TRACK_INTRUDER]
+    "target_state,expected_handled_id",
+    [(GlobalState.VERIFY_IDENTITY, 87), (GlobalState.TRACK_INTRUDER, 0)],
 )
 @pytest.mark.parametrize(
     "source", [EventSource.PERCEPTION, EventSource.NAVIGATION]
 )
-def test_handled_outcome_survives_recovery_errors_and_watchdog(
-    target_state, source
+def test_authorization_disposition_survives_recovery_errors_and_watchdog(
+    target_state, expected_handled_id, source
 ):
     machine = MissionStateMachine()
     advance_to_state(machine, target_state)
@@ -547,7 +574,10 @@ def test_handled_outcome_survives_recovery_errors_and_watchdog(
         else EventType.TARGET_LOST
     )
     outcome_event = event(machine, EventSource.PERCEPTION, outcome, 87)
-    assert machine.handle_event(outcome_event).snapshot.handled_target_id == 87
+    result = machine.handle_event(outcome_event)
+    assert result.accepted
+    assert result.snapshot.state == GlobalState.RECOVER_PATROL
+    assert result.snapshot.handled_target_id == expected_handled_id
     assert machine.handle_event(outcome_event).duplicate
     recovery = machine.snapshot
 
@@ -560,7 +590,7 @@ def test_handled_outcome_survives_recovery_errors_and_watchdog(
     assert restored.accepted
     assert restored.snapshot.state == GlobalState.PATROL
     assert restored.snapshot.target_id == 0
-    assert restored.snapshot.handled_target_id == 87
+    assert restored.snapshot.handled_target_id == expected_handled_id
 
 
 @pytest.mark.parametrize(
