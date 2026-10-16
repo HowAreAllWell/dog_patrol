@@ -19,7 +19,7 @@ class VoiceConfig:
     passphrase: str = "blue star"
     first_prompt: str = DEFAULT_FIRST_PROMPT
     retry_prompt: str = DEFAULT_RETRY_PROMPT
-    response_timeout_seconds: float = 20.0
+    response_timeout_seconds: float = 10.0
     vote_guard_seconds: float = 0.75
     adb_executable: str = "adb"
     device_serial: str | None = None
@@ -114,7 +114,7 @@ def load_voice_config(path: str | Path) -> VoiceConfig:
             first_prompt=_string(raw.get("first_prompt", DEFAULT_FIRST_PROMPT), "first_prompt"),
             retry_prompt=_string(raw.get("retry_prompt", DEFAULT_RETRY_PROMPT), "retry_prompt"),
             response_timeout_seconds=_finite(
-                raw.get("response_timeout_seconds", 20.0), "response_timeout_seconds"
+                raw.get("response_timeout_seconds", 10.0), "response_timeout_seconds"
             ),
             vote_guard_seconds=_finite(raw.get("vote_guard_seconds", 0.75), "vote_guard_seconds"),
             adb_executable=_string(raw.get("adb_executable", "adb"), "adb_executable"),

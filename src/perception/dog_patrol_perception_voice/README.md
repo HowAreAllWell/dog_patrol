@@ -5,6 +5,10 @@
 每个 `R818TaskSession` 建立一次八通道 R818 流并运行一个响应窗；Prompt 播放期间 reader 持续消费
 但丢弃完整音频帧，Prompt 返回后再打开响应窗。窗口结束后清理远端临时节点并恢复厂商音频服务。
 
+当前每轮响应窗 `response_timeout_seconds` 为 10 秒；包默认值、缺省 YAML 字段的回退值与
+资产包的两份 voice 配置保持一致。该参数只限制 Prompt 播放完成后的单轮收音窗口，不修改
+ADB、启动或恢复厂商服务的超时时间。
+
 生产核心入口是 `R818VoiceAdapter.from_model_dir()` 和 `R818VoiceAdapter.task()`。ROS 生产
 evidence 入口是 `perception_voice_provider`：它订阅 `/mission/state` 建立会话门禁，并订阅
 `/perception/authorization_command`。`INITIAL_FACE` 不启动硬件；每条 `DUAL_FIRST` 或

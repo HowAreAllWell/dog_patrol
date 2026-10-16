@@ -1,7 +1,7 @@
 passphrase: blue star
 first_prompt: Please face my camera directly or say the passphrase loudly.
 retry_prompt: Once again, please face my camera directly or say the passphrase loudly.
-response_timeout_seconds: 20.0
+response_timeout_seconds: 10.0
 vote_guard_seconds: 0.75
 adb_executable: adb
 device_serial: null
