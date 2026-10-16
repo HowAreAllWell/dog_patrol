@@ -8,6 +8,9 @@
 - 2026-10-12 已按用户授权合入本地及远端 `merge`，合并提交为 `1cffd24`；测试提交保留在合并历史中。
 - GitHub PR #51 已确认 merged；后续在 merge 分支使用和修改。
 - 使用当前工作区的 `install/setup.bash`，无需加载此前 /tmp 审查环境。
+- 2026-10-16 已接收 PR #52 的“仅 AUTHORIZED 授予 handled”规则，本地合并提交 `cf29650`，
+  同时以 `6931f8b` 保留语音每轮响应窗 10 秒。原始评审 head 为 `96f3597`，验收证据见
+  [PR #52 评审及接收记录](../reviews/pr_52_handled_authorization_review.md)。
 
 ## 当前验收结论（2026-10-12）
 
