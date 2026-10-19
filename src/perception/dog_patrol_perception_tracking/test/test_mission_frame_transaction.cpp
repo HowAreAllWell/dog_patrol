@@ -186,7 +186,7 @@ TEST(MissionFrameTransactionTest, ApproachingSameTrackRecoversTrustedBoxBeforeTa
   EXPECT_TRUE(later.events.empty());
 }
 
-TEST(MissionFrameTransactionTest, SkipsHandledTargetWhenMissionReturnsToPatrol) {
+TEST(MissionFrameTransactionTest, MissionHandledSnapshotAloneDoesNotExcludeTarget) {
   auto transaction = ConfiguredTransaction();
   const auto verify = Mission(MissionPhase::kVerifyIdentity, 200U, 42);
   const auto patrol = Mission(MissionPhase::kPatrol, 201U, 0, 42);
@@ -206,17 +206,16 @@ TEST(MissionFrameTransactionTest, SkipsHandledTargetWhenMissionReturnsToPatrol) 
       {patrol, verify, patrol_candidates, source_time + std::chrono::milliseconds{100}, Metadata()});
 
   EXPECT_EQ(selection.primary.state, PrimaryState::kLocked);
-  EXPECT_EQ(selection.primary.primary_target_id, 99);
+  EXPECT_EQ(selection.primary.primary_target_id, 42);
   ASSERT_EQ(selection.events.size(), 1U);
   EXPECT_EQ(selection.events.front().event, PerceptionMissionEvent::kTargetConfirmed);
-  EXPECT_EQ(selection.events.front().target_id, 99);
+  EXPECT_EQ(selection.events.front().target_id, 42);
   EXPECT_FALSE(selection.target_box.has_value());
 }
 
-TEST(MissionFrameTransactionTest, FailedPeopleRemainSelectableAfterAnotherPersonWasHandled) {
+TEST(MissionFrameTransactionTest, FailedPeopleRemainSelectableAfterReidExcludesAnotherPerson) {
   using namespace std::chrono_literals;
   MissionFrameTransaction::Config config;
-  config.primary.handled_ignore_absence = 60s;
   MissionFrameTransaction transaction(config);
   const auto start = MissionCoordinator::TimePoint{};
   const auto a = TrustedPerson(11, 101, cv::Rect2f{10, 10, 80, 80});
@@ -228,6 +227,8 @@ TEST(MissionFrameTransactionTest, FailedPeopleRemainSelectableAfterAnotherPerson
   const auto patrol_after_a = Mission(MissionPhase::kPatrol, 102U, 0, 11);
   transaction.Update({verify, std::nullopt, people, start, Metadata()});
   transaction.Update({authorized_recovery, verify, people, start + 1s, Metadata()});
+  // Only an explicit ReID conclusion excludes A from subsequent selection.
+  transaction.ExcludeForReidDedup(11);
   auto output = transaction.Update(
       {patrol_after_a, authorized_recovery, people, start + 2s, Metadata()});
   ASSERT_EQ(output.primary.primary_target_id, 22);

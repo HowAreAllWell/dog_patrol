@@ -237,6 +237,43 @@ TEST_F(ReidConfirmGateTest, ResetInvalidatesInFlightResponse) {
   EXPECT_EQ(drained[0], 7);
 }
 
+TEST_F(ReidConfirmGateTest, HandledResultInvalidatesCachedAllowAndQueriesReidAgain) {
+  MakeGate(3000, 30.0);
+  ASSERT_TRUE(UntilQueried(7));
+  mock_->Respond(0, true, false);
+  ASSERT_TRUE(AllowedWithinBudget(7, 1000));
+
+  gate_->NotifyHandled(7);
+  ASSERT_FALSE(gate_->Allow(7, crop_));
+  ASSERT_TRUE(mock_->AwaitRequest(1) != nullptr);
+  mock_->Respond(1, true, true);
+  const auto exclusions = AwaitExclusions(1);
+  ASSERT_EQ(exclusions.size(), 1U);
+  EXPECT_EQ(exclusions.front(), 7);
+  EXPECT_FALSE(gate_->Allow(7, crop_));
+}
+
+TEST_F(ReidConfirmGateTest, HandledResultDiscardsOldResponseAndUsesFreshReidDecision) {
+  MakeGate(3000, 30.0);
+  ASSERT_TRUE(UntilQueried(7));
+  ASSERT_TRUE(mock_->AwaitRequest(0) != nullptr);
+
+  gate_->NotifyHandled(7);
+  ASSERT_FALSE(gate_->Allow(7, crop_));
+  ASSERT_TRUE(mock_->AwaitRequest(1) != nullptr);
+  mock_->Respond(0, false, false);
+  std::this_thread::sleep_for(150ms);
+  // The pre-verification answer cannot release the newer pending query.
+  EXPECT_FALSE(gate_->Allow(7, crop_));
+  EXPECT_TRUE(Drain().empty());
+
+  // Forwarding the result does not create a local exclusion: ReID still owns
+  // the decision, including a response that cannot confirm handled identity.
+  mock_->Respond(1, true, false);
+  EXPECT_TRUE(AllowedWithinBudget(7, 1000));
+  EXPECT_TRUE(Drain().empty());
+}
+
 // T01/N02：超时 fail-open 与新问询成功分开断言——Q2 的放行结论必须在
 // Q2 自身超时预算内取得；Q1 的迟到 suppress 不能覆盖 Q2 的结论。
 TEST_F(ReidConfirmGateTest, TimeoutFailsOpenAndNewResponseAcceptedWithinBudget) {

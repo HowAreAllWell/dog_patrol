@@ -756,10 +756,12 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     if voice_config is None:
         voice_config = find_install_artifact(
             install_prefix,
-            Path("share/dog_patrol_perception_voice/config/voice.yaml"),
+            Path("share/dog_patrol_perception_voice/config/voice_verification.yaml"),
         )
     if voice_config is None:
-        voice_config = Path("/__dog_patrol_voice_install_missing__/config/voice.yaml")
+        voice_config = Path(
+            "/__dog_patrol_voice_install_missing__/config/voice_verification.yaml"
+        )
     voice_helper = args.voice_helper_path or find_installed_voice_asset(
         install_prefix, "r818_pcm_base64_aarch64"
     )

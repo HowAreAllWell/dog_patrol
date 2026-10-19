@@ -134,6 +134,24 @@ TEST(MissionCoordinatorTest, EmitsOneTargetLostAndNeverReacquiresImplicitly) {
   EXPECT_EQ(resumed.target_box->observed_state_seq, 19U);
 }
 
+TEST(MissionCoordinatorTest, DefaultLossTimeoutRequiresSixSecondsOfContinuousAbsence) {
+  using namespace std::chrono_literals;
+  MissionCoordinator coordinator;
+  const MissionCoordinator::TimePoint start{};
+  const auto mission = ActiveMission(MissionPhase::kVerifyIdentity);
+  const auto trusted = TrustedPerson(42, 7);
+  const auto primary = LockedPrimary(42, 7);
+
+  ASSERT_TRUE(coordinator.Update({mission, {trusted}, primary, start}).target_box.has_value());
+  EXPECT_TRUE(coordinator.Update({mission, {}, {}, start + 5999ms}).events.empty());
+  // A trusted reappearance restarts the continuous-loss interval.
+  ASSERT_TRUE(coordinator.Update({mission, {trusted}, primary, start + 6s}).target_box.has_value());
+  EXPECT_TRUE(coordinator.Update({mission, {}, {}, start + 11999ms}).events.empty());
+  ExpectSingleEvent(coordinator.Update({mission, {}, {}, start + 12s}).events,
+                    PerceptionMissionEvent::kTargetLost, 42, 17U);
+  EXPECT_TRUE(coordinator.Update({mission, {}, {}, start + 13s}).events.empty());
+}
+
 TEST(MissionCoordinatorTest, RejectsInvalidTimeoutAndStaleSourceConfiguration) {
   MissionCoordinator::Config config;
   config.lost_event_timeout = MissionCoordinator::Duration::zero();

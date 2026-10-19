@@ -60,8 +60,7 @@ SID 生效配置的镜像；`MotTracker` 的 `config/bot_sort.yaml` 解析仍由
 - `detector.person_conf_threshold` / `detector.car_conf_threshold`
 - `tracker.*`
 - `target.lost_threshold_frames`（tracking/identity 内部的帧级生命周期阈值）
-- `target.lost_event_timeout_sec`（任务级最终 `TARGET_LOST` 的 source-time 超时，当前为 10 s）
-- `target.handled_ignore_absence_sec`（总控通过 `MissionState.handled_target_id` 明确标记已处理后，该目标需要连续不可见多久才允许再次被选中；当前为 60 s，定位失败不进入该排除名单）
+- `target.lost_event_timeout_sec`（任务级最终 `TARGET_LOST` 的 source-time 超时，当前为 6 s）
 - `mission.state_topic` / `mission.event_topic` / `mission.selected_target_bbox_topic`
 - `perception.camera_optical_frame_id`
 - `visualization.enable`（生成 tracking/identity/primary/face overlay；默认 `false`）
@@ -152,7 +151,7 @@ src/perception/dog_patrol_perception_tracking/scripts/check_orin_env.sh
 src/perception/dog_patrol_perception_tracking/scripts/bench_hik_mvs_camera.sh
 ```
 
-`MissionCoordinator::Config` 当前只提供 `lost_event_timeout=10s`。它只使用注入的单调
+`MissionCoordinator::Config` 当前只提供 `lost_event_timeout=6s`。它只使用注入的单调
 source-time，不按固定帧数计时；计时由后续进入任务事务的处理帧推进，如果相机/推理线程
 完全停止而没有新的 `Update()`，该 coordinator 不会凭空生成 `TARGET_LOST`，输入故障应由
 readiness/技术故障监控报告。输出当前 target 的新鲜 bbox 只允许在

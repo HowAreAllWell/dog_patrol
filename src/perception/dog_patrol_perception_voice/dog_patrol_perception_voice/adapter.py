@@ -7,7 +7,7 @@ import threading
 from typing import Protocol
 
 from .config import VoiceConfig
-from .result import VoiceWindowResult
+from .result import VoiceWindowEvent, VoiceWindowResult
 
 
 class TaskStream(Protocol):
@@ -17,7 +17,13 @@ class TaskStream(Protocol):
 
 
 class WindowRecognizer(Protocol):
-    def recognize(self, attempt_number: int, timeout_seconds: float) -> VoiceWindowResult: ...
+    def recognize(
+        self,
+        attempt_number: int,
+        timeout_seconds: float,
+        *,
+        on_event: Callable[[VoiceWindowEvent], None] | None = None,
+    ) -> VoiceWindowResult: ...
 
 
 class PromptPlayer(Protocol):
@@ -208,12 +214,11 @@ class R818TaskSession:
         *,
         timeout_seconds: float | None = None,
         retry: bool = False,
+        on_event: Callable[[VoiceWindowEvent], None] | None = None,
     ) -> VoiceWindowResult:
         self._raise_if_cancelled()
         if not self._active:
             raise RuntimeError("R818 task session must be entered before respond")
-        if self._attempt_number >= 2:
-            raise RuntimeError("R818 task sessions support at most two response windows")
         self._attempt_number += 1
         selected_prompt = prompt
         if selected_prompt is None:
@@ -230,7 +235,12 @@ class R818TaskSession:
         try:
             self._prompt_player.play(selected_prompt)
             self._raise_if_cancelled()
-            result = self._recognizer.recognize(self._attempt_number, response_timeout)
+            if on_event is None:
+                result = self._recognizer.recognize(self._attempt_number, response_timeout)
+            else:
+                result = self._recognizer.recognize(
+                    self._attempt_number, response_timeout, on_event=on_event
+                )
             self._raise_if_cancelled()
         except VoiceTaskCancelled:
             raise

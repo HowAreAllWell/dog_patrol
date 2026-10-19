@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from enum import Enum
 import threading
 import time
@@ -16,7 +16,9 @@ from dog_patrol_interfaces.msg import MissionState
 from dog_patrol_perception_interfaces.msg import (
     AuthorizationCommand,
     AuthorizationEvidence,
+    VoiceVerificationEvent,
 )
+from rcl_interfaces.msg import SetParametersResult
 from rclpy.executors import ExternalShutdownException
 from rclpy.node import Node
 from rclpy.parameter import Parameter
@@ -24,10 +26,13 @@ from rclpy.qos import DurabilityPolicy, HistoryPolicy, QoSProfile, ReliabilityPo
 
 from .adapter import R818VoiceAdapter, VoiceTaskCancelled, VoiceTaskCleanupError
 from .config import VoiceConfig, load_voice_config
-from .result import VoiceWindowResult
+from .result import VoiceWindowEvent, VoiceWindowResult
 
 UINT32_MASK = (1 << 32) - 1
 UINT32_HALF_RANGE = 1 << 31
+VOICE_POLICY_PARAMETERS = (
+    "response_timeout_seconds", "first_prompt", "retry_prompt", "passphrase"
+)
 
 
 def _is_newer_state_seq(candidate: int, current: int) -> bool:
@@ -57,6 +62,13 @@ class VoiceVerificationStage(Enum):
 class VoiceVerificationRequest:
     session: VoiceVerificationSession
     stage: VoiceVerificationStage
+    round_number: int = 0
+
+    def __post_init__(self) -> None:
+        if self.round_number == 0:
+            object.__setattr__(
+                self, "round_number", 1 if self.stage is VoiceVerificationStage.DUAL_FIRST else 2
+            )
 
 
 @dataclass(frozen=True)
@@ -65,6 +77,7 @@ class VoiceEvidence:
     stage: VoiceVerificationStage
     result: VoiceEvidenceResult
     detail: str = ""
+    round_number: int = 0
 
 
 class VoiceTask(Protocol):
@@ -77,7 +90,12 @@ class VoiceTask(Protocol):
         traceback: object,
     ) -> None: ...
 
-    def respond(self, *, retry: bool = False) -> VoiceWindowResult: ...
+    def respond(
+        self,
+        *,
+        retry: bool = False,
+        on_event: Callable[[VoiceWindowEvent], None] | None = None,
+    ) -> VoiceWindowResult: ...
 
     def cancel(self) -> None: ...
 
@@ -103,12 +121,15 @@ class VoiceEvidenceController:
         self,
         adapter_factory: Callable[[], VoiceAdapter],
         publish: Callable[[VoiceEvidence], None],
+        publish_window_event: Callable[[VoiceVerificationRequest, VoiceWindowEvent], None] | None = None,
     ) -> None:
         self._adapter_factory = adapter_factory
         self._publish = publish
+        self._publish_window_event = publish_window_event
         self._condition = threading.Condition()
         self._mission_session: VoiceVerificationSession | None = None
         self._desired_request: VoiceVerificationRequest | None = None
+        self._highest_round_requested = 0
         self._generation = 0
         self._completed_generation = 0
         self._active_task: VoiceTask | None = None
@@ -130,6 +151,7 @@ class VoiceEvidenceController:
                 return
             self._mission_session = session
             self._desired_request = None
+            self._highest_round_requested = 0
             self._generation += 1
             if self._active_cancel is not None:
                 self._active_cancel.set()
@@ -143,8 +165,15 @@ class VoiceEvidenceController:
         with self._condition:
             if request is not None and request.session != self._mission_session:
                 return
+            if (
+                request is not None
+                and request.round_number <= self._highest_round_requested
+            ):
+                return
             if request == self._desired_request:
                 return
+            if request is not None:
+                self._highest_round_requested = request.round_number
             self._desired_request = request
             self._generation += 1
             if self._active_cancel is not None:
@@ -254,10 +283,18 @@ class VoiceEvidenceController:
         task: VoiceTask,
     ) -> _PendingEvidence | None:
         self._raise_if_request_cancelled(generation, request, cancel_event)
-        retry = request.stage is VoiceVerificationStage.DUAL_SECOND
-        result = task.respond(retry=retry)
+        retry = request.round_number > 1
+        if self._publish_window_event is None:
+            result = task.respond(retry=retry)
+        else:
+            result = task.respond(
+                retry=retry,
+                on_event=lambda event: self._on_window_event(
+                    request, generation, cancel_event, event
+                ),
+            )
         self._raise_if_request_cancelled(generation, request, cancel_event)
-        round_number = 2 if retry else 1
+        round_number = request.round_number
         evidence_result = (
             VoiceEvidenceResult.PASSED
             if result.accepted
@@ -269,6 +306,21 @@ class VoiceEvidenceController:
             f"{'passed' if result.accepted else 'not passed'}; "
             f"decision_seconds={result.decision_time_seconds:.3f}",
         )
+
+    def _on_window_event(
+        self,
+        request: VoiceVerificationRequest,
+        generation: int,
+        cancel_event: threading.Event,
+        event: VoiceWindowEvent,
+    ) -> None:
+        with self._condition:
+            if self._stopping or self._request_cancelled_locked(
+                request, generation, self._generation, self._desired_request, cancel_event
+            ):
+                return
+            if self._publish_window_event is not None:
+                self._publish_window_event(request, event)
 
     def _register_task(
         self,
@@ -341,7 +393,9 @@ class VoiceEvidenceController:
                 return False
             if self._desired_request != request:
                 return False
-            self._publish(VoiceEvidence(request.session, request.stage, result, detail))
+            self._publish(VoiceEvidence(
+                request.session, request.stage, result, detail, request.round_number
+            ))
             return True
 
     def _publish_cancelled(self, request: VoiceVerificationRequest) -> None:
@@ -354,6 +408,7 @@ class VoiceEvidenceController:
                     request.stage,
                     VoiceEvidenceResult.CANCELLED,
                     "voice task cancelled",
+                    request.round_number,
                 )
             )
 
@@ -371,6 +426,7 @@ class VoiceEvidenceController:
                     request.stage,
                     VoiceEvidenceResult.ERROR,
                     _exception_detail(exc),
+                    request.round_number,
                 )
             )
 
@@ -409,12 +465,23 @@ class VoiceEvidenceProviderNode(Node):
         self.declare_parameter(
             "authorization_command_topic", "/perception/authorization_command"
         )
+        self.declare_parameter("voice_verification_event_topic", "/perception/voice_verification_event")
         self.declare_parameter("provider", "voice")
         self.declare_parameter("model_dir", "")
         self.declare_parameter("config_file", _default_config_file())
         self.declare_parameter("helper_path", "")
         self.declare_parameter("max_detail_length", 256)
         self.declare_parameter("state_timeout", 0.75)
+
+        config_file = str(self.get_parameter("config_file").value).strip()
+        base_config = load_voice_config(config_file) if config_file else VoiceConfig()
+        for name in VOICE_POLICY_PARAMETERS:
+            self.declare_parameter(name, getattr(base_config, name))
+        self._pending_config = replace(base_config, **{
+            name: self.get_parameter(name).value for name in VOICE_POLICY_PARAMETERS
+        })
+        self._session_config = self._pending_config
+        self._config_session: VoiceVerificationSession | None = None
 
         state_qos = QoSProfile(
             reliability=ReliabilityPolicy.RELIABLE,
@@ -435,7 +502,10 @@ class VoiceEvidenceProviderNode(Node):
             32, int(self.get_parameter("max_detail_length").value)
         )
         self._adapter_lock = threading.Lock()
+        self._policy_lock = threading.Lock()
         self._production_adapter: VoiceAdapter | None = None
+        self._adapter_config: VoiceConfig | None = None
+        self.add_on_set_parameters_callback(self._on_policy_parameters)
         self._mission_state_seq: int | None = None
         self._mission_session: VoiceVerificationSession | None = None
         self._mission_state_signature = None
@@ -448,6 +518,11 @@ class VoiceEvidenceProviderNode(Node):
         self._evidence_pub = self.create_publisher(
             AuthorizationEvidence,
             str(self.get_parameter("authorization_evidence_topic").value),
+            evidence_qos,
+        )
+        self._window_event_pub = self.create_publisher(
+            VoiceVerificationEvent,
+            str(self.get_parameter("voice_verification_event_topic").value),
             evidence_qos,
         )
         self._state_sub = self.create_subscription(
@@ -465,6 +540,7 @@ class VoiceEvidenceProviderNode(Node):
         self._controller = VoiceEvidenceController(
             adapter_factory or self._build_adapter,
             self._publish_evidence,
+            self._publish_window_event,
         )
         self._state_watchdog = self.create_timer(
             min(0.1, self._state_timeout / 2.0), self._check_state_timeout
@@ -474,11 +550,31 @@ class VoiceEvidenceProviderNode(Node):
         self._controller.stop()
         return super().destroy_node()
 
+    def _on_policy_parameters(self, parameters: list[Parameter]) -> SetParametersResult:
+        updates = {
+            parameter.name: parameter.value for parameter in parameters
+            if parameter.name in VOICE_POLICY_PARAMETERS
+        }
+        try:
+            with self._policy_lock:
+                self._pending_config = replace(self._pending_config, **updates)
+        except (TypeError, ValueError) as exc:
+            return SetParametersResult(successful=False, reason=str(exc))
+        return SetParametersResult(successful=True)
+
+    def _observe_session(self, session: VoiceVerificationSession | None) -> None:
+        # Snapshot business settings once; a platform update cannot change an answer mid-session.
+        if session is not None and session != self._config_session:
+            with self._policy_lock:
+                self._session_config = self._pending_config
+                self._config_session = session
+        self._controller.observe_session(session)
+
     def _on_mission(self, msg: MissionState) -> None:
         state_seq = int(msg.state_seq) & UINT32_MASK
         if state_seq == 0:
             self._state_timed_out = True
-            self._controller.observe_session(None)
+            self._observe_session(None)
             return
         session = _session_from_mission(msg)
         signature = (int(msg.state), int(msg.target_id), int(msg.handled_target_id))
@@ -489,12 +585,12 @@ class VoiceEvidenceProviderNode(Node):
                     return
                 if signature != self._mission_state_signature:
                     self._mission_state_conflicted = True
-                    self._controller.observe_session(None)
+                    self._observe_session(None)
                     self._state_timed_out = False
                     return
                 if self._state_timed_out:
                     self._state_timed_out = False
-                    self._controller.observe_session(session)
+                    self._observe_session(session)
                 return
             if not _is_newer_state_seq(state_seq, self._mission_state_seq):
                 return
@@ -503,7 +599,7 @@ class VoiceEvidenceProviderNode(Node):
         self._mission_state_signature = signature
         self._mission_state_conflicted = False
         self._state_timed_out = False
-        self._controller.observe_session(session)
+        self._observe_session(session)
 
     def _check_state_timeout(self) -> None:
         if (
@@ -513,7 +609,7 @@ class VoiceEvidenceProviderNode(Node):
         ):
             return
         self._state_timed_out = True
-        self._controller.observe_session(None)
+        self._observe_session(None)
         self.get_logger().warning(
             "mission state heartbeat timed out; voice authorization session cancelled"
         )
@@ -523,20 +619,28 @@ class VoiceEvidenceProviderNode(Node):
             int(msg.observed_state_seq), int(msg.target_id)
         )
         if int(msg.stage) == AuthorizationCommand.CANCEL:
-            self._controller.request(None)
+            if session == self._mission_session:
+                self._controller.request(None)
             return
         stage = {
             AuthorizationCommand.DUAL_FIRST: VoiceVerificationStage.DUAL_FIRST,
             AuthorizationCommand.DUAL_SECOND: VoiceVerificationStage.DUAL_SECOND,
         }.get(int(msg.stage))
         if stage is not None:
-            self._controller.request(VoiceVerificationRequest(session, stage))
+            round_number = int(msg.round_number)
+            if round_number and (
+                (stage is VoiceVerificationStage.DUAL_FIRST and round_number != 1)
+                or (stage is VoiceVerificationStage.DUAL_SECOND and round_number < 2)
+            ):
+                return
+            self._controller.request(VoiceVerificationRequest(session, stage, round_number))
 
     def _publish_evidence(self, evidence: VoiceEvidence) -> None:
         msg = AuthorizationEvidence()
         msg.header.stamp = self.get_clock().now().to_msg()
         msg.observed_state_seq = evidence.session.observed_state_seq
         msg.target_id = evidence.session.target_id
+        msg.round_number = evidence.round_number
         msg.stage = {
             VoiceVerificationStage.DUAL_FIRST: AuthorizationEvidence.DUAL_FIRST,
             VoiceVerificationStage.DUAL_SECOND: AuthorizationEvidence.DUAL_SECOND,
@@ -546,23 +650,37 @@ class VoiceEvidenceProviderNode(Node):
         msg.detail = evidence.detail[: self._max_detail_length]
         self._evidence_pub.publish(msg)
 
+    def _publish_window_event(
+        self, request: VoiceVerificationRequest, event: VoiceWindowEvent
+    ) -> None:
+        msg = VoiceVerificationEvent()
+        msg.header.stamp = self.get_clock().now().to_msg()
+        msg.observed_state_seq = request.session.observed_state_seq
+        msg.target_id = request.session.target_id
+        msg.round_number = request.round_number
+        msg.event = {
+            VoiceWindowEvent.WAIT_STARTED: VoiceVerificationEvent.WAIT_STARTED,
+            VoiceWindowEvent.PASSED: VoiceVerificationEvent.PASSED,
+            VoiceWindowEvent.NOT_PASSED: VoiceVerificationEvent.NOT_PASSED,
+        }[event]
+        self._window_event_pub.publish(msg)
+
     def _build_adapter(self) -> VoiceAdapter:
+        with self._policy_lock:
+            config = self._session_config
         with self._adapter_lock:
-            if self._production_adapter is not None:
+            if self._production_adapter is not None and self._adapter_config == config:
                 return self._production_adapter
             model_dir = str(self.get_parameter("model_dir").value).strip()
             if not model_dir:
                 raise ValueError("model_dir parameter must be set")
-            config_file = str(self.get_parameter("config_file").value).strip()
-            config = (
-                load_voice_config(config_file) if config_file else VoiceConfig()
-            )
             helper_path = str(self.get_parameter("helper_path").value).strip()
             self._production_adapter = R818VoiceAdapter.from_model_dir(
                 model_dir,
                 config=config,
                 helper_path=helper_path or None,
             )
+            self._adapter_config = config
             return self._production_adapter
 
 
@@ -581,8 +699,8 @@ def _default_config_file() -> str:
     try:
         share_dir = Path(get_package_share_directory("dog_patrol_perception_voice"))
     except Exception:
-        return "/__dog_patrol_voice_install_missing__/config/voice.yaml"
-    return str(share_dir / "config" / "voice.yaml")
+        return "/__dog_patrol_voice_install_missing__/config/voice_verification.yaml"
+    return str(share_dir / "config" / "voice_verification.yaml")
 
 
 def _exception_detail(exc: Exception) -> str:

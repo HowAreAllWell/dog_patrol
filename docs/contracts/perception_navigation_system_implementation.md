@@ -458,7 +458,7 @@ overlay 中红框表示当前 primary semantic ID，绿框表示可见但非 pri
 2. `VERIFY_IDENTITY` 核验过程中丢失；
 3. `TRACK_INTRUDER` 持续跟踪过程中丢失。
 
-短时漏检由 tracker 内部处理。当前任务目标连续超过 `target.lost_event_timeout_sec=10.0 s` 没有可信 bbox 时，感知只发布一次 `TARGET_LOST`。事件发送后，同一个 `state_seq` 内不再发布该旧任务 bbox。
+短时漏检由 tracker 内部处理。当前任务目标连续超过 `target.lost_event_timeout_sec=6.0 s` 没有可信 bbox 时，感知只发布一次 `TARGET_LOST`。事件发送后，同一个 `state_seq` 内不再发布该旧任务 bbox。
 
 如果整个相机或推理线程停止，没有新的 frame transaction 被处理，感知逻辑无法凭空触发基于帧处理的丢失事件；这种情况应由输入/能力监控报告技术故障。
 
@@ -503,8 +503,8 @@ authorization 必须取消认证会话；取消只允许产生 `CANCELLED` 技�
 ```text
 最后一次可信 bbox
   -> 短时漏检：感知内部 tracker 等待恢复
-  -> 10 秒内重新出现：继续当前任务
-  -> 连续 10 秒没有可信 bbox：发布一次 TARGET_LOST
+  -> 6 秒内重新出现：继续当前任务
+  -> 连续 6 秒没有可信 bbox：发布一次 TARGET_LOST
   -> 总控进入 RECOVER_PATROL
   -> 导航停车、清理目标路径、恢复巡检断点
   -> PATROL_RECOVERY_COMPLETE 或恢复超时
@@ -554,7 +554,7 @@ CONFIRM_TARGET
 
 `TARGET_LOST` 和 `EXECUTION_ERROR` 是驱动总状态机的业务事件，不等同于 UI 报警。当前实现没有另行增加一套报警事件类型：
 
-- 目标最终丢失时，感知发布一次 `TARGET_LOST`，`detail` 应说明发生阶段和 10 秒超时原因；
+- 目标最终丢失时，感知发布一次 `TARGET_LOST`，`detail` 应说明发生阶段和 6 秒超时原因；
 - 导航或感知技术故障时发布 `EXECUTION_ERROR`，`detail` 应携带具体技术原因；
 - UI、日志或上层记录系统可以根据事件和 `detail` 生成报警；
 - 报警显示不能代替状态机事件，也不能靠报警清除目标任务。
@@ -590,12 +590,13 @@ uint32 handled_target_id
 - `state`：公共任务状态；
 - `target_id`：当前活动目标，0 表示无目标；
 - `detail`：日志和 UI 说明，不能作为程序业务判断条件。
-- `handled_target_id`：已核验通过、应新增排除的目标，0 表示无新增排除。
+- `handled_target_id`：已核验通过、供 tracking 向 ReID 转发成功结果的目标，0 表示无新增结果。
   总控仅在 `VERIFY_IDENTITY` 接受有效 `AUTHORIZED` 后设置，保留到恢复后的巡逻；
   下一目标或会话重置时清零。核验失败后跟踪结束，以及任何阶段的 `TARGET_LOST` 或
   `EXECUTION_ERROR`，均不新增该结果。
 
-感知根据新巡逻状态中的显式结果执行排除，不根据上一阶段推断结果。消息接口升级时，
+tracking 将显式成功结果转发 ReID，不根据上一阶段推断结果，也不按离场时间兜底排除；
+再次确认资格由 ReID 结论决定。消息接口升级时，
 所有使用 `MissionState` 的节点须与 `dog_patrol_interfaces` 一同重新构建部署。
 
 推荐 QoS：可靠、transient local、keep last、depth 1。
@@ -697,17 +698,21 @@ MissionState 枚举或调试 pause/resume Topic 推断。
 |---|---:|---|
 | `state_publish_rate` | `10.0 Hz` | `/mission/state` 周期发布频率 |
 | `confirm_target_timeout` | `5.0 s` | `CONFIRM_TARGET` 最大等待时间 |
+| `intruder_tracking_timeout` | `60.0 s` | 从进入 `TRACK_INTRUDER` 开始计时，到期恢复巡检 |
 | `patrol_recovery_timeout` | `10.0 s` | 恢复巡检 watchdog 时间 |
 | `initial_state_seq` | `1` | 启动初始状态序号 |
 | `processed_event_limit` | `256` | 已处理事件去重缓存上限 |
 
 ### 9.2 感知参数
 
+语音可配置轮次与整帧照片的增量合同见
+[`verification_evidence.md`](../perception/verification_evidence.md)。没有新增核验总时限；
+原两轮授权图示保留为默认配置，人脸和 ReID 算法由各自模块维护。
+
 | 参数/规则 | 当前值 | 含义 |
 |---|---:|---|
 | `target.lost_threshold_frames` | `100` 帧 | tracker/identity 内部目标生命周期阈值 |
-| `target.lost_event_timeout_sec` | `10.0 s` | 任务级最终 `TARGET_LOST` 阈值 |
-| `target.handled_ignore_absence_sec` | `60.0 s` | 已处理目标再次被选中的抑制时间，不是公共丢失超时 |
+| `target.lost_event_timeout_sec` | `6.0 s` | 任务级最终 `TARGET_LOST` 阈值 |
 | 当前相机输入 | `10 Hz` | 任务级丢失时间按 source timestamp 计算 |
 | 当前 bbox 图像 | `1280x1024` | 导航投影使用原图坐标 |
 
@@ -767,13 +772,13 @@ MissionState 枚举或调试 pause/resume Topic 推断。
 
 ```text
 VERIFY_IDENTITY
-  -> 两轮认证均失败
+  -> 配置的口令播报次数耗尽（默认两轮），且人脸未通过
 感知：UNAUTHORIZED(detail=verification_timeout)
 总控：TRACK_INTRUDER
   -> 感知持续发布同一 target_id 的 bbox
   -> 导航持续更新目标地图位置和 3 m 跟踪路径
-  -> 目标仍在：保持 TRACK_INTRUDER
-  -> 目标连续丢失 10 s：TARGET_LOST
+  -> 目标仍在：保持 TRACK_INTRUDER，达到入侵跟踪时长上限（默认 60 s）后恢复巡检
+  -> 目标连续丢失 6 s：TARGET_LOST
 总控：RECOVER_PATROL
   -> 导航恢复巡检
   -> PATROL(target=0，新 state_seq)
@@ -898,8 +903,8 @@ ros2 action info /compute_path_to_pose
 3. bbox、点云、TF 正常时产生一次 `TARGET_POSITION_READY`；
 4. 导航到约 3 m 且实际停车后产生一次 `ARRIVED_AND_STOPPED`；
 5. 认证成功后经过 `RECOVER_PATROL` 回到新的 `PATROL`；
-6. 两轮认证失败后进入 `TRACK_INTRUDER`，不依赖人工完成事件；
-7. 接近、认证、持续跟踪三个阶段丢失目标超过 10 s 后都能恢复巡检；
+6. 配置的口令播报次数耗尽且人脸未通过后进入 `TRACK_INTRUDER`，停止听口令，并在默认 60 s 后恢复巡检；
+7. 接近、认证、持续跟踪三个阶段连续丢失目标达到默认 6 s 后都能恢复巡检；
 8. 目标框存在但空间定位失败时不会伪造 `TARGET_LOST`，确认超时不会永久卡住；
 9. 旧 `state_seq` 的事件、bbox、认证结果和 planner action 不影响新任务；
 10. 恢复过程再次出错或恢复路径为空时，最终仍能回到 `PATROL`。

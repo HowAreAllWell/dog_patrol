@@ -103,7 +103,7 @@ python3 src/perception/scripts/check_perception_environment.py \
   --params-file /absolute/path/to/orin_tracking.yaml \
   --tracker-config /absolute/path/to/bot_sort.yaml \
   --voice-model-dir /absolute/path/to/vosk-model \
-  --voice-config-file /absolute/path/to/voice.yaml \
+  --voice-config-file /absolute/path/to/voice_verification.yaml \
   --install-prefix /absolute/path/to/dog_patrol/install \
   --build-base /absolute/path/to/dog_patrol/build
 ```

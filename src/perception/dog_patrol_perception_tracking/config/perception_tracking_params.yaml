@@ -49,8 +49,7 @@ dog_patrol_perception_tracking_node:
       min_area_ratio: 0.25
       max_area_ratio: 4.0
       pending_recovery_frames: 3
-      lost_event_timeout_sec: 10.0
-      handled_ignore_absence_sec: 60.0
+      lost_event_timeout_sec: 6.0
 
     mission:
       state_topic: "/mission/state"
@@ -63,6 +62,11 @@ dog_patrol_perception_tracking_node:
       # 该值是标定坐标系，也是检测框和目标裁剪消息的统一来源坐标系。
       camera_optical_frame_id: "camera_link"
       capability_status_topic: "/perception/capability_status"
+
+    photos:
+      enabled: true
+      root: "~/.ros/dog_patrol/photos"
+      voice_event_topic: "/perception/voice_verification_event"
 
     target_image:
       topic: "/perception/tracked_target_image"

@@ -12,9 +12,11 @@ MissionTrackingRuntime::MissionTrackingRuntime(
     std::unique_ptr<MissionRosAdapter> adapter,
     std::shared_ptr<TargetImageRosAdapter> image_adapter,
     PrimaryTargetCropConfig crop_config,
-    ReidConfirmGate *reid_gate)
+    ReidConfirmGate *reid_gate,
+    std::shared_ptr<EventPhotoRecorder> photo_recorder)
     : adapter_(std::move(adapter)), image_adapter_(std::move(image_adapter)),
-      crop_config_(crop_config), reid_gate_(reid_gate) {}
+      crop_config_(crop_config), reid_gate_(reid_gate),
+      photo_recorder_(std::move(photo_recorder)) {}
 
 void MissionTrackingRuntime::Report(
     DetectionTrackingReadiness::RuntimeStatus status) {
@@ -47,7 +49,7 @@ RuntimeFrameOutput MissionTrackingRuntime::ProcessFrame(
     const cv::Mat &source_image) {
   if (reid_gate_ != nullptr && reid_gate_->enabled()) {
     // N03：跨天同步放在每帧固定入口，不依赖 confirm 事件触发 Allow——
-    // 跨天时选人层的 ReID 排除项一并失效（业务 handled 表不受影响）
+    // 跨天时选人层的 ReID 排除项一并失效。
     if (reid_gate_->SyncDay()) {
       adapter_->ClearReidDedupExclusions();
     }
@@ -111,8 +113,15 @@ RuntimeFrameOutput MissionTrackingRuntime::ProcessFrame(
   auto frame = adapter_->ProcessFrame(
       identities, MissionCoordinator::Clock::now(),
       source_metadata, confirm_gate ? &confirm_gate : nullptr);
-  image_adapter_->Consume(
-      BuildPrimaryTargetObservation(frame.primary, source_metadata, source_image, crop_config_));
+  auto observation = BuildPrimaryTargetObservation(
+      frame.primary, source_metadata, source_image, crop_config_);
+  if (photo_recorder_) {
+    photo_recorder_->ObserveFrame(frame.mission,
+                                 observation ? observation->target_id : 0,
+                                 frame.events, source_metadata, source_image,
+                                 frame.mission_stamp_ns);
+  }
+  image_adapter_->Consume(std::move(observation));
   return {std::move(frame.primary), std::move(frame.primary_decision_reason),
           std::move(frame.primary_reject_reason)};
 }

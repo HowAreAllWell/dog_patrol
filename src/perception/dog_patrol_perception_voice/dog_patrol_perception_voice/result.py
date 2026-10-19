@@ -4,6 +4,13 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass, field
+from enum import Enum
+
+
+class VoiceWindowEvent(Enum):
+    WAIT_STARTED = "wait_started"
+    PASSED = "passed"
+    NOT_PASSED = "not_passed"
 
 
 @dataclass(frozen=True)

@@ -31,6 +31,9 @@ class MissionFrameTransaction {
     std::vector<MissionEventAction> events;
     std::string primary_decision_reason;
     std::string primary_reject_reason;
+    // The exact snapshot used for this frame, retained for evidence consumers.
+    std::optional<MissionSnapshot> mission;
+    std::uint64_t mission_stamp_ns{0};
   };
 
   MissionFrameTransaction();
@@ -48,7 +51,7 @@ class MissionFrameTransaction {
   }
 
   // 跨天清理选人层 ReID 排除项（评审 N03）：与 gate 锁存/provider 当日库
-  // 的日期清零同步；业务 handled 表不在此清理范围。
+  // 的日期清零同步。
   void ClearReidDedupExclusions() { primary_manager_.ClearReidDedupExclusions(); }
 
  private:

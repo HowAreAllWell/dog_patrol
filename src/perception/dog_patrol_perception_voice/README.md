@@ -13,6 +13,8 @@ ADB、启动或恢复厂商服务的超时时间。
 evidence 入口是 `perception_voice_provider`：它订阅 `/mission/state` 建立会话门禁，并订阅
 `/perception/authorization_command`。`INITIAL_FACE` 不启动硬件；每条 `DUAL_FIRST` 或
 `DUAL_SECOND` 命令各运行一个响应窗，并将 stage 原样绑定到 `/perception/authorization_evidence`。
+命令和证据的 `round_number` 标识具体轮次：首轮使用 `DUAL_FIRST`，后续轮次复用
+`DUAL_SECOND`。重复或倒序轮次不会重新启动收音；旧消息的 `round_number=0` 仅兼容首两轮。
 provider 的 worker 与 ROS executor 分离；重复命令不重复建 task，状态替换、`CANCEL`、阻塞或离开
 VERIFY 时请求取消并抑制旧 session 的迟到输出。默认不会写入 PCM；回放与
 硬件验收使用测试注入的 `TaskStream` seam，不作为安装后的通用入口。
@@ -21,12 +23,55 @@ VERIFY 时请求取消并抑制旧 session 的迟到输出。默认不会写入 
 TERMINATE 后的 READY）或其他非 VERIFY 状态会取消会话；取消只产生 `CANCELLED` 技术证据，
 不会产生 `UNAUTHORIZED`。旧 `state_seq`、target、stage 和 provider evidence 均被丢弃。
 
+### 口令策略与照片事件
+
+编排节点 `/perception_authorization` 的 ROS 参数 `voice_prompt_count` 控制播报次数，
+默认 2，必须为正整数。每轮播报完成后等待回答；失败才进入下一轮。次数耗尽后不再播报或监听，
+按已有任务流程进入入侵跟踪。这里不新增总核验时限，也不修改 face 的核验窗口。
+第三轮起沿用第二阶段已经完成的人脸结果，不要求 face 识别新的轮次协议。
+
+`/perception_voice_provider` 支持以下 ROS 参数和同名 launch 参数；launch 留空时使用
+`config_file` 的值。直接设置 ROS 参数的优先级高于 YAML：
+
+| 参数 | 默认值/作用 |
+| --- | --- |
+| `response_timeout_seconds` | 10.0；每轮播报结束后的收音时长，必须大于 0 |
+| `first_prompt` | 首次英文播报文本 |
+| `retry_prompt` | 后续英文播报文本；需要同一句口令时与 `first_prompt` 设置相同 |
+| `passphrase` | `blue star`；正确回答，统一转小写、合并空白后精确匹配 |
+
+这些参数和 `voice_prompt_count` 支持 `ros2 param set`，更新在下一次核验会话生效，
+当前人物的各轮沿用开始时的设置。示例：
+
+```bash
+ros2 param set /perception_authorization voice_prompt_count 3
+ros2 param set /perception_voice_provider response_timeout_seconds 10.0
+ros2 param set /perception_voice_provider first_prompt 'Please say the passphrase.'
+ros2 param set /perception_voice_provider retry_prompt 'Please say the passphrase.'
+ros2 param set /perception_voice_provider passphrase 'blue star'
+```
+
+`/perception/voice_verification_event` 发布 `VoiceVerificationEvent`，可通过
+`voice_verification_event_topic` 参数改名。每条包含会话、目标、`round_number` 和事件时刻：
+
+- `WAIT_STARTED`：播报结束、真实收音窗口开启；照片模块保留这一时刻关联的整帧。
+- `PASSED`：识别通过时立即发出，用于选择通过时刻的整帧。
+- `NOT_PASSED`：本轮等待结束且未通过，照片模块使用该轮 `WAIT_STARTED` 的整帧。
+
+上述事件早于设备清理/恢复，不能用后续授权证据的到达时间代替。事件 `header.stamp`
+是 ROS 时钟中的事件时间；照片时间戳与文件名应使用关联相机帧的源时间戳。
+取消或换目标不补发失败事件，由照片模块按任务会话清理未完成窗口。语音包不直接保存图片。
+tracking 将每轮照片按结果保存到照片根目录下的 `voice/passed/`（通过）或
+`voice/failed/`（未通过），文件名为
+`YYYYMMDD_HHMMSS_t<ID>_rN.jpg`，结果由目录区分；
+`ID` 为目标语义 ID，`N` 从 1 开始，表示第几次播报后的口令核验。同名文件追加短序号，避免覆盖。
+
 部署时提供 Vosk 模型目录并启动：
 
 ```bash
 ros2 run dog_patrol_perception_voice perception_voice_provider \
   --ros-args -p model_dir:=/path/to/vosk-model \
-  -p config_file:=/path/to/voice.yaml
+  -p config_file:=/path/to/voice_verification.yaml
 ```
 
 `helper_path` 为空时使用安装包内的 ARM64 helper；`provider`、`mission_state_topic`、
@@ -40,7 +85,7 @@ ros2 run dog_patrol_perception_voice perception_voice_provider \
 ```bash
 ros2 launch dog_patrol_perception_voice voice.launch.py \
   model_dir:=/path/to/vosk-model \
-  config_file:=/path/to/voice.yaml
+  config_file:=/path/to/voice_verification.yaml
 ```
 
 `perception_voice_readiness` 订阅 transient-local `/mission/state`。每个有效 STARTUP
@@ -81,7 +126,7 @@ ADB/AC107/R818，并需要部署机提供 3 条代表性任务结果、Vosk mode
 
 ## 配置和安装资产
 
-- 默认配置：`config/voice.yaml`，只包含当前 `blue star` 口令、两条 Prompt、响应窗和 R818/Prompt
+- 默认配置：`config/voice_verification.yaml`，只包含当前 `blue star` 口令、两条 Prompt、响应窗和 R818/Prompt
   运行参数；设备 serial、模型目录由部署机传入。
 - ARM64 helper：`assets/r818_pcm_base64_aarch64`，安装在 Python package 的 `assets/` 下；对应
   C 源码安装在 `share/dog_patrol_perception_voice/tools/r818_pcm_base64.c`。

@@ -11,6 +11,7 @@ from dog_patrol_interfaces.msg import MissionState
 from dog_patrol_perception_interfaces.msg import (
     AuthorizationCommand,
     AuthorizationEvidence,
+    VoiceVerificationEvent,
 )
 from rclpy.executors import SingleThreadedExecutor
 from rclpy.node import Node
@@ -19,7 +20,7 @@ from rclpy.qos import DurabilityPolicy, HistoryPolicy, QoSProfile, ReliabilityPo
 
 from dog_patrol_perception_voice.adapter import VoiceTaskCleanupError
 from dog_patrol_perception_voice.provider import VoiceEvidenceProviderNode
-from dog_patrol_perception_voice.result import VoiceWindowResult
+from dog_patrol_perception_voice.result import VoiceWindowEvent, VoiceWindowResult
 
 
 def _qos(*, transient: bool, depth: int) -> QoSProfile:
@@ -63,14 +64,19 @@ class FakeTask:
         if self._close_error is not None:
             raise VoiceTaskCleanupError(str(self._close_error))
 
-    def respond(self, *args, retry=False, **kwargs):
+    def respond(self, *args, retry=False, on_event=None, **kwargs):
         del args, kwargs
         self.calls.append(bool(retry))
+        if on_event is not None:
+            on_event(VoiceWindowEvent.WAIT_STARTED)
         if self._wait_for_release:
             assert self.release.wait(timeout=3.0)
         if self._error is not None:
             raise self._error
-        return self._results.popleft()
+        result = self._results.popleft()
+        if on_event is not None:
+            on_event(VoiceWindowEvent.PASSED if result.accepted else VoiceWindowEvent.NOT_PASSED)
+        return result
 
     def cancel(self):
         self.cancel_called.set()
@@ -96,11 +102,12 @@ class FakeAdapterFactory:
 
 
 class ProviderHarness:
-    def __init__(self, adapter_factory) -> None:
+    def __init__(self, adapter_factory, *, config_file="", policy_parameters=()) -> None:
         suffix = f"t{time.monotonic_ns()}"
         self.state_topic = f"/voice/{suffix}/mission/state"
         self.command_topic = f"/voice/{suffix}/authorization/command"
         self.evidence_topic = f"/voice/{suffix}/authorization/evidence"
+        self.window_event_topic = f"/voice/{suffix}/window_event"
         self.source = Node(f"voice_source_{suffix}")
         self.probe = Node(f"voice_probe_{suffix}")
         self.provider = VoiceEvidenceProviderNode(
@@ -108,7 +115,10 @@ class ProviderHarness:
                 Parameter("mission_state_topic", value=self.state_topic),
                 Parameter("authorization_command_topic", value=self.command_topic),
                 Parameter("authorization_evidence_topic", value=self.evidence_topic),
+                Parameter("voice_verification_event_topic", value=self.window_event_topic),
                 Parameter("state_timeout", value=10.0),
+                Parameter("config_file", value=config_file),
+                *policy_parameters,
             ],
             adapter_factory=adapter_factory,
         )
@@ -125,6 +135,11 @@ class ProviderHarness:
             AuthorizationEvidence,
             self.evidence_topic,
             self.evidence.append,
+            _qos(transient=False, depth=10),
+        )
+        self.window_events = []
+        self.window_event_sub = self.probe.create_subscription(
+            VoiceVerificationEvent, self.window_event_topic, self.window_events.append,
             _qos(transient=False, depth=10),
         )
         self.executor = SingleThreadedExecutor()
@@ -160,11 +175,12 @@ class ProviderHarness:
         for _ in range(5):
             self.executor.spin_once(timeout_sec=0.03)
 
-    def publish_command(self, seq, target, stage):
+    def publish_command(self, seq, target, stage, round_number=0):
         msg = AuthorizationCommand()
         msg.observed_state_seq = seq
         msg.target_id = target
         msg.stage = stage
+        msg.round_number = round_number
         self.command_pub.publish(msg)
         for _ in range(5):
             self.executor.spin_once(timeout_sec=0.03)
@@ -197,6 +213,95 @@ def test_voice_does_not_start_during_initial_face_stage():
 
         assert factory.created == []
         assert harness.evidence == []
+    finally:
+        harness.close()
+
+
+def test_rounds_above_two_run_once_and_reject_delayed_commands():
+    tasks = [FakeTask([VoiceWindowResult(False, 10.0)]) for _ in range(3)]
+    factory = FakeAdapterFactory(tasks)
+    harness = ProviderHarness(factory)
+    try:
+        harness.publish_state(17, 42)
+        for number in (1, 2, 3):
+            stage = AuthorizationCommand.DUAL_FIRST if number == 1 else AuthorizationCommand.DUAL_SECOND
+            harness.publish_command(17, 42, stage, number)
+            assert harness.wait(lambda: len(harness.evidence) == number)
+        harness.publish_command(17, 42, AuthorizationCommand.DUAL_SECOND, 2)
+        harness.publish_command(17, 42, AuthorizationCommand.DUAL_SECOND, 3)
+        assert len(factory.created) == 3
+        assert [item.round_number for item in harness.evidence] == [1, 2, 3]
+        assert [item.round_number for item in harness.window_events] == [1, 1, 2, 2, 3, 3]
+    finally:
+        harness.close()
+
+
+@pytest.mark.parametrize("accepted", [True, False])
+def test_photo_events_precede_hardware_restore(accepted):
+    restore_started = threading.Event()
+    allow_restore = threading.Event()
+
+    class SlowRestoreTask(FakeTask):
+        def __exit__(self, *args):
+            restore_started.set()
+            assert allow_restore.wait(timeout=3.0)
+            super().__exit__(*args)
+
+    task = SlowRestoreTask([VoiceWindowResult(accepted, 0.1 if accepted else 10.0)])
+    harness = ProviderHarness(FakeAdapterFactory([task]))
+    try:
+        harness.publish_state(17, 42)
+        harness.publish_command(17, 42, AuthorizationCommand.DUAL_FIRST, 1)
+        assert harness.wait(lambda: len(harness.window_events) == 2)
+        assert restore_started.is_set()
+        assert not task.closed.is_set()
+        assert harness.evidence == []
+        assert [item.event for item in harness.window_events] == [
+            VoiceVerificationEvent.WAIT_STARTED,
+            VoiceVerificationEvent.PASSED if accepted else VoiceVerificationEvent.NOT_PASSED,
+        ]
+        assert all(item.observed_state_seq == 17 and item.target_id == 42 for item in harness.window_events)
+        allow_restore.set()
+        assert harness.wait(lambda: len(harness.evidence) == 1)
+    finally:
+        allow_restore.set()
+        harness.close()
+
+
+def test_ros_policy_update_is_validated_and_applies_to_next_session():
+    harness = ProviderHarness(FakeAdapterFactory([]))
+    try:
+        harness.publish_state(17, 42)
+        results = harness.provider.set_parameters_atomically([
+            Parameter("passphrase", value="  GREEN   Light  "),
+            Parameter("response_timeout_seconds", value=6.0),
+        ])
+        assert results.successful
+        assert harness.provider._session_config.passphrase == "blue star"
+        assert harness.provider._session_config.response_timeout_seconds == 10.0
+        invalid = harness.provider.set_parameters_atomically([
+            Parameter("passphrase", value=" "),
+            Parameter("response_timeout_seconds", value=-1.0),
+        ])
+        assert not invalid.successful
+        harness.publish_state(18, 43)
+        assert harness.provider._session_config.passphrase == "green light"
+        assert harness.provider._session_config.response_timeout_seconds == 6.0
+    finally:
+        harness.close()
+
+
+def test_ros_policy_parameters_override_only_selected_yaml_fields(tmp_path):
+    config_file = tmp_path / "voice.yaml"
+    config_file.write_text("passphrase: GREEN Light\nresponse_timeout_seconds: 7.0\n")
+    harness = ProviderHarness(
+        FakeAdapterFactory([]), config_file=str(config_file),
+        policy_parameters=[Parameter("response_timeout_seconds", value=4.0)],
+    )
+    try:
+        harness.publish_state(17, 42)
+        assert harness.provider._session_config.passphrase == "green light"
+        assert harness.provider._session_config.response_timeout_seconds == 4.0
     finally:
         harness.close()
 

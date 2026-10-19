@@ -9,6 +9,7 @@
 #include <opencv2/core.hpp>
 
 #include "dog_patrol_perception_tracking/modules/mission_ros_adapter.hpp"
+#include "dog_patrol_perception_tracking/modules/event_photo_recorder.hpp"
 #include "dog_patrol_perception_tracking/modules/reid_confirm_gate.hpp"
 #include "dog_patrol_perception_tracking/modules/target_image_ros_adapter.hpp"
 #include "dog_patrol_perception_tracking/types.hpp"
@@ -61,7 +62,8 @@ class MissionTrackingRuntime final : public TrackingRuntime,
       std::unique_ptr<MissionRosAdapter> adapter,
       std::shared_ptr<TargetImageRosAdapter> image_adapter,
       PrimaryTargetCropConfig crop_config,
-      ReidConfirmGate *reid_gate = nullptr);
+      ReidConfirmGate *reid_gate = nullptr,
+      std::shared_ptr<EventPhotoRecorder> photo_recorder = nullptr);
 
   const char *Name() const override { return "mission"; }
   bool FailFastOnInitializationError() const override { return false; }
@@ -89,6 +91,7 @@ class MissionTrackingRuntime final : public TrackingRuntime,
   std::shared_ptr<TargetImageRosAdapter> image_adapter_;
   PrimaryTargetCropConfig crop_config_;
   ReidConfirmGate *reid_gate_{nullptr};
+  std::shared_ptr<EventPhotoRecorder> photo_recorder_;
   // handled 转发与 reset 检测的帧间状态（仅帧处理串行路径访问）
   int prev_snapshot_handled_{0};  // N06：上一观察快照的 handled_target_id
   int reprocessing_target_{0};    // N06：观察到的"正在处置中"目标

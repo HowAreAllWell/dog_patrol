@@ -31,6 +31,7 @@ set(CORE_SOURCES
   src/modules/primary_target_observer.cpp
   src/modules/mission_coordinator.cpp
   src/modules/mission_frame_transaction.cpp
+  src/modules/event_photo_recorder.cpp
   src/modules/perception_config_materializer.cpp
   src/modules/perception_readiness.cpp
   src/modules/primary_recovery_debug.cpp
@@ -259,6 +260,22 @@ ament_export_dependencies(
 
 if(BUILD_TESTING)
   find_package(ament_cmake_gtest REQUIRED)
+
+  ament_add_gtest(test_event_photo_recorder test/test_event_photo_recorder.cpp)
+  if(TARGET test_event_photo_recorder)
+    target_compile_features(test_event_photo_recorder PUBLIC cxx_std_17)
+    target_link_libraries(test_event_photo_recorder ${PROJECT_NAME}_core)
+  endif()
+
+  ament_add_gtest(test_mission_photo_evidence test/test_mission_photo_evidence.cpp)
+  if(TARGET test_mission_photo_evidence)
+    target_compile_features(test_mission_photo_evidence PUBLIC cxx_std_17)
+    target_link_libraries(test_mission_photo_evidence ${PROJECT_NAME}_ros_adapter)
+    ament_target_dependencies(test_mission_photo_evidence
+      rclcpp dog_patrol_interfaces dog_patrol_perception_interfaces dog_patrol_reid_provider)
+    set_tests_properties(test_mission_photo_evidence PROPERTIES
+      ENVIRONMENT "ROS_DOMAIN_ID=189;ROS_LOCALHOST_ONLY=1")
+  endif()
 
   # The portable build cannot link the live executable without Orin SDKs, but
   # it still compiles the node translation unit so mission/standalone control

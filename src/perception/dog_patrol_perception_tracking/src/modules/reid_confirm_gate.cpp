@@ -267,6 +267,12 @@ void ReidConfirmGate::NotifyHandled(int target_id) {
     const auto it = impl_->entries.find(target_id);
     if (it != impl_->entries.end()) {
       crop = it->second.crop_cache;  // 浅拷贝引用计数，互斥锁外只读
+      // Verification changed this person's business disposition. The next
+      // patrol confirmation must ask ReID again, even while an earlier allow
+      // cache is still fresh. Clearing pending state also invalidates any
+      // response issued before this result; a later query gets a new ID.
+      it->second.state = Impl::Decision::kNone;
+      it->second.pending_request_id = 0;
     }
   }
   dog_patrol_reid_provider::msg::ReIDHandled msg;

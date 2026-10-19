@@ -112,7 +112,7 @@ ARRIVED_AND_STOPPED
 
 - `state_seq`：区分不同的全局状态版本；
 - `target_id`：区分不同目标；
-- `handled_target_id`：记录已核验通过、供感知建立排除表的目标；
+- `handled_target_id`：记录已核验通过、供 tracking 向 ReID 转发成功结果的目标；
 - `header.stamp`：判断连续数据是否过期。
 
 父任务控制使用 `PatrolTaskState` 和 `PatrolTaskCommand`，不通过状态 Topic 或 waypoint
@@ -358,7 +358,7 @@ uint32 handled_target_id
 - `state`：当前全局状态；
 - `target_id`：当前目标，`0` 表示没有活动目标；
 - `detail`：供日志和界面显示的说明，程序不能解析该字符串决定业务逻辑。
-- `handled_target_id`：总控接受核验通过结果、应进入感知排除名单的目标；
+- `handled_target_id`：总控接受核验通过结果、供 tracking 转发给 ReID 的目标；
   `0` 表示本轮没有新增排除。它不是“刚结束任务的目标”，不能由恢复阶段推断。
 
 `handled_target_id` 仅在 `VERIFY_IDENTITY` 接受有效 `AUTHORIZED` 时设置为当前目标。
@@ -368,9 +368,9 @@ uint32 handled_target_id
 接受下一目标的 `TARGET_CONFIRMED` 或重置会话时清零。
 恢复阶段的错误和恢复 watchdog 不得覆盖已经确定的业务结果。
 
-感知仅在首次处理新的 `PATROL state_seq` 时消费当前快照的 `handled_target_id`，
-不依赖是否收到了中间的核验/恢复状态。重复状态不能重新加入已过期的排除项或重置
-连续离场计时。`STARTUP` 和活动目标阶段的该字段必须为 `0`；恢复阶段非零时必须
+tracking 识别当前快照中的新成功结果并转发给 ReID，不依赖是否收到了中间的
+核验/恢复状态。相同结果的重复心跳不重复转发；新结果会作废该目标旧放行缓存，
+下次确认重新问询 ReID。选人层不再根据 `handled_target_id` 创建本地离场计时排除项。`STARTUP` 和活动目标阶段的该字段必须为 `0`；恢复阶段非零时必须
 等于 `target_id`；暂停恢复型 RECOVER 和 `PAUSED + READY` 可以保留暂停前已经成立的正值。
 同一序号下的该字段也必须一致。
 
@@ -756,7 +756,7 @@ abs(angular_speed) < 0.10 rad/s
 ### 8.7 TARGET_LOST
 
 该事件只能由感知发布，表示感知已确认当前语义目标的跟踪已丢失，无法继续产生可信
-bbox。当前实现使用 `target.lost_event_timeout_sec=10.0` 秒的 source-time 任务级
+bbox。当前实现使用 `target.lost_event_timeout_sec=6.0` 秒的 source-time 任务级
 窗口；短时漏检由 detector/tracker 内部处理，只有最终超时才发布一次该事件。这个
 计时需要后续任务处理帧推进；如果相机或推理线程完全停止而没有新的 frame transaction，
 感知 coordinator 不会凭空生成 `TARGET_LOST`，输入故障应由 readiness/技术故障监控报告。
@@ -996,7 +996,7 @@ bbox。当前实现使用 `target.lost_event_timeout_sec=10.0` 秒的 source-tim
 
 感知继续发布同一目标 bbox，导航持续跟随。
 
-目标连续丢失超过 10 秒后，感知发送 `TARGET_LOST`，状态机进入 `RECOVER_PATROL`；导航
+目标连续丢失达到 6 秒后，感知发送 `TARGET_LOST`，状态机进入 `RECOVER_PATROL`；导航
 返回保存的巡检中断位姿、恢复 waypoint 或在恢复超时后释放等待，随后发送
 `PATROL_RECOVERY_COMPLETE`（或由 supervisor 的恢复 watchdog 收口），状态机清理目标并
 返回 `PATROL`。

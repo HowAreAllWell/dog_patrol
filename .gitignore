@@ -7,6 +7,7 @@ log/
 
 # Local models, recordings, and runtime artifacts
 data/
+photos/
 assets/models/engines/
 assets/models/reid/
 assets/models/upstream/

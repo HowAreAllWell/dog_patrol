@@ -2,6 +2,7 @@
 #include <chrono>
 #include <cmath>
 #include <filesystem>
+#include <limits>
 #include <memory>
 #include <mutex>
 #include <optional>
@@ -34,6 +35,7 @@
 #include "dog_patrol_perception_tracking/modules/target_image_ros_adapter.hpp"
 #include "dog_patrol_perception_tracking/modules/visualizer_recorder.hpp"
 #include "dog_patrol_perception_interfaces/msg/face_overlay.hpp"
+#include "dog_patrol_perception_interfaces/msg/voice_verification_event.hpp"
 
 namespace {
 
@@ -268,8 +270,7 @@ class PerceptionTrackingNode : public rclcpp::Node {
     this->declare_parameter<double>("target.min_area_ratio", 0.25);
     this->declare_parameter<double>("target.max_area_ratio", 4.0);
     this->declare_parameter<int>("target.pending_recovery_frames", 3);
-    this->declare_parameter<double>("target.lost_event_timeout_sec", 10.0);
-    this->declare_parameter<double>("target.handled_ignore_absence_sec", 60.0);
+    this->declare_parameter<double>("target.lost_event_timeout_sec", 6.0);
 
     this->declare_parameter<std::string>("mission.state_topic", "/mission/state");
     this->declare_parameter<double>("mission.state_timeout", 0.75);
@@ -285,6 +286,10 @@ class PerceptionTrackingNode : public rclcpp::Node {
     this->declare_parameter<double>("target_image.crop_padding_ratio", 0.10);
     this->declare_parameter<double>("target_image.max_publish_hz", 10.0);
     this->declare_parameter<int>("target_image.queue_capacity", 2);
+    this->declare_parameter<bool>("photos.enabled", true);
+    this->declare_parameter<std::string>("photos.root", "~/.ros/dog_patrol/photos");
+    this->declare_parameter<std::string>("photos.voice_event_topic",
+                                        "/perception/voice_verification_event");
 
     this->declare_parameter<std::string>("face.overlay_topic",
                                          "/perception/face_overlay");
@@ -365,6 +370,30 @@ class PerceptionTrackingNode : public rclcpp::Node {
     crop_config.padding_ratio = static_cast<float>(
         this->get_parameter("target_image.crop_padding_ratio").as_double());
     if (mode == RuntimeMode::kMission) {
+      if (this->get_parameter("photos.enabled").as_bool()) {
+        dog_patrol_perception_tracking::EventPhotoRecorder::Config photos;
+        photos.root = this->get_parameter("photos.root").as_string();
+        photo_recorder_ = std::make_shared<
+            dog_patrol_perception_tracking::EventPhotoRecorder>(
+                photos, [logger = this->get_logger()](const std::string &error) {
+                  RCLCPP_ERROR(logger, "event photo: %s", error.c_str());
+                });
+        using VoiceEvent = dog_patrol_perception_interfaces::msg::VoiceVerificationEvent;
+        voice_photo_subscription_ = this->create_subscription<VoiceEvent>(
+            this->get_parameter("photos.voice_event_topic").as_string(),
+            rclcpp::QoS(32).reliable(),
+            [recorder = photo_recorder_](VoiceEvent::ConstSharedPtr message) {
+              if (message->header.stamp.sec < 0 || message->target_id >
+                  static_cast<std::uint32_t>(std::numeric_limits<int>::max())) {
+                return;
+              }
+              const auto stamp = static_cast<std::uint64_t>(message->header.stamp.sec) *
+                                     1000000000ULL + message->header.stamp.nanosec;
+              recorder->RecordVoice(message->observed_state_seq,
+                                    static_cast<int>(message->target_id),
+                                    message->round_number, message->event, stamp);
+            });
+      }
       // 短时 ReID 去重闸门（confirm_target 发布前问询 /perception/reid/dedup）。
       // reid.enable=false 或 ReID 服务不在线时整体旁路，行为与不接 ReID 一致。
       dog_patrol_perception_tracking::ReidConfirmGate::Config reid_cfg;
@@ -383,7 +412,7 @@ class PerceptionTrackingNode : public rclcpp::Node {
           *this, reid_cfg);
       auto runtime = std::make_unique<MissionTrackingRuntime>(
           CreateMissionRosAdapter(target_cfg), std::move(image_adapter), crop_config,
-          reid_gate_.get());
+          reid_gate_.get(), photo_recorder_);
       detection_tracking_status_sink_ = runtime.get();
       observation_lifecycle_ = runtime.get();
       runtime_ = std::move(runtime);
@@ -409,14 +438,6 @@ class PerceptionTrackingNode : public rclcpp::Node {
                  static_cast<float>(this->get_parameter("target.max_area_ratio").as_double()));
     target_cfg.pending_recovery_frames =
         std::max(0, static_cast<int>(this->get_parameter("target.pending_recovery_frames").as_int()));
-    const double handled_ignore_absence_sec =
-        this->get_parameter("target.handled_ignore_absence_sec").as_double();
-    if (!std::isfinite(handled_ignore_absence_sec) || handled_ignore_absence_sec <= 0.0) {
-      throw std::runtime_error("target.handled_ignore_absence_sec must be positive");
-    }
-    target_cfg.handled_ignore_absence = std::chrono::duration_cast<
-        dog_patrol_perception_tracking::PrimaryTargetManager::Duration>(
-        std::chrono::duration<double>(handled_ignore_absence_sec));
     return target_cfg;
   }
 
@@ -1049,6 +1070,9 @@ class PerceptionTrackingNode : public rclcpp::Node {
   // 声明在 runtime_ 之前：gate 必须比持有其裸指针的 runtime 后析构
   std::unique_ptr<dog_patrol_perception_tracking::ReidConfirmGate> reid_gate_;
   std::unique_ptr<TrackingRuntime> runtime_;
+  std::shared_ptr<dog_patrol_perception_tracking::EventPhotoRecorder> photo_recorder_;
+  rclcpp::Subscription<dog_patrol_perception_interfaces::msg::VoiceVerificationEvent>::SharedPtr
+      voice_photo_subscription_;
   DetectionTrackingStatusSink *detection_tracking_status_sink_{nullptr};
   ObservationLifecycle *observation_lifecycle_{nullptr};
   rclcpp::CallbackGroup::SharedPtr mission_state_callback_group_;

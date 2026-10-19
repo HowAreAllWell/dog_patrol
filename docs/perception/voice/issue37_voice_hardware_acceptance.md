@@ -13,8 +13,8 @@ ros2 run dog_patrol_perception_voice perception_voice_acceptance \
   --fixture /srv/dog-patrol/issue37_voice_tasks.json \
   --cycles 3 \
   --model-dir /srv/dog-patrol/vosk-model \
-  --config-file /absolute/path/to/dog_patrol/install/dog_patrol_perception_voice/share/dog_patrol_perception_voice/config/voice.yaml \
-  --environment-check-command "python3 /srv/dog-patrol/check_perception_environment.py --target perception-orin --params-file /srv/dog-patrol/orin_tracking.yaml --tracker-config /srv/dog-patrol/bot_sort.yaml --voice-model-dir /srv/dog-patrol/vosk-model --voice-config-file /absolute/path/to/dog_patrol/install/dog_patrol_perception_voice/share/dog_patrol_perception_voice/config/voice.yaml --install-prefix /absolute/path/to/dog_patrol/install --build-base /absolute/path/to/dog_patrol/build" \
+  --config-file /absolute/path/to/dog_patrol/install/dog_patrol_perception_voice/share/dog_patrol_perception_voice/config/voice_verification.yaml \
+  --environment-check-command "python3 /srv/dog-patrol/check_perception_environment.py --target perception-orin --params-file /srv/dog-patrol/orin_tracking.yaml --tracker-config /srv/dog-patrol/bot_sort.yaml --voice-model-dir /srv/dog-patrol/vosk-model --voice-config-file /absolute/path/to/dog_patrol/install/dog_patrol_perception_voice/share/dog_patrol_perception_voice/config/voice_verification.yaml --install-prefix /absolute/path/to/dog_patrol/install --build-base /absolute/path/to/dog_patrol/build" \
   --report /srv/dog-patrol/issue37_voice_acceptance.json
 ```
 
@@ -22,7 +22,7 @@ ros2 run dog_patrol_perception_voice perception_voice_acceptance \
 `PERCEPTION ENVIRONMENT: PASS`，否则不会接管设备。该命令由部署侧提供，验收 CLI
 本身只依赖 clean install，不从源码目录导入运行时。
 
-`voice.yaml` 中的 ADB serial、AC107 播放设备和 mixer 必须是部署机实际值。
+`voice_verification.yaml` 中的 ADB serial、AC107 播放设备和 mixer 必须是部署机实际值。
 `--fixture` 是部署机上的任务结果清单，不包含 PCM、录音、模型或口令；命令不等待
 用户输入，也不会把原始音频写入主机。`--cycles` 默认是 3，fixture 的任务数必须
 严格匹配该值。默认 fixture 覆盖三个必要的正常任务形状：第一窗通过、第一窗拒绝后第二窗

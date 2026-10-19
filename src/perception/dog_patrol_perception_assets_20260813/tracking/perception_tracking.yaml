@@ -25,8 +25,7 @@ dog_patrol_perception_tracking_node:
     target:
       # Internal tracker lifecycle only; final mission loss is time-based below.
       lost_threshold_frames: 100
-      lost_event_timeout_sec: 10.0
-      handled_ignore_absence_sec: 60.0
+      lost_event_timeout_sec: 6.0
     mission:
       state_topic: "/mission/state"
       state_timeout: 0.75
@@ -35,6 +34,11 @@ dog_patrol_perception_tracking_node:
     perception:
       camera_optical_frame_id: "camera_link"
       capability_status_topic: "/perception/capability_status"
+    photos:
+      enabled: true
+      root: "~/.ros/dog_patrol/photos"
+      voice_event_topic: "/perception/voice_verification_event"
+
     target_image:
       topic: "/perception/tracked_target_image"
       crop_padding_ratio: 0.10

@@ -38,6 +38,11 @@ def generate_launch_description():
     state_timeout = LaunchConfiguration("state_timeout")
     reid_service_name = LaunchConfiguration("reid_service_name")
     reid_handled_topic = LaunchConfiguration("reid_handled_topic")
+    voice_event_topic = LaunchConfiguration("voice_verification_event_topic")
+    voice_prompt_count = LaunchConfiguration("voice_prompt_count")
+    lost_event_timeout = LaunchConfiguration("lost_event_timeout_sec")
+    photos_enabled = LaunchConfiguration("photos_enabled")
+    photos_root = LaunchConfiguration("photos_root")
     python_prefix = [
         EnvironmentVariable("DOG_PATROL_PYTHON", default_value="python3"),
         " ",
@@ -56,7 +61,7 @@ def generate_launch_description():
     face_whitelist = PathJoinSubstitution(
         [assets_root, "face", "whitelist_mobilefacenet"]
     )
-    voice_config = PathJoinSubstitution([assets_root, "runtime", "voice.yaml"])
+    voice_config = PathJoinSubstitution([assets_root, "runtime", "voice_verification.yaml"])
     reid_config = PathJoinSubstitution([assets_root, "runtime", "reid.yaml"])
     reid_engine = PathJoinSubstitution(
         [assets_root, "reid", "reid_clipreid_vitb16_after.fp16.engine"]
@@ -90,6 +95,10 @@ def generate_launch_description():
                 "mission.selected_target_bbox_topic": target_bbox_topic,
                 "perception.capability_status_topic": capability_status_topic,
                 "target_image.topic": tracked_target_image_topic,
+                "target.lost_event_timeout_sec": ParameterValue(lost_event_timeout, value_type=float),
+                "photos.enabled": ParameterValue(photos_enabled, value_type=bool),
+                "photos.root": ParameterValue(photos_root, value_type=str),
+                "photos.voice_event_topic": voice_event_topic,
                 "visualization.enable": ParameterValue(preview, value_type=bool),
                 "visualization.publish_image": True,
                 "visualization.image_topic": visualization_topic,
@@ -140,6 +149,7 @@ def generate_launch_description():
         "dog_patrol_perception_voice",
         "voice.launch.py",
         {
+            "use_sim_time": use_sim_time,
             "model_dir": voice_model,
             "config_file": voice_config,
             "helper_path": voice_helper,
@@ -147,6 +157,11 @@ def generate_launch_description():
             "capability_status_topic": capability_status_topic,
             "authorization_evidence_topic": authorization_evidence_topic,
             "authorization_command_topic": authorization_command_topic,
+            "voice_verification_event_topic": voice_event_topic,
+            "response_timeout_seconds": LaunchConfiguration("response_timeout_seconds"),
+            "first_prompt": LaunchConfiguration("first_prompt"),
+            "retry_prompt": LaunchConfiguration("retry_prompt"),
+            "passphrase": LaunchConfiguration("passphrase"),
             "provider": "voice",
             "state_timeout": state_timeout,
         },
@@ -183,6 +198,7 @@ def generate_launch_description():
                 "authorization_evidence_topic": authorization_evidence_topic,
                 "authorization_command_topic": authorization_command_topic,
                 "state_timeout": ParameterValue(state_timeout, value_type=float),
+                "voice_prompt_count": ParameterValue(voice_prompt_count, value_type=int),
             }
         ],
     )
@@ -209,6 +225,19 @@ def generate_launch_description():
                 default_value="/perception/tracking_overlay",
             ),
             DeclareLaunchArgument("record", default_value="false"),
+            DeclareLaunchArgument("photos_enabled", default_value="true"),
+            DeclareLaunchArgument("photos_root", default_value="~/.ros/dog_patrol/photos"),
+            DeclareLaunchArgument("lost_event_timeout_sec", default_value="6.0"),
+            DeclareLaunchArgument("voice_prompt_count", default_value="2"),
+            # Empty overrides retain the deployment voice YAML values.
+            DeclareLaunchArgument("response_timeout_seconds", default_value=""),
+            DeclareLaunchArgument("first_prompt", default_value=""),
+            DeclareLaunchArgument("retry_prompt", default_value=""),
+            DeclareLaunchArgument("passphrase", default_value=""),
+            DeclareLaunchArgument(
+                "voice_verification_event_topic",
+                default_value="/perception/voice_verification_event",
+            ),
             DeclareLaunchArgument(
                 "voice_helper",
                 default_value=PathJoinSubstitution(

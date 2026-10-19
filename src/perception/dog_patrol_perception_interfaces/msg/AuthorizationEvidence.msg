@@ -14,3 +14,6 @@ uint8 stage
 uint8 result
 string provider
 string detail
+
+# Voice providers echo the commanded round. Face providers may leave this zero.
+uint32 round_number
