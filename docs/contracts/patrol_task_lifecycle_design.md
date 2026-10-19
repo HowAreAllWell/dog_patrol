@@ -389,8 +389,8 @@ supervisor 同一互斥锁中的实际线性顺序为准；正式客户端仍必
 - `target_id` 是当前实时目标上下文，只在正在处置目标或普通目标恢复时为非零；
 - `handled_target_id` 是最近一次核验通过的目标 ID，用于恢复 PATROL 后通知
   感知暂时不要再次选择该目标；
-- supervisor 只保存最近一次 handled ID；多个已处理目标及各自过期时间由感知侧
-  PrimaryTargetManager 的内部排除表保存。
+- supervisor 只保存最近一次 handled ID；多个已处理目标的身份和免核验资格由 ReID
+  维护，PrimaryTargetManager 只应用 ReID 返回的排除结论。
 
 设置规则：
 
@@ -420,47 +420,38 @@ MissionState 合法字段组合：
 | 普通 RECOVER_PATROL | 必须大于 0 | 0 或等于 target_id |
 | 暂停恢复 RECOVER_PATROL | 0 | 0 或暂停前已经成立的 handled ID |
 
-感知进入新的 PATROL state_seq 时读取 `handled_target_id`。若大于 0，将其插入内部排除表；
-周期重发相同 state_seq 不得重复创建新的巡检周期。排除表可以同时保存多个 semantic ID，选择
-primary target 时跳过表中所有 ID。
+tracking 识别当前快照中新的 `handled_target_id` 成功结果，转发给 ReID，并作废该
+semantic ID 的旧放行缓存和在途问询。回到巡逻后再次确认前重新查询 ReID；只有
+`is_seen && handled` 才抑制确认并从巡逻候选中排除。单独的成功快照不会在
+PrimaryTargetManager 中建立另一套本地排除资格，连续离场计时兜底已经删除。
 
-插入必须是“仅不存在时新增”：如果同一个 handled ID 已在排除表中，PAUSE/RESUME 或其他
-PATROL 重入不得覆盖其已有 absence 起始时间。目标过期后会从表中删除；将来同一 semantic ID
-再次核验通过时，才会作为新条目重新开始排除周期。
+ReID 排除集合可以同时保存多个 semantic ID。新的巡逻周期只清当前 primary，
+既有 ReID 排除不随目标是否可见或父任务普通边界变化；跨天和 STARTUP/reset 清除。
+仅在活动目标阶段绑定 supervisor 的 `target_id`，新到的 ReID 排除不得替换活动目标。
 
-当前排除时限语义保持为“目标持续离开画面 60 秒”：目标仍可见时不开始或重置 absence timer；
-只有持续不可见达到 `handled_ignore_absence` 后才从排除表删除并重新具备选择资格。这个计时属于
-感知内部状态，不由 supervisor 修改 handled_target_id 来计时。
-
-absence timer 只在 MissionState.PATROL 的有效感知帧中推进；READY、RECOVER_PATROL、目标活动
-阶段以及无 MissionState 时冻结。PAUSE 持续时间不计入“离开画面 60 秒”，RESUME 回 PATROL 后
-继续原有计时；这保证暂停不会在后台改变下一次目标选择资格。
-
-必须区分“消息字段清零”和“感知排除表清空”：
+必须区分“消息字段清零”和“ReID 排除清空”：
 
 - 新 TARGET_CONFIRMED、RETURN、TERMINATE、COMPLETED、FAILED 和新 START 会把 supervisor
-  当前 `handled_target_id` 字段清零；
-- 上述普通父任务边界不强制删除 PrimaryTargetManager 中尚未过期的多个排除项，它们继续按
-  absence timeout 自然释放，避免立即开始的新任务重复选择刚处理且仍在现场的人；
-- `/mission/reset` 进入 STARTUP 时必须显式清空感知排除表和当前 primary 上下文；
-- 整套进程重启会自然清空内存排除表；
-- 相同 READY/PATROL 快照的周期重发不得清空或重新计时排除表。
+  当前 `handled_target_id` 字段清零；这些边界本身不撤销 ReID 已接受的成功结果。
+- `/mission/reset` 进入 STARTUP 时清空当前 primary、选人层 ReID 排除和 gate 缓存，
+  并向 ReID 转发清除已处理标记请求。
+- 整套进程重启会清空 tracking 内存缓存；ReID provider 按既有当日持久化规则恢复身份与结果。
+- 相同 READY/PATROL 快照的周期重发不得重复转发旧结果。
 
 PAUSE/RESUME 时 supervisor 保留 handled_target_id，是为了暂停发生在已完成目标的
-RECOVER_PATROL 或刚恢复到 PATROL 时，不因暂停丢失排除结论。它不代表恢复旧目标：
+RECOVER_PATROL 或刚恢复到 PATROL 时，不因暂停丢失成功结果。它不代表恢复旧目标：
 MissionState.target_id 仍为 0，face、voice、tracking 不得创建目标会话。
 
 连续处理目标的示例：
 
 ~~~text
-目标 87 核验通过 -> supervisor 发布 handled_target_id=87
-回到 PATROL      -> 感知排除表加入 87
-开始处理目标 99  -> supervisor 字段清为 0；感知表中的 87 仍保留
-目标 99 核验通过 -> supervisor 发布 handled_target_id=99
-回到 PATROL      -> 感知排除表加入 99
+目标 87 核验通过 -> supervisor 发布 handled_target_id=87，tracking 转发给 ReID
+再次看到目标 87 -> ReID 确认 seen+handled，tracking 抑制确认并排除该候选
+开始处理目标 99 -> supervisor 字段清为 0；ReID 的 87 成功结果仍保留
+目标 99 核验通过 -> supervisor 发布 handled_target_id=99，tracking 转发给 ReID
 
 最终：supervisor 字段只保存 99
-      感知排除表可以同时保存 87、99
+      87、99 的免核验资格均由 ReID 维护
 ~~~
 
 ### 4.8 READY 消费者契约
@@ -1585,7 +1576,7 @@ heartbeat 超时只影响各节点本地安全门，不修改 supervisor 权威�
 
 heartbeat 恢复时即使 state_seq 与超时前相同，也属于一次本地通信恢复边界：mux 更新 barrier
 并等待新路径，waypoint/navigation 递增本地 request generation 后重新规划，感知重新打开当前
-状态允许的处理门；但不得重新发布父任务事件、重置 handled absence timer 或重复改变业务状态。
+状态允许的处理门；但不得重新发布父任务事件、重复转发已核验通过结果 或重复改变业务状态。
 
 最后一条保证快速 PAUSE/RESUME 时，即使 keep-last 订阅者只看到最终状态，也会取消旧请求并
 从最终权威上下文重新开始，不会继续使用暂停前创建的 planner 或认证会话。
@@ -1865,31 +1856,26 @@ MissionRosAdapter 不订阅 PatrolTaskState，因此无法单独判断 READY 是
 按上述 MissionState 字段规则验证。`READY + handled_target_id>0` 是否只发生在 PAUSED，由唯一
 状态权威 supervisor 保证。
 
-进入 PATROL 时，PrimaryTargetManager 继续调用
-`ResetForPatrolCycle(mission.handled_target_id)`。该方法只能重置当前 primary 选择上下文并把
-新的正 ID 插入 handled 排除表，不得清空表中其他尚未过期的 ID。相同 state_seq 的周期状态
-重发不能再次调用 ResetForPatrolCycle，避免反复重置 absence timer。
+进入新的 PATROL 时，PrimaryTargetManager 调用 `ResetForPatrolCycle()`，只清当前
+primary 选择上下文，不根据 `handled_target_id` 新建本地排除。成功结果由 tracking runtime
+转发给 ReID，再次确认由 ReID gate 查询资格；相同 state_seq 的周期状态重发不重置 primary。
 
-handled 排除表必须使用等价于 `try_emplace()` 的“缺失才插入”行为；PAUSE/RESUME 或其他
-PATROL 重入不得用 `insert_or_assign()` 覆盖同一 ID 的已有 absence timer。
+MissionState 首次进入 STARTUP 或 state_seq 变大后重新进入 STARTUP 时，感知调用独立的
+`ResetMissionHistory()`，清空当前 primary 和 ReID 排除集合。`ResetForPatrolCycle()` 则保留
+ReID 排除，避免普通巡逻重入撤销已取得的 ReID 结论。
 
-MissionState 首次进入 STARTUP 或 state_seq 变大后重新进入 STARTUP 时，感知必须调用独立的
-`ResetMissionHistory()`（名称可按实现调整）清空当前 primary、handled 排除表和 absence timer；
-不能复用 `ResetForPatrolCycle(0)`，因为后者按现有语义不会清空多个历史排除项。
+`PrimaryTargetManager::UpdateForMission()` 按 phase 明确分流：
 
-`PrimaryTargetManager::UpdateForMission()` 必须按 phase 明确分流：
-
-| phase | primary target 行为 | handled 排除表 |
+| phase | primary target 行为 | ReID 排除集合 |
 |---|---|---|
 | STARTUP | 清除当前 primary，不选择目标 | 清空 |
 | READY | 清除当前 primary，不选择目标 | 保留 |
-| PATROL | 按面积和资格选择目标 | 先插入当前 handled ID，再按 absence 规则维护 |
-| CONFIRM/APPROACH/VERIFY/TRACK | 只维持当前目标上下文，不选择新的 patrol primary | 保留 |
-| RECOVER_PATROL | 清除当前 primary，不选择目标 | 保留，等待回到 PATROL 应用 handled ID |
+| PATROL | 按面积和 ReID 资格选择目标 | 保留；应用异步 ReID 排除结论 |
+| CONFIRM/APPROACH/VERIFY/TRACK | 只维持 supervisor 指定的目标 | 保留，不替换活动目标 |
+| RECOVER_PATROL | 清除当前 primary，不选择目标 | 保留 |
 
-实现必须按上述 phase 显式分流。READY 和暂停恢复只清当前 primary，不调用普通 PATROL
-Update；用于“清当前 primary 但保留 handled 表”的方法必须与 `ResetMissionHistory()` 分开，
-避免 PAUSE 误删已经成立的排除结论。当前实现已经按此规则分流并覆盖多 handled history。
+READY 和暂停恢复只清当前 primary，不调用普通 PATROL Update；清 primary 与清 ReID
+排除历史使用不同方法。选人层不再维护连续离场时间或另一个免核验期限。
 
 ### 12.9 face、voice 和 authorization
 
@@ -2170,14 +2156,13 @@ internal_error
 - MissionRosAdapter 继续拒绝活动目标阶段 target_id=0；
 - MissionRosAdapter 继续拒绝普通 RECOVER 中与 target_id 不相等的正 handled ID；
 - PrimaryTargetManager 在 READY 和 RECOVER_PATROL 下不选择 primary target；
-- PAUSE 进入 READY 时清当前 primary 但保留 handled 排除表；
-- 连续处理多个目标后，PrimaryTargetManager 同时排除所有尚未过期的 handled ID；
+- PAUSE 进入 READY 时清当前 primary 但保留 ReID 排除集合；
+- PrimaryTargetManager 同时排除多个已取得 ReID seen+handled 结论的候选；
 - handled 目标持续可见时保持排除，持续离开画面达到配置时间后才重新允许选择；
-- READY/RECOVER/目标活动阶段冻结 handled absence timer，PAUSE 时长不计入过期；
-- 相同 PATROL state_seq 周期重发不重置 handled absence timer；
-- PAUSE/RESUME 造成 PATROL 重入时，已有 handled ID 的 absence timer 不被重新置零；
-- 普通任务结束和新 START 不强制清空尚未过期的感知排除表；
-- `/mission/reset` 进入 STARTUP 时清空感知排除表和 absence timer；
+- 相同 PATROL state_seq 周期重发不重复转发已核验通过结果；
+- PAUSE/RESUME 造成 PATROL 重入时，保留已有 ReID 排除结论；
+- 普通任务结束和新 START 不强制清空 ReID 排除结论；
+- `/mission/reset` 进入 STARTUP 时清空当前 primary 和 ReID 排除结论；
 - STARTUP preflight 尚未结束即进入 READY 时，迟到 readiness 结果不再发布；
 - PAUSE 进入 READY 时取消当前认证；
 - 取消不会产生 UNAUTHORIZED；
@@ -2243,7 +2228,7 @@ PATROL 到 RECOVER_PATROL 流程持续通过测试。
 10. handled_target_id 只表示最近核验通过的目标，多个排除目标由感知内部表保存；
 11. PAUSE/RESUME 保留 handled_target_id，但不恢复实时目标或认证会话；
 12. RETURN、TERMINATE、COMPLETED、FAILED、reset 和新 START 清除消息中的 handled_target_id；
-13. 普通任务边界不清空感知内部未过期排除表，STARTUP reset 和整套重启必须清空；
+13. 普通任务边界保留 ReID 排除；STARTUP reset 清除，整套重启后通过 ReID 当日库重新查询；
 14. RETURN 结束原路线并只去 home pose；
 15. TERMINATE 随时停止且不返航；
 16. 机器人端形成的任务完成、返航完成、终止和失败收口都进入 `TASK_NO_TASK + READY`；进程

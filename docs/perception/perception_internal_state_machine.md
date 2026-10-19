@@ -73,7 +73,7 @@ Detector 对每一帧图像产生检测框。检测框仍然属于当前图像�
 替代公共任务丢失计时。
 
 任务级目标丢失由 `MissionCoordinator` 使用单调的 source-time 确认，当前统一为
-`target.lost_event_timeout_sec=10.0` 秒。该计时在任务状态下已有目标并且后续帧仍在
+`target.lost_event_timeout_sec=6.0` 秒。该计时在任务状态下已有目标并且后续帧仍在
 被处理时进行；如果整个相机/推理线程完全停止，协调器没有新的 `Update` 调用，不能
 凭空产生 `TARGET_LOST`，此时应由运行期 readiness/技术故障监控发现输入故障。
 
@@ -100,7 +100,7 @@ IDLE
 
 进入 `LOST` 后，当前主目标会被清空，后续巡检帧可以重新选择新的业务目标。这个
 层级的 `LOST` 是感知内部状态，不是直接等价于总状态机的 `TARGET_LOST`；公共事件
-只有在任务目标已经建立且连续没有可信当前目标达到 10 秒时才由任务协调器发出。
+只有在任务目标已经建立且连续没有可信当前目标达到 6 秒时才由任务协调器发出。
 
 进入 `CONFIRM_TARGET`、`APPROACH_TARGET`、`VERIFY_IDENTITY` 或 `TRACK_INTRUDER` 后，
 `MissionState.target_id` 是唯一允许维持的主目标。即使本地主目标上下文短暂缺失，也只能重新绑定
@@ -121,7 +121,7 @@ IDLE
 4. 如果当前处于目标任务状态，只允许发布当前任务 target ID 对应的可信 bounding box。
 5. 对 bounding box 做图像边界、尺寸、时间戳和 frame 校验。
 6. 如果当前目标持续没有可信 bounding box，在后续仍被处理的 source frame 中交给
-   `MissionCoordinator` 按 10 秒时间阈值产生目标丢失事件。
+   `MissionCoordinator` 按 6 秒时间阈值产生目标丢失事件。
 
 当前允许发布目标框的总状态是：
 
@@ -160,14 +160,14 @@ IDLE
 
 当前任务级丢失判断基于“最后一次可信、可投影 bounding box 的 source time”：
 
-- `target.lost_event_timeout_sec` 默认是 10.0 秒。
+- `target.lost_event_timeout_sec` 默认是 6.0 秒。
 - 目标在任务状态中有效，但超过该时间没有新的可信 bounding box 时，感知产生一次 `TARGET_LOST`。
 - 感知不会用其他人的 bounding box 替代当前任务目标。
 - 目标丢失期间不会继续发布旧的缓存框。
 
 监视画面的红框表示该 semantic ID 是当前 primary，绿框只表示该人员 identity 当前可见但不是
 primary，不表示人脸认证通过。画面仍有绿框而任务发布 `TARGET_LOST` 并不矛盾：它表示当前仍检测
-到人员，但连续 10 秒没有得到权威 `target_id` 对应的可信框。此时必须保留 fail-closed 行为，不能
+到人员，但连续 6 秒没有得到权威 `target_id` 对应的可信框。此时必须保留 fail-closed 行为，不能
 把绿框人员自动转接成旧目标。
 
 该逻辑对 `CONFIRM_TARGET`、`APPROACH_TARGET`、`VERIFY_IDENTITY` 和 `TRACK_INTRUDER` 共用，因此理论上覆盖：
@@ -303,14 +303,14 @@ TRACK_INTRUDER
 
 这里“目标仍有可信 bbox”是继续跟踪的唯一必要条件，不需要等待操作员参与。
 
-### 7.3 10 秒目标丢失确认窗口
+### 7.3 6 秒目标丢失确认窗口
 
 当前实现把两个层次明确区分：
 
 1. **短时漏检处理**：用于防止单帧漏检或短暂遮挡立即改变业务状态。期间由 detector/tracker
    保留内部跟踪结果，恢复后继续提供当前帧证据；这不是公共 mission event。
 2. **最终丢失确认**：同一任务目标从最后一次可信 observation 开始，在后续处理帧的
-   source-time 上持续丢失达到 10 秒后，产生一个明确事件，让总状态机结束目标任务并
+   source-time 上持续丢失达到 6 秒后，产生一个明确事件，让总状态机结束目标任务并
    进入 `RECOVER_PATROL`，再由导航恢复并回到 `PATROL`。
 
 最终采用现有 `TARGET_LOST` 事件承载任务级丢失，不新增“最终丢失”事件类型。事件
@@ -319,13 +319,13 @@ TRACK_INTRUDER
 ```text
 可信目标最后一次出现
   -> 短时丢失：感知内部保持，不发布任务事件
-   -> 10 秒内同目标重新出现：继续当前任务，不发布额外事件
-   -> 超过 10 秒仍未出现：发送一次 TARGET_LOST
+   -> 6 秒内同目标重新出现：继续当前任务，不发布额外事件
+   -> 超过 6 秒仍未出现：发送一次 TARGET_LOST
   -> 总状态结束目标任务并进入 RECOVER_PATROL
   -> 导航恢复巡检后发送 PATROL_RECOVERY_COMPLETE，总状态回到 PATROL
 ```
 
-`TARGET_LOST` 的 `detail` 应携带具体原因，例如 `target_lost_timeout_10s`，便于日志和
+`TARGET_LOST` 的 `detail` 应携带具体原因，例如 `target_lost_timeout_6s`，便于日志和
 报警模块区分“接近时丢失”“核验时丢失”和“持续跟踪时丢失”。不能在短暂漏检时就
 发送该事件，否则总控会提前结束任务。也不应通过重复发送 `TARGET_LOST` 表示不同
 阶段，因为总控收到一次后就会递增 `state_seq`。
@@ -341,7 +341,7 @@ TRACK_INTRUDER
 4. `VERIFY_IDENTITY` 中目标持续丢失，授权流程被取消，产生目标丢失事件。
 5. `TRACK_INTRUDER` 中目标仍存在时持续发布 bbox，不需要人工事件才能跟踪。
 6. `TRACK_INTRUDER` 中目标持续丢失，产生目标丢失事件并能恢复巡检。
-7. 目标丢失超过 10 秒后，验证只发布一次 `TARGET_LOST`，并进入恢复巡检。
+7. 目标丢失超过 6 秒后，验证只发布一次 `TARGET_LOST`，并进入恢复巡检。
 8. 恢复阶段不接受新的目标确认；恢复超时直接回到 `PATROL`。
 9. 两轮人脸和口令全部失败，外部只收到一次 `UNAUTHORIZED`，并且 detail 表示核验超时。
 10. 授权过程中目标丢失，后续迟到的授权结果不能改变新的巡检状态。
@@ -356,7 +356,7 @@ TRACK_INTRUDER
 - 授权最终失败的业务语义需要固定为“核验超时后进入持续跟踪”。
 - `TRACK_INTRUDER` 持续依赖可信 bbox；目标丢失后由 `TARGET_LOST` 完成任务收口。
 - 目标丢失需要覆盖接近、核验、持续跟踪三个阶段。
-- 10 秒后发送一次最终 `TARGET_LOST` 事件。
+- 6 秒后发送一次最终 `TARGET_LOST` 事件。
 - 总状态机收到最终丢失或技术故障后进入 `RECOVER_PATROL`，导航取消目标任务并恢复之前巡检任务的断点。
 - 恢复阶段错误不再形成新的业务分支；恢复超时由 supervisor 直接进入 `PATROL`。
 
@@ -406,22 +406,21 @@ PATROL -> CONFIRM_TARGET -> timeout -> PATROL -> CONFIRM_TARGET -> ...
 当前代码没有一个专门的“定位失败冷却”参数。确认超时由总控 watchdog 结束当前
 `CONFIRM_TARGET`，先进入 `RECOVER_PATROL`，导航恢复完成或恢复超时后再进入新的
 `PATROL state_seq`。新的巡检序号允许感知重新评估画面，因此不能把旧序号的
-`TARGET_CONFIRMED` 或 bbox 继续带入新任务。当前感知侧实际保留的 handled-ID 机制
-只针对总控明确报告 `handled_target_id` 的核验通过目标：`VERIFY_IDENTITY` 接受有效
-`AUTHORIZED`。跟踪结束的 `TARGET_LOST` 不新增排除。它不再根据前序任务阶段推断，参数是
-`target.handled_ignore_absence_sec=60.0`；它不是确认超时专用冷却，也不适用于把目标
-永久屏蔽。
+`TARGET_CONFIRMED` 或 bbox 继续带入新任务。总控只为核验通过的目标报告
+`handled_target_id`，tracking 将这个权威结果转发给 ReID。免重复核验资格由 ReID 的
+`is_seen && handled` 结论决定；tracking 不再维护按连续离场时间释放的本地兜底排除表。
+跟踪结束的 `TARGET_LOST` 不新增已处理结果。
 
 确认超时后的实际行为是：
 
 - 感知在 `RECOVER_PATROL` 中清理旧任务目标，不发布旧任务 bbox 或确认事件。
 - 进入新的 `PATROL state_seq` 后，感知重新执行巡检选目标规则。
 - 从核验通过后的恢复回到巡检时，总控将 `handled_target_id` 保留到新的
-  `PATROL` 快照，感知只排除该 ID；即使漏收中间状态也能应用结果。该目标
-  连续不可见达到 `handled_ignore_absence_sec` 后才解除排除，期间其他合格目标仍可被选中。
+  `PATROL` 快照，tracking 将新的成功结果转发 ReID，并作废该目标的旧放行缓存。
+  再次确认前重新问询 ReID；仅命中 `is_seen && handled` 才抑制并让出选人资格。
 - 定位确认超时、任何目标阶段丢失（含核验失败后的持续跟踪）、目标任务中的执行错误
   返回巡逻时，该字段为 0，不新增排除。核验通过后的恢复错误不覆盖已有结果。
-  重复巡逻心跳不能重置离场计时或重新添加已到期的排除项。
+  重复巡逻心跳不能再次转发旧成功结果；ReID 排除按既有跨天/reset规则清除。
 - 这不是公共事件，不新增 `TARGET_REACQUIRED`。
 
 确认位置超时的等待时间由总控参数 `confirm_target_timeout=5.0` 秒控制；恢复等待由
@@ -434,7 +433,7 @@ PATROL -> CONFIRM_TARGET -> timeout -> PATROL -> CONFIRM_TARGET -> ...
 | 情况 | 判断方 | 结果 |
 |---|---|---|
 | 目标框持续存在，但导航算不出地图位置 | 导航/总状态机 | `CONFIRM_TARGET` 继续原巡检并后台重试；5 秒确认超时后进入恢复，再由新巡检序号重新评估 |
-| 感知连续超过 10 秒无法找回当前目标 | 感知 | 上报最终目标丢失和报警，结束旧目标任务，再恢复 `PATROL` |
+| 感知连续超过 6 秒无法找回当前目标 | 感知 | 上报最终目标丢失和报警，结束旧目标任务，再恢复 `PATROL` |
 
 前者表示目标仍然可见，只是当前无法可靠定位；后者表示目标生命周期已经结束。两者不能共用同一个错误原因或相同的目标抑制策略。
 
@@ -690,7 +689,7 @@ CONFIRM_TARGET(seq=N, target=T)
 |---|---|---|---:|
 | bbox 短暂漏检 | 感知内部 tracker | 保持内部跟踪，等待同一目标重新出现 | 否 |
 | bbox 存在但点云无法融合 | 导航协调器 | `CONFIRM_TARGET` 继续原巡检并后台重试；5 秒确认超时后进入 `RECOVER_PATROL`，再由新巡检序号重新评估 | 由确认超时或任务策略决定 |
-| 目标持续丢失超过 10 秒 | 感知任务级逻辑 | 发布最终目标丢失/告警事件 | 是 |
+| 目标持续丢失超过 6 秒 | 感知任务级逻辑 | 发布最终目标丢失/告警事件 | 是 |
 | TF、planner、控制链故障 | 导航协调器 | 停车并发布 `EXECUTION_ERROR` | 由总状态机恢复策略决定 |
 | 感知检测器、跟踪器或核验服务故障 | 感知 | 发布 `EXECUTION_ERROR` | 由总状态机恢复策略决定 |
 
@@ -708,13 +707,13 @@ CONFIRM_TARGET(seq=N, target=T)
 最后一次可信 bbox
   -> 短时丢失窗口：感知内部保留 track
   -> 同一目标重新出现：继续当前任务
-  -> 连续丢失达到 10 秒：发布最终目标丢失事件
+  -> 连续丢失达到 6 秒：发布最终目标丢失事件
   -> 导航停车并清空目标路径
   -> 总状态清空目标、递增 state_seq、恢复 PATROL
 ```
 
 这里不新增 `TARGET_LOST_TIMEOUT` 或其他目标丢失事件。感知只有在内部累计丢失超过
-10 秒后才发布现有 `TARGET_LOST`，总状态机将它作为本次目标任务的结束事件处理，而
+6 秒后才发布现有 `TARGET_LOST`，总状态机将它作为本次目标任务的结束事件处理，而
 不是进入永久等待。总状态机收到后进入 `RECOVER_PATROL`，不能阻止其自动恢复
 `PATROL`。
 
@@ -817,9 +816,9 @@ event 来自不同的异步执行链。
 4. 目标任务进入 `APPROACH_TARGET` 时是否保存巡检断点，恢复阶段是否返回该断点；
    回到新的巡检序号后是否重新执行选目标规则。
 5. `APPROACH_TARGET`、`VERIFY_IDENTITY`、`TRACK_INTRUDER` 三个阶段都是否覆盖
-   10 秒最终目标丢失和恢复巡检。
+   6 秒最终目标丢失和恢复巡检。
 6. 核验失败是否固定映射为 `UNAUTHORIZED -> TRACK_INTRUDER`，不再依赖人工完成事件。
-7. `TARGET_LOST` 是否只在感知内部累计丢失超过 10 秒后发送，并且总控收到后自动
+7. `TARGET_LOST` 是否只在感知内部累计丢失超过 6 秒后发送，并且总控收到后自动
    清理目标并进入 `RECOVER_PATROL`，由导航完成巡检恢复后再回到 `PATROL`。
 8. 导航技术错误是否停车、清理旧路径并通过总控统一恢复，而不是只改变导航内部
    模式。
@@ -844,7 +843,7 @@ event 来自不同的异步执行链。
 | 到达目标前约 3 m 并稳定停车 | `ARRIVED_AND_STOPPED` | 总控进入 `VERIFY_IDENTITY` |
 | 核验成功 | `AUTHORIZED` | 进入 `RECOVER_PATROL`，恢复完成后返回 `PATROL` |
 | 两轮核验均失败 | `UNAUTHORIZED` | `detail` 标明 `verification_timeout`，进入跟踪 |
-| 目标连续丢失超过 10 秒 | `TARGET_LOST` | `detail` 标明阶段和 `target_lost_timeout_10s`，总控进入 `RECOVER_PATROL`，再恢复巡检 |
+| 目标连续丢失超过 6 秒 | `TARGET_LOST` | `detail` 标明阶段和 `target_lost_timeout_6s`，总控进入 `RECOVER_PATROL`，再恢复巡检 |
 | 导航或感知技术故障 | `EXECUTION_ERROR` | `detail` 携带具体技术原因，由总控执行恢复 |
 | 巡检恢复到中断点 | `PATROL_RECOVERY_COMPLETE` | 仅导航在当前 RECOVER 状态发布一次 |
 | 父任务返航成功 | `RETURN_REACHED` | 仅导航在同序号 `TASK_RETURNING + READY` 下发布一次 |
@@ -872,11 +871,11 @@ event 来自不同的异步执行链。
 - 简短原因和可读详情；
 - 是否需要清除或已经恢复。
 
-例如目标在接近、核验或跟踪阶段连续丢失超过 10 秒时：
+例如目标在接近、核验或跟踪阶段连续丢失超过 6 秒时：
 
 ```text
-感知内部累计丢失超过 10 秒
-  -> 发布一次 TARGET_LOST(detail=target_lost_timeout_10s)
+感知内部累计丢失超过 6 秒
+  -> 发布一次 TARGET_LOST(detail=target_lost_timeout_6s)
   -> 同时发布一次目标丢失报警
   -> 导航停车并清空目标路径
   -> 总控清空目标并恢复 PATROL

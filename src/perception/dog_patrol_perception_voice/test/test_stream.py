@@ -18,7 +18,7 @@ from dog_patrol_perception_voice.r818_stream import (
     decode_base64_pcm_chunks,
 )
 from dog_patrol_perception_voice.config import VoiceConfig
-from dog_patrol_perception_voice.result import VoiceWindowResult
+from dog_patrol_perception_voice.result import VoiceWindowEvent, VoiceWindowResult
 
 
 def test_base64_decoder_reassembles_input_and_only_yields_complete_eight_channel_frames() -> None:
@@ -330,3 +330,33 @@ def test_six_microphone_window_rejects_incomplete_origin_frame_as_technical_erro
 
     with pytest.raises(R818HardwareUnreadyError, match="16-byte"):
         recognizer.recognize(1, 20.0)
+
+
+@pytest.mark.parametrize("text,final_text,accepted", [
+    ("blue star", "", True),
+    ("", " BLUE   STAR ", True),
+    ("wrong answer", "wrong answer", False),
+    ("", "", False),
+])
+def test_window_events_mark_open_and_decision_once(text, final_text, accepted) -> None:
+    stream = FakeWindowStream([[bytes(range(16))]])
+    factory = SequencedFactory([
+        FakeVoskRecognizer(result=text, final_result=final_text),
+        *(FakeVoskRecognizer() for _ in range(5)),
+    ])
+    recognizer = R818StreamingVoskSession(
+        stream, VoiceConfig(passphrase="Blue STAR", vote_guard_seconds=0.0),
+        model=object(), recognizer_factory=factory,
+    )
+    events = []
+
+    def record(event):
+        assert stream.calls == [("window", 10.0)]
+        events.append(event)
+
+    result = recognizer.recognize(3, 10.0, on_event=record)
+    assert result.accepted is accepted
+    assert events == [
+        VoiceWindowEvent.WAIT_STARTED,
+        VoiceWindowEvent.PASSED if accepted else VoiceWindowEvent.NOT_PASSED,
+    ]

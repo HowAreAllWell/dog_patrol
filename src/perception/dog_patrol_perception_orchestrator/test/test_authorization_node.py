@@ -103,6 +103,7 @@ class AuthorizationHarness:
         detail="result",
         *,
         stamp_sec=None,
+        round_number=0,
     ):
         msg = AuthorizationEvidence()
         msg.header.stamp.sec = seq if stamp_sec is None else stamp_sec
@@ -112,6 +113,7 @@ class AuthorizationHarness:
         msg.provider = provider
         msg.result = result
         msg.detail = detail
+        msg.round_number = round_number
         self.evidence_pub.publish(msg)
         for _ in range(5):
             self.executor.spin_once(timeout_sec=0.05)
@@ -134,6 +136,36 @@ def command_keys(messages):
         (message.observed_state_seq, message.target_id, message.stage)
         for message in messages
     ]
+
+
+def test_ros_prompt_count_and_round_numbers_allow_third_round_without_face_change(harness):
+    result = harness.node.set_parameters_atomically([Parameter("voice_prompt_count", value=3)])
+    assert result.successful
+    invalid = harness.node.set_parameters_atomically([Parameter("voice_prompt_count", value=0)])
+    assert not invalid.successful
+    harness.publish_state(17, 42)
+    harness.publish_evidence(
+        17, 42, AuthorizationEvidence.INITIAL_FACE, "face", AuthorizationEvidence.NOT_PASSED
+    )
+    for number, stage in ((1, AuthorizationEvidence.DUAL_FIRST), (2, AuthorizationEvidence.DUAL_SECOND)):
+        assert harness.commands[-1].round_number == number
+        for provider in ("face", "voice"):
+            harness.publish_evidence(
+                17, 42, stage, provider, AuthorizationEvidence.NOT_PASSED,
+                round_number=number if provider == "voice" else 0,
+            )
+    assert harness.commands[-1].round_number == 3
+    harness.publish_evidence(
+        17, 42, AuthorizationEvidence.DUAL_SECOND, "voice", AuthorizationEvidence.PASSED,
+        round_number=2,
+    )
+    assert not harness.events
+    harness.publish_evidence(
+        17, 42, AuthorizationEvidence.DUAL_SECOND, "voice", AuthorizationEvidence.PASSED,
+        round_number=3,
+    )
+    assert harness.spin_until(lambda: len(harness.events) == 1)
+    assert harness.events[0].event == MissionEvent.AUTHORIZED
 
 
 def test_two_round_internal_flow_only_rejects_after_both_second_round_miss(

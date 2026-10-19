@@ -71,10 +71,11 @@ class ReidConfirmGate {
 
   // supervisor handled 结论转发：请求 ReID 节点把该 track_id 的身份标记
   // 已处置。自动附带该目标最近一次问询的 crop 作为外观兜底。
+  // 同时作废该目标之前的缓存/在途问询，下次确认重新向 ReID 获取资格。
   void NotifyHandled(int target_id);
 
   // 任务 reset/新会话：请求 ReID 节点清除全部 handled 标记，并清空本地
-  // 锁存结论（与业务侧 handled 排除表的全清对齐）。
+  // 锁存结论（与选人层的 ReID 排除清理对齐）。
   void NotifyHandledReset();
 
  private:

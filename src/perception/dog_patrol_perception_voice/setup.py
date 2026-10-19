@@ -15,7 +15,7 @@ setup(
             [f"resource/{package_name}"],
         ),
         (f"share/{package_name}", ["package.xml", "README.md", "LICENSE", "requirements.txt"]),
-        (f"share/{package_name}/config", ["config/voice.yaml"]),
+        (f"share/{package_name}/config", ["config/voice_verification.yaml"]),
         (f"share/{package_name}/launch", glob("launch/*.launch.py")),
         (f"share/{package_name}/tools", ["tools/r818_pcm_base64.c"]),
     ],

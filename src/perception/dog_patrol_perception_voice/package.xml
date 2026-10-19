@@ -12,6 +12,7 @@
   <exec_depend>launch</exec_depend>
   <exec_depend>launch_ros</exec_depend>
   <exec_depend>rclpy</exec_depend>
+  <exec_depend>rcl_interfaces</exec_depend>
   <exec_depend>dog_patrol_interfaces</exec_depend>
   <exec_depend>dog_patrol_perception_interfaces</exec_depend>
   <exec_depend>dog_patrol_perception_orchestrator</exec_depend>

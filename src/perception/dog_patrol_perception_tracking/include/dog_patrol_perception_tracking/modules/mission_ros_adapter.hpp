@@ -91,7 +91,7 @@ class MissionRosAdapter {
   void ExcludeForReidDedup(int semantic_id);
 
   // 跨天清理选人层 ReID 排除项（评审 N03）：与 gate 的 SyncDay 配对调用；
-  // 业务 handled 表按原有规则维护。线程安全：内部持 mission_mutex_。
+  // 线程安全：内部持 mission_mutex_。
   void ClearReidDedupExclusions();
 
  private:
@@ -113,6 +113,7 @@ class MissionRosAdapter {
   mutable std::mutex mission_mutex_;
   MissionStateSequenceCursor state_sequence_;
   std::optional<MissionSnapshot> latest_mission_;
+  std::uint64_t latest_mission_stamp_ns_{0};
   std::optional<MissionSnapshot> previous_mission_;
   std::optional<std::chrono::steady_clock::time_point> last_state_received_;
   bool mission_state_conflicted_{false};

@@ -229,7 +229,7 @@ TEST_F(MissionRosAdapterTest, InvalidSameSequenceSnapshotLocksOutOriginalSnapsho
   EXPECT_TRUE(adapter.CurrentMission().has_value());
 }
 
-TEST_F(MissionRosAdapterTest, PatrolMessageAlonePreservesHandledTargetAcrossRosTransport) {
+TEST_F(MissionRosAdapterTest, HandledSnapshotNeedsReidConclusionToExcludeTarget) {
   auto node = std::make_shared<rclcpp::Node>("mission_disposition_receiver");
   MissionRosAdapter::Config config;
   config.mission_state_topic = "/handled_disposition/mission/state";
@@ -241,7 +241,7 @@ TEST_F(MissionRosAdapterTest, PatrolMessageAlonePreservesHandledTargetAcrossRosT
   rclcpp::executors::SingleThreadedExecutor executor;
   executor.add_node(node);
   executor.add_node(publisher_node);
-  // No prior recovery message: the current durable snapshot is sufficient.
+  // A durable success snapshot is forwarded to ReID; it is not a local TTL.
   publisher->publish(State(19U, MissionStateMessage::PATROL, 0U, 42U));
   ASSERT_TRUE(SpinUntil(executor, [&adapter] {
     return adapter.CurrentMission().has_value();
@@ -250,9 +250,40 @@ TEST_F(MissionRosAdapterTest, PatrolMessageAlonePreservesHandledTargetAcrossRosT
   adapter.ProcessFrame({TrustedPerson(42, 7, cv::Rect2f{10, 10, 80, 80}),
                          TrustedPerson(99, 8, cv::Rect2f{120, 10, 40, 40})},
                         MissionCoordinator::TimePoint{}, Metadata(1710000000000000000ULL));
+  EXPECT_EQ(adapter.CurrentPrimary().primary_target_id, 42);
+  adapter.ExcludeForReidDedup(42);
+  adapter.ProcessFrame({TrustedPerson(42, 7, cv::Rect2f{10, 10, 80, 80}),
+                        TrustedPerson(99, 8, cv::Rect2f{120, 10, 40, 40})},
+                       MissionCoordinator::TimePoint{} + std::chrono::milliseconds{100},
+                       Metadata(1710000000100000000ULL));
   EXPECT_EQ(adapter.CurrentPrimary().primary_target_id, 99);
   executor.remove_node(publisher_node);
   executor.remove_node(node);
+}
+
+TEST_F(MissionRosAdapterTest, EvidenceOutputOnlyContainsPublishedEventsAndOriginalStateTime) {
+  auto node = std::make_shared<rclcpp::Node>("photo_gate_events");
+  MissionRosAdapter adapter(*node, MissionRosAdapter::Config{});
+  auto patrol = State(20U, MissionStateMessage::PATROL);
+  patrol.header.stamp.sec = 1710000000;
+  ASSERT_TRUE(adapter.StoreMissionState(patrol));
+  const std::function<bool(int)> hold = [](int) { return false; };
+  auto output = adapter.ProcessFrame({TrustedPerson(42, 7)},
+      MissionCoordinator::TimePoint{}, Metadata(1710000000000000000ULL), &hold);
+  EXPECT_TRUE(output.events.empty());
+  ASSERT_TRUE(output.mission.has_value());
+  EXPECT_EQ(output.mission->state_seq, 20U);
+  EXPECT_EQ(output.mission_stamp_ns, 1710000000000000000ULL);
+
+  // Heartbeat publication time must not move the stage boundary used by photos.
+  patrol.header.stamp.sec += 1;
+  ASSERT_TRUE(adapter.StoreMissionState(patrol));
+  const std::function<bool(int)> allow = [](int) { return true; };
+  output = adapter.ProcessFrame({TrustedPerson(42, 7)},
+      MissionCoordinator::TimePoint{} + std::chrono::seconds{1},
+      Metadata(1710000001000000000ULL), &allow);
+  ASSERT_EQ(output.events.size(), 1U);
+  EXPECT_EQ(output.mission_stamp_ns, 1710000000000000000ULL);
 }
 
 TEST_F(MissionRosAdapterTest, DeclaresTheSharedContractQosProfiles) {

@@ -13,6 +13,7 @@ def generate_launch_description():
     task_command_service = LaunchConfiguration("task_command_service")
     state_publish_rate = LaunchConfiguration("state_publish_rate")
     confirm_target_timeout = LaunchConfiguration("confirm_target_timeout")
+    intruder_tracking_timeout = LaunchConfiguration("intruder_tracking_timeout")
     patrol_recovery_timeout = LaunchConfiguration("patrol_recovery_timeout")
 
     supervisor = Node(
@@ -30,6 +31,7 @@ def generate_launch_description():
                 "task_command_service": task_command_service,
                 "state_publish_rate": state_publish_rate,
                 "confirm_target_timeout": confirm_target_timeout,
+                "intruder_tracking_timeout": intruder_tracking_timeout,
                 "patrol_recovery_timeout": patrol_recovery_timeout,
             }
         ],
@@ -47,6 +49,11 @@ def generate_launch_description():
             # perception, navigation, and the UI to observe state changes.
             DeclareLaunchArgument("state_publish_rate", default_value="10.0"),
             DeclareLaunchArgument("confirm_target_timeout", default_value="5.0"),
+            DeclareLaunchArgument(
+                "intruder_tracking_timeout",
+                default_value="60.0",
+                description="Maximum seconds in TRACK_INTRUDER before restoring patrol",
+            ),
             DeclareLaunchArgument("patrol_recovery_timeout", default_value="10.0"),
             supervisor,
         ]

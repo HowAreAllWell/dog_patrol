@@ -10,7 +10,8 @@
 perception_assets/
 ├── runtime/
 │   ├── face.yaml
-│   └── reid.yaml
+│   ├── reid.yaml
+│   └── voice_verification.yaml
 ├── tracking/
 │   ├── yolo26n_fp16_640.engine
 │   ├── perception_tracking.yaml
@@ -27,7 +28,7 @@ perception_assets/
 │   └── whitelist_mobilefacenet/<person>/*.npy
 ├── voice/
 │   ├── vosk-model-small-en-us-0.15/
-│   └── voice.yaml
+│   └── voice_verification.yaml
 └── SHA256SUMS
 ```
 
@@ -50,7 +51,8 @@ Tracking engine 必须在目标 JetPack/TensorRT 组合上生成或验证，不�
 cp src/perception/dog_patrol_perception_tracking/config/perception_tracking_params.yaml tracking/perception_tracking.yaml
 cp src/perception/dog_patrol_perception_tracking/config/bot_sort.yaml tracking/bot_sort.yaml
 cp src/perception/dog_patrol_perception_face/config/face.yaml runtime/face.yaml
-cp src/perception/dog_patrol_perception_voice/config/voice.yaml voice/voice.yaml
+cp src/perception/dog_patrol_perception_voice/config/voice_verification.yaml voice/voice_verification.yaml
+cp voice/voice_verification.yaml runtime/voice_verification.yaml
 ```
 
 至少修改：
@@ -58,7 +60,11 @@ cp src/perception/dog_patrol_perception_voice/config/voice.yaml voice/voice.yaml
 - `tracking/perception_tracking.yaml` 的 `camera.mvs_serial` 和 `detector.runtime_path`；默认 `light` ReID 不需要 ONNX。
 - `runtime/face.yaml` 的 `detector_engine`、`recognition_engine` 和 `whitelist_dir`；生产默认是MobileFaceNet。
 - `runtime/reid.yaml` 的 `model_path` 和 `data_dir`；本机已配置为本资产包下的 TRT engine，以及 NVMe 工作区的 `data/reid`。
-- `voice/voice.yaml` 的 `device_serial`、`prompt_device`、`prompt_mixer_card` 和 `prompt_mixer_control`。
+- `runtime/voice_verification.yaml` 的 `device_serial`、`prompt_device`、`prompt_mixer_card` 和 `prompt_mixer_control`。
+
+完整感知启动时，语音模块读取 `runtime/voice_verification.yaml`，`voice/voice_verification.yaml` 是交付参考副本。
+旧部署资产中的 `runtime/voice.yaml` 应重命名为 `runtime/voice_verification.yaml`，保留现场配置内容，
+并同步更新资产校验清单和使用显式配置路径的启动命令。
 
 不要把这些现场配置提交回公开仓库。
 
@@ -74,7 +80,7 @@ python3 src/perception/scripts/check_perception_environment.py \
   --params-file /path/to/perception_assets/tracking/perception_tracking.yaml \
   --tracker-config /path/to/perception_assets/tracking/bot_sort.yaml \
   --voice-model-dir /path/to/perception_assets/voice/vosk-model-small-en-us-0.15 \
-  --voice-config-file /path/to/perception_assets/voice/voice.yaml \
+  --voice-config-file /path/to/perception_assets/runtime/voice_verification.yaml \
   --install-prefix "$PWD/install" \
   --build-base "$PWD/build"
 ```

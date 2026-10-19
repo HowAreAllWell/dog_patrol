@@ -1,5 +1,7 @@
 # Issue #87 Hik MVS 无损链路与 mission-aware patrol 集成验收
 
+> 历史验证记录：本文中的本地连续离场排除机制已移除。当前免重复核验资格由 ReID 决定；任务级连续丢失默认 6 秒。下文保留当时的配置与结果。
+
 本页记录 umbrella spec #78 的历史完整链路验收证据。子票据的关闭状态只作为待复核证据；文中
 `dev`、现场设备和 artifact 的结论保留作历史复核，不是当前运行手册。当前父任务入口以
 [`patrol_task_lifecycle_design.md`](../../contracts/patrol_task_lifecycle_design.md) 为准：双侧

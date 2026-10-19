@@ -12,6 +12,7 @@ rosidl_generate_interfaces(${PROJECT_NAME}
   "msg/CapabilityStatus.msg"
   "msg/FaceOverlay.msg"
   "msg/TrackedTargetImage.msg"
+  "msg/VoiceVerificationEvent.msg"
   DEPENDENCIES builtin_interfaces std_msgs
 )
 

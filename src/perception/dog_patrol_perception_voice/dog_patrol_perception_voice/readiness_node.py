@@ -126,10 +126,10 @@ def _default_config_file() -> str:
         return str(
             Path(get_package_share_directory("dog_patrol_perception_voice"))
             / "config"
-            / "voice.yaml"
+            / "voice_verification.yaml"
         )
     except Exception:
-        return "/__dog_patrol_voice_install_missing__/config/voice.yaml"
+        return "/__dog_patrol_voice_install_missing__/config/voice_verification.yaml"
 
 
 def main(args=None) -> None:

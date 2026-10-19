@@ -22,7 +22,7 @@
   `TASK_RUNNING + PATROL`，可信 semantic 主目标只产生一次 `TARGET_CONFIRMED`，PATROL 不发布 bbox。
 - 只有任务状态允许的 `CONFIRM_TARGET`、`APPROACH_TARGET` 和 `VERIFY_IDENTITY` 发布当前帧 bbox；消息保留
   semantic `target_id`、源时间戳、光学 frame、原图尺寸和 clamped half-open 像素坐标。
-- 持续缺失达到配置的丢失确认时限（当前默认 10 秒）时只产生一次 `TARGET_LOST`，缺失帧不复用缓存框；时限内的
+- 持续缺失达到配置的丢失确认时限（本记录验收时为 10 秒，当前默认 6 秒）时只产生一次 `TARGET_LOST`，缺失帧不复用缓存框；时限内的
   短暂漏检由 detector/tracker 内部处理，恢复后继续当前任务；`TARGET_LOST` 发出后不再恢复旧任务 bbox。
 - 旧 `state_seq`、等序列冲突状态、错误 `target_id` 和只含错误目标的当前帧 evidence 不改变权威 snapshot，
   也不产生公共 event 或 bbox。

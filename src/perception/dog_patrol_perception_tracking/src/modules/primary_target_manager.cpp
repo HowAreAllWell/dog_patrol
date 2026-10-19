@@ -15,9 +15,6 @@ PrimaryTargetManager::PrimaryTargetManager(Config config) : config_(std::move(co
   config_.min_area_ratio = std::max(0.0F, config_.min_area_ratio);
   config_.max_area_ratio = std::max(config_.min_area_ratio, config_.max_area_ratio);
   config_.pending_recovery_frames = std::max(0, config_.pending_recovery_frames);
-  if (config_.handled_ignore_absence <= Duration::zero()) {
-    config_.handled_ignore_absence = std::chrono::milliseconds{1};
-  }
 }
 
 std::optional<IdentityObservation> PrimaryTargetManager::FindVisibleIdentityBySemanticId(
@@ -75,11 +72,7 @@ std::optional<IdentityObservation> PrimaryTargetManager::SelectLargestValidPerso
   return best;
 }
 
-void PrimaryTargetManager::ResetForPatrolCycle(const int handled_semantic_id) {
-  if (handled_semantic_id > 0) {
-    handled_identity_absence_started_at_.try_emplace(handled_semantic_id, std::nullopt);
-  }
-
+void PrimaryTargetManager::ResetForPatrolCycle() {
   ResetCurrentPrimary();
 }
 
@@ -94,7 +87,6 @@ void PrimaryTargetManager::ClearReidDedupExclusions() {
 }
 
 void PrimaryTargetManager::ResetMissionHistory() {
-  handled_identity_absence_started_at_.clear();
   reid_dedup_excluded_ids_.clear();
   last_mission_for_primary_.reset();
   ResetCurrentPrimary();
@@ -114,40 +106,7 @@ void PrimaryTargetManager::ResetCurrentPrimary() {
 
 bool PrimaryTargetManager::IsMissionEligible(const IdentityObservation &identity) const {
   return identity.semantic_id > 0 &&
-         handled_identity_absence_started_at_.find(identity.semantic_id) == handled_identity_absence_started_at_.end() &&
          reid_dedup_excluded_ids_.find(identity.semantic_id) == reid_dedup_excluded_ids_.end();
-}
-
-void PrimaryTargetManager::UpdateHandledIdentityAbsence(const std::vector<IdentityObservation> &identities,
-                                                        const TimePoint now) {
-  // ReID 排除项当日有效（N04 契约：处置过=当天免处置），不随不可见释放
-  UpdateAbsenceTable(handled_identity_absence_started_at_, identities, now);
-}
-
-// 可见即重置计时；持续不可见超过 handled_ignore_absence 后释放（重新可选）
-void PrimaryTargetManager::UpdateAbsenceTable(
-    std::unordered_map<int, std::optional<TimePoint>> &table,
-    const std::vector<IdentityObservation> &identities, const TimePoint now) {
-  for (auto it = table.begin(); it != table.end();) {
-    const auto visible_identity = FindVisibleIdentityBySemanticId(identities, it->first);
-    if (visible_identity.has_value()) {
-      it->second.reset();
-      ++it;
-      continue;
-    }
-
-    if (!it->second.has_value()) {
-      it->second = now;
-      ++it;
-      continue;
-    }
-
-    if (now >= it->second.value() && now - it->second.value() >= config_.handled_ignore_absence) {
-      it = table.erase(it);
-      continue;
-    }
-    ++it;
-  }
 }
 
 bool PrimaryTargetManager::IsVisibleIdentity(const IdentityObservation &identity) const {
@@ -302,8 +261,7 @@ PrimaryTargetResult PrimaryTargetManager::Update(const std::vector<IdentityObser
 }
 
 PrimaryTargetResult PrimaryTargetManager::UpdateForPatrol(const std::vector<IdentityObservation> &identities,
-                                                          const TimePoint now) {
-  UpdateHandledIdentityAbsence(identities, now);
+                                                          const TimePoint /*now*/) {
   // 巡逻选人边界重评当前 primary 的资格（N01）：ReID 排除结论可能在持有
   // 期间异步注入，在位者失去资格时让出 primary 并重选其他有效候选；活动
   // 目标阶段（UpdateForActiveMissionTarget）仍只绑定 supervisor.target_id，
@@ -312,8 +270,7 @@ PrimaryTargetResult PrimaryTargetManager::UpdateForPatrol(const std::vector<Iden
       primary_target_id_ > 0 ? primary_target_id_
                              : (state_.primary_target_id > 0 ? state_.primary_target_id : -1);
   if (current_primary_id > 0 &&
-      (handled_identity_absence_started_at_.find(current_primary_id) != handled_identity_absence_started_at_.end() ||
-       reid_dedup_excluded_ids_.find(current_primary_id) != reid_dedup_excluded_ids_.end())) {
+      reid_dedup_excluded_ids_.find(current_primary_id) != reid_dedup_excluded_ids_.end()) {
     ResetCurrentPrimary();
   }
   return UpdateInternal(identities, true);
@@ -348,10 +305,9 @@ PrimaryTargetResult PrimaryTargetManager::UpdateForMission(
       (!last_mission_for_primary_.has_value() ||
        last_mission_for_primary_->state_seq != mission->state_seq ||
        last_mission_for_primary_->phase != MissionPhase::kPatrol)) {
-    // Recovery is also used for position-confirmation failures and execution
-    // errors. Only the supervisor's explicit disposition may exclude a person.
-    // Read the current snapshot so skipped intermediate callbacks are harmless.
-    ResetForPatrolCycle(mission->handled_target_id);
+    // The ReID gate owns successful-verification deduplication. A mission
+    // snapshot alone must not create another local exclusion policy.
+    ResetForPatrolCycle();
   }
 
   if (mission->phase == MissionPhase::kReady ||

@@ -77,6 +77,18 @@ def test_task_session_runs_two_independent_windows_with_one_stream_lifecycle() -
     assert stream.calls == ["start", "close"]
 
 
+def test_task_session_does_not_impose_a_two_round_limit() -> None:
+    stream = FakeTaskStream()
+    recognizer = FakeWindowRecognizer([VoiceWindowResult(False, 10.0)] * 4)
+    adapter = R818VoiceAdapter(
+        stream=stream, recognizer=recognizer, prompt_player=FakePromptPlayer()
+    )
+    with adapter.task() as task:
+        results = [task.respond() for _ in range(4)]
+    assert [result.attempt_number for result in results] == [1, 2, 3, 4]
+    assert recognizer.calls == [(number, 10.0) for number in range(1, 5)]
+
+
 def test_task_cancel_interrupts_recognition_and_leaves_close_to_context_cleanup() -> None:
     class CancellableStream(FakeTaskStream):
         def __init__(self) -> None:

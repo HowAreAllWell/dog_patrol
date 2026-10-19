@@ -29,6 +29,71 @@ def test_new_session_starts_with_face_only(session):
     assert transition.outcome is None
 
 
+@pytest.mark.parametrize("count", [1, 3, 5])
+def test_configured_round_count_exhausts_without_requiring_extra_face_windows(session, count):
+    coordinator = AuthorizationCoordinator(voice_prompt_count=count)
+    coordinator.observe(session)
+    transition = coordinator.record_observation(AuthorizationObservation(
+        session, AuthorizationStage.INITIAL_FACE,
+        AuthorizationProvider.FACE, AuthorizationResult.NOT_PASSED,
+    ))
+    for number in range(1, count + 1):
+        command, = transition.commands
+        assert command.round_number == number
+        stage = AuthorizationStage.DUAL_FIRST if number == 1 else AuthorizationStage.DUAL_SECOND
+        if number <= 2:
+            coordinator.record_observation(AuthorizationObservation(
+                session, stage, AuthorizationProvider.FACE, AuthorizationResult.NOT_PASSED,
+            ))
+        if number > 2:
+            stale = coordinator.record_observation(AuthorizationObservation(
+                session, stage, AuthorizationProvider.VOICE, AuthorizationResult.PASSED,
+                number - 1,
+            ))
+            assert stale == AuthorizationTransition()
+        transition = coordinator.record_observation(AuthorizationObservation(
+            session, stage, AuthorizationProvider.VOICE, AuthorizationResult.NOT_PASSED, number,
+        ))
+    assert transition.outcome == AuthorizationOutcome(session, AuthorizationResult.NOT_PASSED)
+    assert coordinator.active_session is None
+
+
+def test_count_update_applies_to_next_session(session):
+    coordinator = AuthorizationCoordinator(voice_prompt_count=1)
+    coordinator.observe(session)
+    coordinator.set_voice_prompt_count(3)
+    # Heartbeat recovery keeps the same mission identity and policy snapshot.
+    coordinator.observe(None)
+    coordinator.observe(session)
+    coordinator.record_observation(AuthorizationObservation(
+        session, AuthorizationStage.INITIAL_FACE,
+        AuthorizationProvider.FACE, AuthorizationResult.NOT_PASSED,
+    ))
+    for provider in (AuthorizationProvider.FACE, AuthorizationProvider.VOICE):
+        transition = coordinator.record_observation(AuthorizationObservation(
+            session, AuthorizationStage.DUAL_FIRST, provider, AuthorizationResult.NOT_PASSED,
+        ))
+    assert transition.outcome is not None
+    next_session = AuthorizationSession(18, 43)
+    coordinator.observe(next_session)
+    coordinator.record_observation(AuthorizationObservation(
+        next_session, AuthorizationStage.INITIAL_FACE,
+        AuthorizationProvider.FACE, AuthorizationResult.NOT_PASSED,
+    ))
+    for provider in (AuthorizationProvider.FACE, AuthorizationProvider.VOICE):
+        transition = coordinator.record_observation(AuthorizationObservation(
+            next_session, AuthorizationStage.DUAL_FIRST, provider, AuthorizationResult.NOT_PASSED,
+        ))
+    assert transition.outcome is None
+    assert transition.commands[0].round_number == 2
+
+
+@pytest.mark.parametrize("value", [0, -1, True, 2.5, 1 << 32])
+def test_invalid_prompt_count_is_rejected(value):
+    with pytest.raises(ValueError, match="voice_prompt_count"):
+        AuthorizationCoordinator(voice_prompt_count=value)
+
+
 def test_initial_face_miss_starts_first_dual_round(session):
     coordinator = AuthorizationCoordinator()
     coordinator.observe(session)

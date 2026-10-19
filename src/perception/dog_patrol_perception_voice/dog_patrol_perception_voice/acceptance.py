@@ -55,7 +55,7 @@ from .preflight import (
     default_helper_path,
 )
 from .prompt import FfmpegAlsaPromptPlayer
-from .result import VoiceWindowResult
+from .result import VoiceWindowEvent, VoiceWindowResult
 from .r818_stream import R818StreamingVoskSession, SubprocessAdbEncodedPcmStream
 from .vosk import load_vosk_model
 
@@ -337,8 +337,12 @@ class _FixtureRecognizer:
         self._stream = stream
         self._consume_stream = consume_stream
 
-    def recognize(self, attempt_number: int, timeout_seconds: float) -> VoiceWindowResult:
+    def recognize(
+        self, attempt_number: int, timeout_seconds: float, *, on_event=None
+    ) -> VoiceWindowResult:
         self._record.recognition_started[attempt_number].set()
+        if on_event is not None:
+            on_event(VoiceWindowEvent.WAIT_STARTED)
         if self._behavior.cancel_at == f"window-{attempt_number}":
             if not self._record.stop_requested.wait(timeout=3.0):
                 raise TimeoutError("response cancellation was not delivered")
@@ -352,6 +356,8 @@ class _FixtureRecognizer:
                 if callable(close):
                     close()
         window = self._behavior.windows[attempt_number - 1]
+        if on_event is not None:
+            on_event(VoiceWindowEvent.PASSED if window.accepted else VoiceWindowEvent.NOT_PASSED)
         return VoiceWindowResult(
             accepted=window.accepted,
             decision_time_seconds=window.decision_time_seconds,
@@ -710,6 +716,7 @@ class _RosAcceptanceHarness:
                 Parameter("authorization_evidence_topic", value=self.evidence_topic),
                 Parameter("authorization_command_topic", value=self.command_topic),
                 Parameter("state_timeout", value=30.0),
+                Parameter("config_file", value=""),
             ],
             adapter_factory=adapter_factory,
         )
@@ -2053,10 +2060,10 @@ def _default_config_path() -> Path:
         return (
             Path(get_package_share_directory("dog_patrol_perception_voice"))
             / "config"
-            / "voice.yaml"
+            / "voice_verification.yaml"
         )
     except Exception:
-        return Path("/__dog_patrol_voice_install_missing__/config/voice.yaml")
+        return Path("/__dog_patrol_voice_install_missing__/config/voice_verification.yaml")
 
 
 def _write_report(path: Path, report: dict[str, Any]) -> None:

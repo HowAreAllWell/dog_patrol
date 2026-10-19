@@ -20,14 +20,14 @@
   ROS-independent `PrimaryTargetObservation` 返回当前可信语义主目标及自持有目标图像；mission 与
   standalone 均通过有界异步 ROS adapter 以 `TrackedTargetImage` 向独立人脸进程交付同帧 crop。
 - `dog_patrol_perception_orchestrator`：已实现 capability readiness、分阶段授权命令与最终任务事件
-  adapter。授权流程固定为“初始仅人脸；未通过后人脸与语音并行第一轮；两者均未通过后并行第二轮”；
-  任一 provider 通过即授权，技术错误单独上报，只有第二轮两者均未通过才判未授权。
+  adapter。初始仅人脸，之后语音按 `voice_prompt_count` 播报和等待，默认两轮；人脸保留原阶段接口。
+  任一有效 provider 通过即授权，技术错误单独上报，配置轮次耗尽且人脸未通过后进入入侵跟踪。
 - `dog_patrol_perception_face`：已迁入真实算法（detector/recognition/verifier/whitelist）与
   `perception_face_provider`、真实 readiness 和 launch。模型与白名单由同一 face YAML 或 ROS 参数提供；
   provider 严格消费 tracking 最新主目标 crop，并按授权阶段发布 evidence。真实 TensorRT 模型、会话取消、
   跨会话隔离与 readiness 已在当前 Orin 验证。
 - `dog_patrol_perception_voice`：已迁入 R818/Vosk 核心、真实 readiness 和异步 provider。MissionState 只负责
-  会话门禁；provider 仅响应 orchestrator 发出的第一轮/第二轮并行授权命令，每条命令运行一个语音窗，
+  会话门禁；provider 按 orchestrator 命令中的轮次运行独立语音窗，次数耗尽后停止监听，
   状态替换或取消会抑制迟到结果，默认不落盘 PCM。既有硬件与真人语音验收记录保留在
   [`docs/perception/voice/`](docs/perception/voice/)；本次以整条感知流程的最终现场验收为准。
 - 语音部署候选源仓 `moonshine_voice_commands` 已以 `b979a7fd33aac5c9ced9591bb507e483faf4aef5` 冻结；#33 只从该版本选择性提炼，不把源仓作为构建或运行依赖。允许/排除清单与复现证据见 [`docs/issue32_voice_deployment_baseline_audit.md`](docs/issue32_voice_deployment_baseline_audit.md)，迁入说明见 [`docs/perception/voice/issue33_voice_import.md`](docs/perception/voice/issue33_voice_import.md)。
@@ -40,6 +40,9 @@
 - 人脸 bbox 已通过轻量 `FaceOverlay` 回传，在 tracking 既有 `VisualizerRecorder` 的同一 canvas/window
   上绘制；错目标、未来帧和过期结果不显示。最终还需用户参加一次仅导航 fake 的感知整流程现场验收，
   同时记录阶段耗时、CPU/GPU/RAM、温度及 tracking/face 指标。
+- 入侵跟踪默认最多 60 秒，连续目标丢失默认 6 秒；
+  免重复核验继续由 ReID 决定。检测、丢失照片按照片项分子目录；语音照片按结果存入 `voice/passed/`、`voice/failed/`，文件名额外包含轮次。所有照片保存原始整帧 JPEG，文件名包含拍摄时间和目标语义 ID。
+  参数、启动与修改方法、照片目录见[配置项与照片使用说明](docs/perception/verification_evidence.md)，按需求截图逐项对应。
 - 目标公开远程：`https://github.com/HowAreAllWell/dog_patrol`
 
 ## 目录

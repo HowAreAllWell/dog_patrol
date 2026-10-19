@@ -16,8 +16,8 @@ from typing import Any, Callable, Protocol
 
 import numpy as np
 
-from .config import VoiceConfig
-from .result import VoiceWindowResult
+from .config import VoiceConfig, normalize_answer
+from .result import VoiceWindowEvent, VoiceWindowResult
 
 R818_SAMPLE_RATE = 16_000
 R818_ORIGIN_CHANNELS = 8
@@ -498,13 +498,21 @@ class R818StreamingVoskSession:
             recognizer_factory=recognizer_factory,
         )
 
-    def recognize(self, attempt_number: int, timeout_seconds: float) -> VoiceWindowResult:
+    def recognize(
+        self,
+        attempt_number: int,
+        timeout_seconds: float,
+        *,
+        on_event: Callable[[VoiceWindowEvent], None] | None = None,
+    ) -> VoiceWindowResult:
         if isinstance(attempt_number, bool) or attempt_number < 1:
             raise ValueError("attempt_number must be positive")
         if not math.isfinite(timeout_seconds) or timeout_seconds <= 0:
             raise ValueError("timeout_seconds must be finite and positive")
         chunks = iter(self._stream.window_chunks(timeout_seconds))
         try:
+            if on_event is not None:
+                on_event(VoiceWindowEvent.WAIT_STARTED)
             grammar = json.dumps([self._config.passphrase, "[unk]"])
             channel_recognizers = tuple(
                 self._recognizer_factory(self._model, R818_SAMPLE_RATE, grammar)
@@ -546,6 +554,8 @@ class R818StreamingVoskSession:
                         target_seen_at = elapsed_seconds
                     if elapsed_seconds >= target_seen_at + self._config.vote_guard_seconds:
                         accepted_at = target_seen_at + self._config.vote_guard_seconds
+                        if on_event is not None:
+                            on_event(VoiceWindowEvent.PASSED)
                         break
         finally:
             close = getattr(chunks, "close", None)
@@ -559,6 +569,10 @@ class R818StreamingVoskSession:
                     channel_results[channel] = text
             if any(text == self._config.passphrase for text in channel_results):
                 accepted_at = elapsed_seconds
+                if on_event is not None:
+                    on_event(VoiceWindowEvent.PASSED)
+            elif on_event is not None:
+                on_event(VoiceWindowEvent.NOT_PASSED)
 
         matching_channels = tuple(
             channel
@@ -593,4 +607,4 @@ def _result_text(payload: str) -> str:
     text = result.get("text", "")
     if not isinstance(text, str):
         raise RuntimeError("Vosk result field 'text' must be a string")
-    return " ".join(text.lower().split())
+    return normalize_answer(text)

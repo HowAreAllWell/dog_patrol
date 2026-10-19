@@ -205,6 +205,9 @@ bool MissionRosAdapter::StoreMissionState(const MissionStateMessage &message) {
     previous_mission_ = latest_mission_;
   }
   latest_mission_ = mission;
+  latest_mission_stamp_ns_ = message.header.stamp.sec < 0 ? 0 :
+      static_cast<std::uint64_t>(message.header.stamp.sec) * 1000000000ULL +
+      message.header.stamp.nanosec;
   mission_state_conflicted_ = false;
   last_state_received_ = std::chrono::steady_clock::now();
   return true;
@@ -299,6 +302,10 @@ MissionFrameTransaction::Output MissionRosAdapter::ProcessFrame(
       MissionStateAvailableLocked() ? latest_mission_ : std::nullopt;
   MissionFrameTransaction::Output output = frame_transaction_.Update(
       {current_mission, previous_mission_, identities, source_time, metadata});
+  output.mission = current_mission;
+  output.mission_stamp_ns = current_mission ? latest_mission_stamp_ns_ :
+      static_cast<std::uint64_t>(std::max<std::int64_t>(0, node_.get_clock()->now().nanoseconds()));
+  std::vector<MissionEventAction> published_events;
   for (const auto &event : output.events) {
     if (event.event == PerceptionMissionEvent::kTargetConfirmed &&
         confirm_gate != nullptr && !(*confirm_gate)(event.target_id)) {
@@ -312,7 +319,10 @@ MissionFrameTransaction::Output MissionRosAdapter::ProcessFrame(
     mission_event_publisher_->publish(
         EventMessage(event.event, event.target_id, event.observed_state_seq,
                      metadata.source_timestamp_ns));
+    published_events.push_back(event);
   }
+  // Evidence must not record a detection which the ReID gate suppressed.
+  output.events = std::move(published_events);
   if (!output.target_box.has_value()) {
     return output;
   }

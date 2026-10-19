@@ -121,7 +121,7 @@ ros2 service call /mission/task_command \
 
 终端 6 的行为是：真实导航到达 3 m 并使 supervisor 进入 `VERIFY_IDENTITY` 后，发布
 `UNAUTHORIZED`，触发 `TRACK_INTRUDER`。之后需要让真实目标离开画面并持续超过
-`target.lost_event_timeout_sec`（默认 10 秒），由 tracking 发布 `TARGET_LOST`，导航协调器再恢复巡检。
+`target.lost_event_timeout_sec`（默认 6 秒），由 tracking 发布 `TARGET_LOST`，导航协调器再恢复巡检。
 
 验证完整过程：
 
@@ -152,7 +152,7 @@ STARTUP + TASK_NO_TASK
 `UNAUTHORIZED` 由测试工具模拟，`TARGET_LOST` 必须来自真实 tracking。
 
 先观察 `TRACK_INTRUDER` 是否能够持续收到真实 bbox 和更新目标路径；确认跟踪正常后，
-让测试目标离开画面，测试 10 秒最终丢失后的巡检恢复。
+让测试目标离开画面，测试连续丢失 6 秒后的巡检恢复。
 如果测试人员一直留在画面中，回到 `PATROL` 后真实 tracking 可能再次发布
 `TARGET_CONFIRMED`，这是当前“巡检状态继续检测”的真实行为，不是状态机回退失败。
 返回巡检后若测试目标再次出现，tracking 可在新的 `PATROL state_seq` 下开启下一次目标流程。
@@ -169,7 +169,7 @@ python3 tools/fake_integration/run_fake_integration.py \
   --tracker-config /absolute/path/to/bot_sort.yaml \
   --face-config /absolute/path/to/face.yaml \
   --voice-model-dir /absolute/path/to/vosk-model \
-  --voice-config /absolute/path/to/voice.yaml \
+  --voice-config /absolute/path/to/voice_verification.yaml \
   --voice-helper /absolute/path/to/r818_pcm_base64_aarch64 \
   --acceptance-case initial_face_pass \
   --preview
@@ -190,7 +190,7 @@ python3 tools/fake_integration/run_fake_integration.py \
   --tracker-config /absolute/path/to/bot_sort.yaml \
   --face-config /absolute/path/to/face.yaml \
   --voice-model-dir /absolute/path/to/vosk-model \
-  --voice-config /absolute/path/to/voice.yaml \
+  --voice-config /absolute/path/to/voice_verification.yaml \
   --voice-helper /absolute/path/to/r818_pcm_base64_aarch64 \
   --acceptance-case initial_face_pass \
   --preview
@@ -219,7 +219,7 @@ python3 tools/fake_integration/run_fake_integration.py \
   --tracker-config /absolute/path/to/bot_sort.yaml \
   --face-config /absolute/path/to/face.yaml \
   --voice-model-dir /absolute/path/to/vosk-model \
-  --voice-config /absolute/path/to/voice.yaml \
+  --voice-config /absolute/path/to/voice_verification.yaml \
   --voice-helper /absolute/path/to/r818_pcm_base64_aarch64 \
   --acceptance-case dual_pass \
   --preview
@@ -231,8 +231,8 @@ python3 tools/fake_integration/run_fake_integration.py \
 已授权目标短时离开后再次出现的豁免场景使用
 `--scenario authorized_reencounter`。第一次授权完成后，脚本提示目标离开画面；真实 tracking 确认
 画面内已无目标后再提示返回，确认目标重新出现后观察 10 秒。期间不得再次进入可疑目标流程，也不得
-产生新的语音 evidence。生产配置按目标连续
-离开画面的时长计算豁免失效，当前 `target.handled_ignore_absence_sec=30` 秒；目标持续可见时不会失效。
+产生新的语音 evidence。该场景需要启用真实 ReID：tracking 转发成功结果后，
+由 ReID 对再次出现的同人返回 `is_seen && handled` 决定豁免；本地已删除连续离场计时兜底。
 
 诊断开机时目标已在相机画面内的状态切换时，使用 `--scenario startup_visible`。该 tracking-only
 场景不启动真实 voice 或 face 算法，fake capability 只补齐启动条件；启动命令前先站到镜头前并保持可见。脚本在真实

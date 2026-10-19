@@ -38,6 +38,15 @@ class AuthorizationOutcome:
 class AuthorizationCommand:
     session: AuthorizationSession
     stage: AuthorizationStage
+    round_number: int = 0
+
+    def __post_init__(self) -> None:
+        if self.round_number == 0 and self.stage in (
+            AuthorizationStage.DUAL_FIRST, AuthorizationStage.DUAL_SECOND
+        ):
+            object.__setattr__(
+                self, "round_number", 1 if self.stage is AuthorizationStage.DUAL_FIRST else 2
+            )
 
 
 @dataclass(frozen=True)
@@ -46,6 +55,7 @@ class AuthorizationObservation:
     stage: AuthorizationStage
     provider: AuthorizationProvider
     result: AuthorizationResult
+    round_number: int = 0
 
 
 @dataclass(frozen=True)
@@ -57,10 +67,19 @@ class AuthorizationTransition:
 class AuthorizationCoordinator:
     """Combines verification results without exposing attempt state."""
 
-    def __init__(self) -> None:
+    def __init__(self, *, voice_prompt_count: int = 2) -> None:
+        self.set_voice_prompt_count(voice_prompt_count)
         self._active_session: Optional[AuthorizationSession] = None
         self._active_stage: Optional[AuthorizationStage] = None
         self._stage_results: dict[AuthorizationProvider, AuthorizationResult] = {}
+        self._round_number = 0
+        self._session_prompt_count = voice_prompt_count
+        self._policy_session: Optional[AuthorizationSession] = None
+
+    def set_voice_prompt_count(self, value: int) -> None:
+        if isinstance(value, bool) or not isinstance(value, int) or not 1 <= value <= 0xFFFFFFFF:
+            raise ValueError("voice_prompt_count must be an integer between 1 and 4294967295")
+        self._voice_prompt_count = value
 
     @property
     def active_session(self) -> Optional[AuthorizationSession]:
@@ -81,6 +100,9 @@ class AuthorizationCoordinator:
         if session is None:
             return AuthorizationTransition(commands=tuple(commands))
         self._active_session = session
+        if session != self._policy_session:
+            self._session_prompt_count = self._voice_prompt_count
+            self._policy_session = session
         self._active_stage = AuthorizationStage.INITIAL_FACE
         commands.append(
             AuthorizationCommand(session, AuthorizationStage.INITIAL_FACE)
@@ -91,6 +113,7 @@ class AuthorizationCoordinator:
         self._active_session = None
         self._active_stage = None
         self._stage_results.clear()
+        self._round_number = 0
 
     def record_observation(
         self, observation: AuthorizationObservation
@@ -113,6 +136,13 @@ class AuthorizationCoordinator:
         }.get(self._active_stage, set())
         if observation.provider not in expected_providers:
             return AuthorizationTransition()
+        if observation.provider is AuthorizationProvider.VOICE:
+            # Zero identifies old providers, which only knew rounds one and two.
+            round_number = observation.round_number or (
+                1 if observation.stage is AuthorizationStage.DUAL_FIRST else 2
+            )
+            if round_number != self._round_number:
+                return AuthorizationTransition()
         if observation.result in (
             AuthorizationResult.PASSED,
             AuthorizationResult.ERROR,
@@ -134,6 +164,7 @@ class AuthorizationCoordinator:
             and observation.result is AuthorizationResult.NOT_PASSED
         ):
             self._active_stage = AuthorizationStage.DUAL_FIRST
+            self._round_number = 1
             self._stage_results.clear()
             return AuthorizationTransition(
                 commands=(
@@ -154,14 +185,22 @@ class AuthorizationCoordinator:
                 AuthorizationProvider.FACE,
                 AuthorizationProvider.VOICE,
             }:
-                if self._active_stage is AuthorizationStage.DUAL_FIRST:
+                if self._round_number < self._session_prompt_count:
+                    previous_stage = self._active_stage
+                    self._round_number += 1
                     self._active_stage = AuthorizationStage.DUAL_SECOND
-                    self._stage_results.clear()
+                    if previous_stage is AuthorizationStage.DUAL_FIRST:
+                        self._stage_results.clear()
+                    else:
+                        # Face keeps its existing two-stage protocol. Reusing DUAL_SECOND
+                        # does not start another face window, so retain its completed result.
+                        self._stage_results.pop(AuthorizationProvider.VOICE, None)
                     return AuthorizationTransition(
                         commands=(
                             AuthorizationCommand(
                                 observation.session,
                                 AuthorizationStage.DUAL_SECOND,
+                                self._round_number,
                             ),
                         )
                     )

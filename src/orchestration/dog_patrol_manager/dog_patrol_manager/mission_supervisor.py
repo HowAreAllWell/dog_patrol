@@ -119,6 +119,7 @@ class MissionSupervisor(Node):
         self.declare_parameter("processed_event_limit", 256)
         self.declare_parameter("max_detail_length", 256)
         self.declare_parameter("confirm_target_timeout", 5.0)
+        self.declare_parameter("intruder_tracking_timeout", 60.0)
         self.declare_parameter("patrol_recovery_timeout", 10.0)
         self.declare_parameter("return_timeout", 60.0)
         self.declare_parameter("map_frame", "map")
@@ -138,6 +139,9 @@ class MissionSupervisor(Node):
         self._processed_event_limit = int(value("processed_event_limit").value)
         self._max_detail_length = max(32, int(value("max_detail_length").value))
         self._confirm_target_timeout = max(0.1, float(value("confirm_target_timeout").value))
+        self._intruder_tracking_timeout = float(value("intruder_tracking_timeout").value)
+        if not math.isfinite(self._intruder_tracking_timeout) or self._intruder_tracking_timeout <= 0.0:
+            raise ValueError("intruder_tracking_timeout must be finite and positive")
         self._patrol_recovery_timeout = max(0.1, float(value("patrol_recovery_timeout").value))
         self._return_timeout = max(0.1, float(value("return_timeout").value))
         self._map_frame = str(value("map_frame").value).lstrip("/")
@@ -285,6 +289,13 @@ class MissionSupervisor(Node):
                 if snapshot.state == GlobalState.CONFIRM_TARGET and age >= self._confirm_target_timeout:
                     result = self._machine.begin_patrol_recovery(
                         f"target position confirmation timed out after {age:.1f}s"
+                    )
+                elif snapshot.state == GlobalState.TRACK_INTRUDER and age >= self._intruder_tracking_timeout:
+                    # This clock starts only when UNAUTHORIZED enters tracking.
+                    # Heartbeats and temporary visibility changes do not change
+                    # the mission state, so they cannot extend the deadline.
+                    result = self._machine.begin_patrol_recovery(
+                        f"intruder tracking timed out after {age:.1f}s"
                     )
                 elif snapshot.state == GlobalState.RECOVER_PATROL and age >= self._patrol_recovery_timeout:
                     result = self._machine.complete_patrol_recovery(

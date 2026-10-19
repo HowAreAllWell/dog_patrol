@@ -119,12 +119,10 @@ TEST(ReidDedupExclusionTest, ExclusionDoesNotReplaceActiveMissionTarget) {
   EXPECT_EQ(state.primary_target_id, 11);
 }
 
-// N04（契约：处置过=当日免处置）：ReID 排除不随持续不可见释放，即使超过
-// 业务 handled 表的 handled_ignore_absence 窗口。
-TEST(ReidDedupExclusionTest, ExclusionSurvivesAbsenceBeyondHandledIgnoreWindow) {
+// ReID 排除不受目标是否持续可见、离场时长或新巡逻周期影响。
+TEST(ReidDedupExclusionTest, ExclusionSurvivesAbsenceAndNewPatrolCycle) {
   PrimaryTargetManager::Config cfg;
   cfg.min_person_area_px = 100.0F;
-  cfg.handled_ignore_absence = 60s;
   PrimaryTargetManager mgr(cfg);
   const PrimaryTargetManager::TimePoint start{};
 
@@ -138,13 +136,14 @@ TEST(ReidDedupExclusionTest, ExclusionSurvivesAbsenceBeyondHandledIgnoreWindow) 
   mgr.UpdateForPatrol({}, start + 61s);
   EXPECT_FALSE(mgr.IsMissionEligible(a));
 
+  mgr.ResetForPatrolCycle();
   const auto state = mgr.UpdateForPatrol({a, b}, start + 62s);
   ASSERT_TRUE(state.primary_track.has_value());
   EXPECT_EQ(state.primary_target_id, 22);
 }
 
-// N03：跨天清理只清 ReID 排除项，业务 handled 排除保持原规则。
-TEST(ReidDedupExclusionTest, ClearReidDedupExclusionsDropsOnlyReidExclusions) {
+// 跨天清理让所有被 ReID 排除的身份重新具备巡逻选择资格。
+TEST(ReidDedupExclusionTest, ClearReidDedupExclusionsRestoresEligibility) {
   PrimaryTargetManager::Config cfg;
   cfg.min_person_area_px = 100.0F;
   PrimaryTargetManager mgr(cfg);
@@ -153,12 +152,12 @@ TEST(ReidDedupExclusionTest, ClearReidDedupExclusionsDropsOnlyReidExclusions) {
   const auto a = MakePerson(11, 101, cv::Rect2f(0, 0, 80, 80));
   const auto b = MakePerson(22, 202, cv::Rect2f(100, 0, 60, 60));
 
-  mgr.ResetForPatrolCycle(22);  // 业务 handled 排除（merge 原有路径）
+  mgr.ExcludeForReidDedup(22);
   mgr.ExcludeForReidDedup(11);
   mgr.ClearReidDedupExclusions();
 
   EXPECT_TRUE(mgr.IsMissionEligible(a));
-  EXPECT_FALSE(mgr.IsMissionEligible(b));
+  EXPECT_TRUE(mgr.IsMissionEligible(b));
   const auto state = mgr.UpdateForPatrol({a, b}, now);
   ASSERT_TRUE(state.primary_track.has_value());
   EXPECT_EQ(state.primary_target_id, 11);

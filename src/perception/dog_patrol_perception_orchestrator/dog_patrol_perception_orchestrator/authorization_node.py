@@ -10,6 +10,7 @@ from dog_patrol_perception_interfaces.msg import (
     AuthorizationCommand,
     AuthorizationEvidence,
 )
+from rcl_interfaces.msg import SetParametersResult
 from rclpy.executors import ExternalShutdownException
 from rclpy.node import Node
 from rclpy.parameter import Parameter
@@ -46,6 +47,7 @@ class PerceptionAuthorizationNode(Node):
             "authorization_command_topic", "/perception/authorization_command"
         )
         self.declare_parameter("state_timeout", 0.75)
+        self.declare_parameter("voice_prompt_count", 2)
 
         state_qos = QoSProfile(
             reliability=ReliabilityPolicy.RELIABLE,
@@ -60,7 +62,10 @@ class PerceptionAuthorizationNode(Node):
             depth=10,
         )
         self._lock = threading.RLock()
-        self._coordinator = AuthorizationCoordinator()
+        self._coordinator = AuthorizationCoordinator(
+            voice_prompt_count=self.get_parameter("voice_prompt_count").value
+        )
+        self.add_on_set_parameters_callback(self._on_policy_parameters)
         self._mission_session: Optional[AuthorizationSession] = None
         self._mission_state_seq: Optional[int] = None
         self._mission_snapshot_session: Optional[AuthorizationSession] = None
@@ -97,6 +102,16 @@ class PerceptionAuthorizationNode(Node):
         self._state_watchdog = self.create_timer(
             min(0.1, self._state_timeout / 2.0), self._check_state_timeout
         )
+
+    def _on_policy_parameters(self, parameters: Sequence[Parameter]) -> SetParametersResult:
+        try:
+            with self._lock:
+                for parameter in parameters:
+                    if parameter.name == "voice_prompt_count":
+                        self._coordinator.set_voice_prompt_count(parameter.value)
+        except (TypeError, ValueError) as exc:
+            return SetParametersResult(successful=False, reason=str(exc))
+        return SetParametersResult(successful=True)
 
     def _on_mission(self, msg: MissionState) -> None:
         with self._lock:
@@ -209,7 +224,7 @@ class PerceptionAuthorizationNode(Node):
             ):
                 return
             transition = self._coordinator.record_observation(
-                AuthorizationObservation(session, stage, provider, result)
+                AuthorizationObservation(session, stage, provider, result, int(msg.round_number))
             )
             stage_elapsed_ms = self._elapsed_ms(self._stage_started_monotonic_ns)
             self.get_logger().info(
@@ -233,6 +248,7 @@ class PerceptionAuthorizationNode(Node):
             msg.observed_state_seq = command.session.observed_state_seq
             msg.target_id = command.session.target_id
             msg.stage = self._command_stage_value(command.stage)
+            msg.round_number = command.round_number
             self._command_pub.publish(msg)
             if command.stage is not AuthorizationStage.CANCEL:
                 self._stage_started_monotonic_ns = time.monotonic_ns()

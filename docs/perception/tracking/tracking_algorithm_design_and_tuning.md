@@ -117,7 +117,7 @@ src/perception/dog_patrol_perception_tracking/config/bot_sort.yaml
 - `sid.recover_relaxed_max_missing_frames`
 
 现场换 FPS 时要重算帧数。当前默认 100 帧：10 FPS 输入约 10 秒；30 FPS 输入约 3.3 秒。
-这个内部帧窗口与任务级 `target.lost_event_timeout_sec=10.0` 秒事件分开配置。
+这个内部帧窗口与任务级 `target.lost_event_timeout_sec=6.0` 秒事件分开配置。
 
 ### missing assignment
 

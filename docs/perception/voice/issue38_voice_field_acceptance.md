@@ -41,9 +41,9 @@ source /absolute/path/to/dog_patrol/install/setup.bash
 ros2 run dog_patrol_perception_voice perception_voice_acceptance \
   --mode field \
   --model-dir /srv/dog-patrol/vosk-model \
-  --config-file /absolute/path/to/dog_patrol/install/dog_patrol_perception_voice/share/dog_patrol_perception_voice/config/voice.yaml \
+  --config-file /absolute/path/to/dog_patrol/install/dog_patrol_perception_voice/share/dog_patrol_perception_voice/config/voice_verification.yaml \
   --automated-report /srv/dog-patrol/issue37_voice_acceptance.json \
-  --environment-check-command "python3 /srv/dog-patrol/check_perception_environment.py --target perception-orin --params-file /srv/dog-patrol/orin_tracking.yaml --tracker-config /srv/dog-patrol/bot_sort.yaml --voice-model-dir /srv/dog-patrol/vosk-model --voice-config-file /absolute/path/to/dog_patrol/install/dog_patrol_perception_voice/share/dog_patrol_perception_voice/config/voice.yaml --install-prefix /absolute/path/to/dog_patrol/install --build-base /absolute/path/to/dog_patrol/build" \
+  --environment-check-command "python3 /srv/dog-patrol/check_perception_environment.py --target perception-orin --params-file /srv/dog-patrol/orin_tracking.yaml --tracker-config /srv/dog-patrol/bot_sort.yaml --voice-model-dir /srv/dog-patrol/vosk-model --voice-config-file /absolute/path/to/dog_patrol/install/dog_patrol_perception_voice/share/dog_patrol_perception_voice/config/voice_verification.yaml --install-prefix /absolute/path/to/dog_patrol/install --build-base /absolute/path/to/dog_patrol/build" \
   --report /srv/dog-patrol/issue38_voice_field_acceptance.json
 ```
 

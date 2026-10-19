@@ -59,7 +59,7 @@ class MissionCoordinator {
   using TimePoint = Clock::time_point;
 
   struct Config {
-    Duration lost_event_timeout{std::chrono::seconds{10}};
+    Duration lost_event_timeout{std::chrono::seconds{6}};
   };
 
   struct FrameInput {

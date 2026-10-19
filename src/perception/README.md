@@ -42,8 +42,9 @@ tracking 的完整监视器画面由同一个 overlay worker 发布为
 - `CapabilityStatus`：表达 capability 名称、ready/not-ready/error、诊断信息和关联的
   `STARTUP state_seq`；
 - `TrackedTargetImage`：向独立人脸进程交付同帧 semantic 主目标 crop；
-- `AuthorizationCommand`：orchestrator 向 provider 下发初始人脸、两轮并行或取消命令；
-- `AuthorizationEvidence`：将 provider 的单阶段结果与 `state_seq + target_id + stage` 关联；
+- `AuthorizationCommand`：orchestrator 下发初始人脸、并行核验或取消命令，语音轮次通过 `round_number` 区分；
+- `AuthorizationEvidence`：将 provider 的结果与 `state_seq + target_id + stage + round_number` 关联；
+- `VoiceVerificationEvent`：标记实际口令等待开始和识别结果时刻，供 tracking 保存原始整帧照片；
 - `FaceOverlay`：把人脸 bbox、匹配状态和原 crop 来源元数据送回既有 tracking canvas。
 
 Capability topic 使用 reliable + transient-local QoS，使晚启动的 orchestrator 可以获得各真实
@@ -52,8 +53,9 @@ provider 保留的当前状态。授权证据是离散、reliable、volatile 事
 `dog_patrol_perception_orchestrator` 提供 ROS-independent 的感知业务编排和 readiness ROS adapter：
 
 - `AuthorizationCoordinator`：维护与 `state_seq + target_id` 绑定的分阶段授权会话；
-- 初始仅人脸；失败后人脸/语音并行第一轮；两者均失败后并行第二轮；任一通过立即授权，任一技术错误
-  结束为技术错误，只有第二轮两者均未通过才判未授权；
+- 初始仅人脸；失败后进入并行核验，语音轮数默认 2，可通过 `voice_prompt_count` 修改；
+  人脸保持原有阶段协议，第 3 轮起语音沿用 `DUAL_SECOND` 并携带独立轮次。
+  任一有效通过立即授权，任一技术错误结束为技术错误；语音轮数耗尽且人脸未通过才判未授权；
 - 不依赖 ROS 2、具体人脸算法或语音算法的纯 Python 测试面。
 - `perception_authorization` 节点：发布阶段命令，只在有效的 `VERIFY_IDENTITY` 会话接受匹配 evidence，将最终结果
   映射为 `AUTHORIZED`、`UNAUTHORIZED` 或 `EXECUTION_ERROR`；`CANCELLED` 不发布任务事件。
@@ -84,8 +86,10 @@ ReID，无需另开服务终端。ReID 配置来自资产包的 `runtime/reid.ya
 感知内部状态、目标生命周期、认证阶段、总状态机、导航协调和任务级目标丢失规则统一以
 [`../../docs/contracts/perception_navigation_system_implementation.md`](../../docs/contracts/perception_navigation_system_implementation.md)
 为准。当前实现中，感知在 `PATROL` 选出可信主目标后发送一次
-`TARGET_CONFIRMED`，在目标任务阶段持续发送当前帧 bbox；连续 10 秒没有可信目标框时
-发送一次 `TARGET_LOST`，由总状态机进入 `RECOVER_PATROL`，而不是由感知直接修改全局状态。
+`TARGET_CONFIRMED`，在目标任务阶段持续发送当前帧 bbox；连续 6 秒没有可信目标框时
+发送一次 `TARGET_LOST`，由总状态机进入 `RECOVER_PATROL`。入侵跟踪由主控限制为默认 60 秒，
+到期同样恢复巡检。完整配置及整帧照片规则见
+[配置项与照片使用说明](../../docs/perception/verification_evidence.md)，包含截图逐项对应、启动命令和运行时配置方法。
 
 原始的感知内部记录 [`../../docs/perception/perception_internal_state_machine.md`](../../docs/perception/perception_internal_state_machine.md)
 仅作为历史详细记录，不再作为当前实现的唯一依据。
@@ -124,7 +128,8 @@ colcon test-result --verbose
 
 - `observe` 对新会话下发 `INITIAL_FACE`，替换/退出会话时先下发 `CANCEL`；
 - 初始人脸未通过后下发 `DUAL_FIRST`，第一轮两者均未通过后下发 `DUAL_SECOND`；
-- 任一预期 provider 通过或报错立即结束；第二轮两者均未通过才结束为未授权；
+- 任一预期 provider 通过或报错立即结束；配置轮数耗尽且人脸未通过才结束为未授权；
+- `round_number=0` 兼容旧的第一、第二轮；第 3 轮起必须使用明确轮次，旧轮结果不影响新轮；
 - 非当前会话、错误 stage、重复或已取消结果都被忽略，不能影响新会话；
 - `perception_authorization` ROS adapter 订阅内部 `AuthorizationEvidence`，并将完成结果映射为公共
   任务事件；该职责不下沉到人脸或语音算法。

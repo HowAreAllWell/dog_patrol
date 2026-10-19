@@ -14,6 +14,13 @@ DEFAULT_FIRST_PROMPT = "Please face my camera directly or say the passphrase lou
 DEFAULT_RETRY_PROMPT = "Once again, please face my camera directly or say the passphrase loudly."
 
 
+def normalize_answer(value: str) -> str:
+    """Use the same English text normalization for configured and recognized answers."""
+    if not isinstance(value, str):
+        raise ValueError("passphrase must be a string")
+    return " ".join(value.lower().split())
+
+
 @dataclass(frozen=True)
 class VoiceConfig:
     passphrase: str = "blue star"
@@ -33,10 +40,14 @@ class VoiceConfig:
     prompt_volume_percent: int = 100
 
     def __post_init__(self) -> None:
-        if not self.passphrase.strip():
+        object.__setattr__(self, "passphrase", normalize_answer(self.passphrase))
+        if not self.passphrase:
             raise ValueError("passphrase must not be empty")
-        if not self.first_prompt.strip() or not self.retry_prompt.strip():
-            raise ValueError("prompts must not be empty")
+        for name in ("first_prompt", "retry_prompt"):
+            value = getattr(self, name)
+            if not isinstance(value, str) or not value.strip():
+                raise ValueError("prompts must be non-empty strings")
+            object.__setattr__(self, name, value.strip())
         for name, value in (
             ("response_timeout_seconds", self.response_timeout_seconds),
             ("vote_guard_seconds", self.vote_guard_seconds),
