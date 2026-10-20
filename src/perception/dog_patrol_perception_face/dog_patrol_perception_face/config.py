@@ -30,7 +30,7 @@ class FaceConfig:
     dual_verification_window_seconds: float = 0.0
     crop_freshness_timeout_seconds: float = 1.0
     evidence_photo_enabled: bool = False
-    evidence_photo_root: str = "/data/face_evidence"
+    evidence_photo_root: str = "/data/dog_patrol/photos/face"
     evidence_photo_format: str = "jpg"
     evidence_photo_jpeg_quality: int = 90
     evidence_photo_retention_seconds: int = 604800

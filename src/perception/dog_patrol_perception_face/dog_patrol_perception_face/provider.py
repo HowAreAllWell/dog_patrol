@@ -11,8 +11,9 @@ from __future__ import annotations
 
 from collections import deque
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from enum import Enum
+from pathlib import Path
 import threading
 import time
 
@@ -155,6 +156,7 @@ class FaceEvidenceController:
         self._hardware_faulted = False
         self._stopping = False
         self._queue: deque[tuple[DecodedCrop, int]] = deque()
+        self._first_crop: tuple[int, DecodedCrop] | None = None
         self._last_crop_wall_ns: int | None = None
         self._worker_cuda_ctx = None
         self._worker_verifier: FaceVerifier | None = None
@@ -186,6 +188,7 @@ class FaceEvidenceController:
             if self._active_cancel is not None:
                 self._active_cancel.set()
             self._queue.clear()
+            self._first_crop = None
             self._last_crop_wall_ns = None
             self._condition.notify_all()
 
@@ -201,6 +204,7 @@ class FaceEvidenceController:
             if self._active_cancel is not None:
                 self._active_cancel.set()
             self._queue.clear()
+            self._first_crop = None
             self._last_crop_wall_ns = None
             self._condition.notify_all()
 
@@ -212,6 +216,13 @@ class FaceEvidenceController:
             if crop.target_id != self._desired_request.session.target_id:
                 self.crops_dropped_target += 1
                 return
+            if self._first_crop is None or self._first_crop[0] != self._generation:
+                # Preserve the actual first valid crop received for this stage.
+                # The inference queue remains latest-only and may discard it.
+                self._first_crop = (
+                    self._generation,
+                    replace(crop, image=crop.image.copy()),
+                )
             self.crops_dropped_queue += len(self._queue)
             self._queue.clear()
             arrival_ns = time.monotonic_ns()
@@ -395,7 +406,13 @@ class FaceEvidenceController:
         deadline = time.monotonic() + self._window_timeout_for(request.stage)
         last_detail = ""
         last_source_box = None
-        first_crop = None
+        with self._condition:
+            first_crop = (
+                self._first_crop[1]
+                if self._first_crop is not None
+                and self._first_crop[0] == generation
+                else None
+            )
         best_similarity = 0.0
         while True:
             crop_and_arrival = self._pop_latest_crop(
@@ -412,7 +429,7 @@ class FaceEvidenceController:
                 )
             crop, arrival_ns = crop_and_arrival
             if first_crop is None:
-                first_crop = crop
+                first_crop = replace(crop, image=crop.image.copy())
             verdict = self._verify(verifier, crop)
             best_similarity = max(best_similarity, float(verdict.similarity))
             if verdict.detail:
@@ -629,6 +646,8 @@ class FaceEvidenceProviderNode(Node):
         self.declare_parameter("detector_engine", "")
         self.declare_parameter("recognition_engine", "")
         self.declare_parameter("whitelist_dir", "")
+        self.declare_parameter("photos_root", "")
+        self.declare_parameter("photos_enabled", True)
         self.declare_parameter("max_detail_length", 256)
         self.declare_parameter("state_timeout", 0.75)
 
@@ -673,9 +692,18 @@ class FaceEvidenceProviderNode(Node):
         self._last_state_monotonic = None
         self._state_timed_out = False
         self._config = config or self._load_config()
+        shared_photos_root = str(self.get_parameter("photos_root").value).strip()
+        evidence_root = (
+            str(Path(shared_photos_root).expanduser() / "face")
+            if shared_photos_root
+            else self._config.evidence_photo_root
+        )
         self._evidence_photo_store = EvidencePhotoStore(
-            enabled=self._config.evidence_photo_enabled,
-            root=self._config.evidence_photo_root,
+            enabled=(
+                self._config.evidence_photo_enabled
+                and bool(self.get_parameter("photos_enabled").value)
+            ),
+            root=evidence_root,
             image_format=self._config.evidence_photo_format,
             jpeg_quality=self._config.evidence_photo_jpeg_quality,
             retention_seconds=self._config.evidence_photo_retention_seconds,

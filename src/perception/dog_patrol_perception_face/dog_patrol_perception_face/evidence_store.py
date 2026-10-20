@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 import re
 import time
+from uuid import uuid4
 
 import cv2
 
@@ -59,15 +61,16 @@ class EvidencePhotoStore:
         if not self.enabled:
             return ""
         self._cleanup()
-        frame_part = (
-            str(crop.source_frame_number)
-            if crop.source_frame_number_available
-            else str(crop.source_stamp_ns)
-        )
         directory = self.root / f"state-{int(state_seq)}" / f"target-{int(target_id)}"
         directory.mkdir(parents=True, exist_ok=True)
-        path = directory / (
-            f"{self._safe(stage)}_{self._safe(outcome)}_{frame_part}.{self.image_format}"
+        frame_part = (
+            f"f{crop.source_frame_number}"
+            if crop.source_frame_number_available
+            else "fna"
+        )
+        stem = (
+            f"{max(0, int(crop.source_stamp_ns))}_target-{int(target_id)}_"
+            f"{self._safe(stage)}_{self._safe(outcome)}_{frame_part}"
         )
         extension = ".jpg" if self.image_format == "jpg" else ".png"
         params = (
@@ -78,10 +81,26 @@ class EvidencePhotoStore:
         ok, encoded = cv2.imencode(extension, crop.image, params)
         if not ok:
             raise RuntimeError("OpenCV failed to encode evidence photo")
-        temporary = path.with_suffix(path.suffix + ".tmp")
+        temporary = directory / f".{uuid4().hex}.tmp"
         temporary.write_bytes(encoded.tobytes())
-        temporary.replace(path)
+        path = self._claim_unique_path(directory, stem, temporary)
+        self._cleanup()
         return path.resolve().as_uri()
+
+    def _claim_unique_path(self, directory: Path, stem: str, temporary: Path) -> Path:
+        """Atomically publish a photo without replacing existing history."""
+        try:
+            for suffix in range(10000):
+                tail = "" if suffix == 0 else f"-{suffix}"
+                candidate = directory / f"{stem}{tail}.{self.image_format}"
+                try:
+                    os.link(temporary, candidate)
+                    return candidate
+                except FileExistsError:
+                    continue
+            raise RuntimeError("too many evidence photo filename collisions")
+        finally:
+            temporary.unlink(missing_ok=True)
 
     @staticmethod
     def _safe(value: str) -> str:
@@ -98,7 +117,7 @@ class EvidencePhotoStore:
         )
         cutoff = time.time() - self.retention_seconds
         expired = [path for path in files if path.stat().st_mtime < cutoff]
-        overflow = max(0, len(files) - len(expired) - self.max_files + 1)
+        overflow = max(0, len(files) - len(expired) - self.max_files)
         victims = expired + [path for path in files if path not in expired][:overflow]
         for path in victims:
             path.unlink(missing_ok=True)
