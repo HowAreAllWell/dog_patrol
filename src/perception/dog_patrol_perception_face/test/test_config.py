@@ -16,6 +16,8 @@ def _write(tmp_path: Path, text: str) -> Path:
 def test_defaults_without_config() -> None:
     config = FaceConfig()
     assert config.window_timeout_seconds == 3.0
+    assert config.initial_face_window_seconds == 0.0
+    assert config.dual_verification_window_seconds == 0.0
     assert config.similarity_threshold == pytest.approx(0.3274939358)
     assert config.size_weighting_enabled is False
 
@@ -61,6 +63,39 @@ def test_nonpositive_window_raises(tmp_path: Path) -> None:
     path = _write(tmp_path, "window_timeout_seconds: 0")
     with pytest.raises(ValueError, match="positive"):
         load_face_config(str(path))
+
+
+def test_stage_specific_windows_are_loaded(tmp_path: Path) -> None:
+    path = _write(
+        tmp_path,
+        "initial_face_window_seconds: 3\n"
+        "dual_verification_window_seconds: 10\n",
+    )
+    config = load_face_config(path)
+    assert config.initial_face_window_seconds == 3.0
+    assert config.dual_verification_window_seconds == 10.0
+
+
+def test_evidence_photo_configuration_is_loaded(tmp_path: Path) -> None:
+    path = _write(
+        tmp_path,
+        "evidence_photo_enabled: true\n"
+        "evidence_photo_root: /data/test-face-evidence\n"
+        "evidence_photo_format: png\n"
+        "evidence_photo_jpeg_quality: 88\n"
+        "evidence_photo_retention_seconds: 3600\n"
+        "evidence_photo_max_files: 100\n",
+    )
+    config = load_face_config(path)
+    assert config.evidence_photo_enabled is True
+    assert config.evidence_photo_format == "png"
+    assert config.evidence_photo_retention_seconds == 3600
+
+
+def test_negative_stage_window_is_rejected(tmp_path: Path) -> None:
+    path = _write(tmp_path, "dual_verification_window_seconds: -1")
+    with pytest.raises(ValueError, match="must not be negative"):
+        load_face_config(path)
 
 
 def test_legacy_model_fields_are_rejected(tmp_path: Path) -> None:
