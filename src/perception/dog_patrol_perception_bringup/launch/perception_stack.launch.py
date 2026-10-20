@@ -143,6 +143,8 @@ def generate_launch_description():
             "authorization_command_topic": authorization_command_topic,
             "provider": "face",
             "state_timeout": state_timeout,
+            "photos_root": photos_root,
+            "photos_enabled": photos_enabled,
         },
     )
     voice = include(

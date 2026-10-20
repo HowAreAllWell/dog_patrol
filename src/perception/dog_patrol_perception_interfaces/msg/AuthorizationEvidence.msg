@@ -17,3 +17,9 @@ string detail
 
 # Voice providers echo the commanded round. Face providers may leave this zero.
 uint32 round_number
+
+# Face providers return identity metadata and the selected tracking-crop photo.
+# Voice providers leave these fields empty/zero.
+string person_id
+float32 similarity
+string image_url

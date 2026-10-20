@@ -58,11 +58,12 @@ cp voice/voice_verification.yaml runtime/voice_verification.yaml
 至少修改：
 
 - `tracking/perception_tracking.yaml` 的 `camera.mvs_serial` 和 `detector.runtime_path`；默认 `light` ReID 不需要 ONNX。
-- `runtime/face.yaml` 的 `detector_engine`、`recognition_engine` 和 `whitelist_dir`；生产默认是MobileFaceNet。
+- `runtime/face.yaml` 的 `detector_engine`、`recognition_engine`、`whitelist_dir`、分阶段核验时长和人脸照片开关；生产默认是 MobileFaceNet。
 - `runtime/reid.yaml` 的 `model_path` 和 `data_dir`；本机已配置为本资产包下的 TRT engine，以及 NVMe 工作区的 `data/reid`。
 - `runtime/voice_verification.yaml` 的 `device_serial`、`prompt_device`、`prompt_mixer_card` 和 `prompt_mixer_control`。
 
 完整感知启动时，语音模块读取 `runtime/voice_verification.yaml`，`voice/voice_verification.yaml` 是交付参考副本。
+完整感知启动会将统一 `photos_root` 传入人脸模块，并把人脸照片保存到其 `face/` 子目录。
 旧部署资产中的 `runtime/voice.yaml` 应重命名为 `runtime/voice_verification.yaml`，保留现场配置内容，
 并同步更新资产校验清单和使用显式配置路径的启动命令。
 

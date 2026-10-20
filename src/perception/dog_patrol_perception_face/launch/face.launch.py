@@ -17,6 +17,8 @@ def generate_launch_description():
     command_topic = LaunchConfiguration("authorization_command_topic")
     provider = LaunchConfiguration("provider")
     state_timeout = LaunchConfiguration("state_timeout")
+    photos_root = LaunchConfiguration("photos_root")
+    photos_enabled = LaunchConfiguration("photos_enabled")
     python_prefix = [
         EnvironmentVariable("DOG_PATROL_PYTHON", default_value="python3"),
         " ",
@@ -61,6 +63,8 @@ def generate_launch_description():
                 "recognition_engine": recognition_engine,
                 "whitelist_dir": whitelist_dir,
                 "state_timeout": ParameterValue(state_timeout, value_type=float),
+                "photos_root": ParameterValue(photos_root, value_type=str),
+                "photos_enabled": ParameterValue(photos_enabled, value_type=bool),
             }
         ],
     )
@@ -90,6 +94,8 @@ def generate_launch_description():
             ),
             DeclareLaunchArgument("provider", default_value="face"),
             DeclareLaunchArgument("state_timeout", default_value="0.75"),
+            DeclareLaunchArgument("photos_root", default_value=""),
+            DeclareLaunchArgument("photos_enabled", default_value="true"),
             readiness,
             evidence,
         ]

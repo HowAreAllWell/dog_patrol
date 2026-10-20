@@ -11,8 +11,9 @@ from __future__ import annotations
 
 from collections import deque
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from enum import Enum
+from pathlib import Path
 import threading
 import time
 
@@ -32,6 +33,7 @@ from .config import FaceConfig, load_face_config
 from .config import RECOGNITION_EMBEDDING_DIM
 from .crop import DecodedCrop, decode_crop
 from .detector import TRTInference, ensure_cuda_context
+from .evidence_store import EvidencePhotoStore
 from .recognition import RecModel
 from .verifier import FaceVerifier, ProductionFaceVerifier
 from .whitelist import load_whitelist_npy
@@ -79,6 +81,9 @@ class FaceEvidence:
     # Face bounding box in source-image coordinates: (x1, y1, x2, y2).
     # None when no face was detected in the crop.
     box: tuple[int, int, int, int] | None = None
+    person_id: str = ""
+    similarity: float = 0.0
+    image_url: str = ""
 
 
 class _MissionCancelled(RuntimeError):
@@ -117,11 +122,24 @@ class FaceEvidenceController:
             None,
         ]
         | None = None,
+        evidence_photo_callback: Callable[
+            [DecodedCrop, FaceVerificationRequest, FaceEvidenceResult], str
+        ]
+        | None = None,
     ) -> None:
         self._verifier_factory = verifier_factory
         self._publish = publish
         self._overlay_callback = overlay_callback
-        self._window_timeout = max(0.1, float(config.window_timeout_seconds))
+        self._evidence_photo_callback = evidence_photo_callback
+        legacy_timeout = max(0.1, float(config.window_timeout_seconds))
+        self._initial_face_window = max(
+            0.1,
+            float(config.initial_face_window_seconds) or legacy_timeout,
+        )
+        self._dual_verification_window = max(
+            0.1,
+            float(config.dual_verification_window_seconds) or legacy_timeout,
+        )
         self._freshness_timeout = max(
             0.1, float(config.crop_freshness_timeout_seconds)
         )
@@ -138,6 +156,7 @@ class FaceEvidenceController:
         self._hardware_faulted = False
         self._stopping = False
         self._queue: deque[tuple[DecodedCrop, int]] = deque()
+        self._first_crop: tuple[int, DecodedCrop] | None = None
         self._last_crop_wall_ns: int | None = None
         self._worker_cuda_ctx = None
         self._worker_verifier: FaceVerifier | None = None
@@ -169,6 +188,7 @@ class FaceEvidenceController:
             if self._active_cancel is not None:
                 self._active_cancel.set()
             self._queue.clear()
+            self._first_crop = None
             self._last_crop_wall_ns = None
             self._condition.notify_all()
 
@@ -184,6 +204,7 @@ class FaceEvidenceController:
             if self._active_cancel is not None:
                 self._active_cancel.set()
             self._queue.clear()
+            self._first_crop = None
             self._last_crop_wall_ns = None
             self._condition.notify_all()
 
@@ -195,6 +216,13 @@ class FaceEvidenceController:
             if crop.target_id != self._desired_request.session.target_id:
                 self.crops_dropped_target += 1
                 return
+            if self._first_crop is None or self._first_crop[0] != self._generation:
+                # Preserve the actual first valid crop received for this stage.
+                # The inference queue remains latest-only and may discard it.
+                self._first_crop = (
+                    self._generation,
+                    replace(crop, image=crop.image.copy()),
+                )
             self.crops_dropped_queue += len(self._queue)
             self._queue.clear()
             arrival_ns = time.monotonic_ns()
@@ -286,13 +314,23 @@ class FaceEvidenceController:
             verifier = self._verifier_factory()
             self._worker_verifier = verifier
             verifier.reset()
-            result, detail, box = self._run_window(
+            result, detail, box, evidence_crop, person_id, similarity = self._run_window(
                 request, generation, cancel_event, verifier
             )
             if result is FaceEvidenceResult.ERROR:
                 self._publish_error_detail(request, detail)
                 return False
-            self._publish_current(request, generation, result, detail, box)
+            image_url = ""
+            if evidence_crop is not None and self._evidence_photo_callback is not None:
+                try:
+                    image_url = self._evidence_photo_callback(evidence_crop, request, result)
+                except Exception as exc:
+                    warning = f"evidence photo unavailable: {_exception_detail(exc)}"
+                    detail = f"{detail}; {warning}" if detail else warning
+            self._publish_current(
+                request, generation, result, detail, box,
+                person_id, similarity, image_url,
+            )
             return True
         except _MissionCancelled:
             self._publish_cancelled(request)
@@ -361,10 +399,15 @@ class FaceEvidenceController:
         generation: int,
         cancel_event: threading.Event,
         verifier: FaceVerifier,
-    ) -> tuple[FaceEvidenceResult, str, tuple[int, int, int, int] | None]:
-        deadline = time.monotonic() + self._window_timeout
+    ) -> tuple[
+        FaceEvidenceResult, str, tuple[int, int, int, int] | None,
+        DecodedCrop | None, str, float,
+    ]:
+        deadline = time.monotonic() + self._window_timeout_for(request.stage)
         last_detail = ""
         last_source_box = None
+        first_crop = self._first_crop_for(generation)
+        best_similarity = 0.0
         while True:
             crop_and_arrival = self._pop_latest_crop(
                 request, generation, cancel_event, deadline
@@ -374,9 +417,20 @@ class FaceEvidenceController:
                     FaceEvidenceResult.NOT_PASSED,
                     "verification window elapsed without a match",
                     None,
+                    self._initial_failure_crop(request, generation, first_crop),
+                    "",
+                    best_similarity,
                 )
             crop, arrival_ns = crop_and_arrival
+            if first_crop is None:
+                # A crop may arrive after this window starts. Prefer the
+                # receive-side snapshot because the latest-only queue may
+                # already have replaced the actual first crop.
+                first_crop = self._first_crop_for(generation)
+                if first_crop is None:
+                    first_crop = replace(crop, image=crop.image.copy())
             verdict = self._verify(verifier, crop)
+            best_similarity = max(best_similarity, float(verdict.similarity))
             if verdict.detail:
                 last_detail = verdict.detail
             if verdict.box is not None:
@@ -403,9 +457,12 @@ class FaceEvidenceController:
                 )
                 self._overlay_callback(request, crop, box, result_code)
             if verdict.error:
-                return FaceEvidenceResult.ERROR, verdict.error, box
+                return FaceEvidenceResult.ERROR, verdict.error, box, None, "", 0.0
             if verdict.accepted:
-                return FaceEvidenceResult.PASSED, verdict.detail, box
+                return (
+                    FaceEvidenceResult.PASSED, verdict.detail, box, crop,
+                    verdict.person_id, verdict.similarity,
+                )
             if time.monotonic() >= deadline:
                 detail = "verification window elapsed without a match"
                 if last_detail:
@@ -414,7 +471,32 @@ class FaceEvidenceController:
                     FaceEvidenceResult.NOT_PASSED,
                     detail,
                     last_source_box,
+                    self._initial_failure_crop(request, generation, first_crop),
+                    "",
+                    best_similarity,
                 )
+
+    def _first_crop_for(self, generation: int) -> DecodedCrop | None:
+        with self._condition:
+            if self._first_crop is not None and self._first_crop[0] == generation:
+                return self._first_crop[1]
+        return None
+
+    def _initial_failure_crop(
+        self,
+        request: FaceVerificationRequest,
+        generation: int,
+        fallback: DecodedCrop | None,
+    ) -> DecodedCrop | None:
+        if request.stage is not FaceVerificationStage.INITIAL_FACE:
+            return None
+        return self._first_crop_for(generation) or fallback
+
+    def _window_timeout_for(self, stage: FaceVerificationStage) -> float:
+        """Use the platform-configured face window for the active subtask stage."""
+        if stage is FaceVerificationStage.INITIAL_FACE:
+            return self._initial_face_window
+        return self._dual_verification_window
 
     def _verify(self, verifier: FaceVerifier, crop: DecodedCrop):
         started_ns = time.monotonic_ns()
@@ -494,15 +576,19 @@ class FaceEvidenceController:
         result: FaceEvidenceResult,
         detail: str,
         box: tuple[int, int, int, int] | None,
+        person_id: str,
+        similarity: float,
+        image_url: str,
     ) -> bool:
         with self._condition:
             if self._stopping or self._generation != generation:
                 return False
             if self._desired_request != request:
                 return False
-            self._publish(
-                FaceEvidence(request.session, request.stage, result, detail, box)
-            )
+            self._publish(FaceEvidence(
+                request.session, request.stage, result, detail, box,
+                person_id, similarity, image_url,
+            ))
             return True
 
     def _publish_cancelled(self, request: FaceVerificationRequest) -> None:
@@ -575,6 +661,8 @@ class FaceEvidenceProviderNode(Node):
         self.declare_parameter("detector_engine", "")
         self.declare_parameter("recognition_engine", "")
         self.declare_parameter("whitelist_dir", "")
+        self.declare_parameter("photos_root", "")
+        self.declare_parameter("photos_enabled", True)
         self.declare_parameter("max_detail_length", 256)
         self.declare_parameter("state_timeout", 0.75)
 
@@ -619,6 +707,23 @@ class FaceEvidenceProviderNode(Node):
         self._last_state_monotonic = None
         self._state_timed_out = False
         self._config = config or self._load_config()
+        shared_photos_root = str(self.get_parameter("photos_root").value).strip()
+        evidence_root = (
+            str(Path(shared_photos_root).expanduser() / "face")
+            if shared_photos_root
+            else self._config.evidence_photo_root
+        )
+        self._evidence_photo_store = EvidencePhotoStore(
+            enabled=(
+                self._config.evidence_photo_enabled
+                and bool(self.get_parameter("photos_enabled").value)
+            ),
+            root=evidence_root,
+            image_format=self._config.evidence_photo_format,
+            jpeg_quality=self._config.evidence_photo_jpeg_quality,
+            retention_seconds=self._config.evidence_photo_retention_seconds,
+            max_files=self._config.evidence_photo_max_files,
+        )
         self._adapter_lock = threading.Lock()
         self._production_verifier: FaceVerifier | None = None
         self._evidence_pub = self.create_publisher(
@@ -654,6 +759,7 @@ class FaceEvidenceProviderNode(Node):
             self._publish_evidence,
             config=self._config,
             overlay_callback=self._publish_face_overlay,
+            evidence_photo_callback=self._save_evidence_photo,
         )
         self._metrics_timer = self.create_timer(5.0, self._log_metrics)
         self._state_watchdog = self.create_timer(
@@ -780,7 +886,24 @@ class FaceEvidenceProviderNode(Node):
         msg.result = self._ROS_RESULT_CODES[evidence.result]
         msg.provider = self._provider_name
         msg.detail = evidence.detail[: self._max_detail_length]
+        msg.person_id = evidence.person_id
+        msg.similarity = float(evidence.similarity)
+        msg.image_url = evidence.image_url
         self._evidence_pub.publish(msg)
+
+    def _save_evidence_photo(
+        self,
+        crop: DecodedCrop,
+        request: FaceVerificationRequest,
+        result: FaceEvidenceResult,
+    ) -> str:
+        return self._evidence_photo_store.save(
+            crop,
+            state_seq=request.session.observed_state_seq,
+            target_id=request.session.target_id,
+            stage=request.stage.value,
+            outcome=result.value,
+        )
 
     def _publish_face_overlay(
         self,

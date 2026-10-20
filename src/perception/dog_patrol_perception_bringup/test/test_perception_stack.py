@@ -3,6 +3,8 @@ from pathlib import Path
 import signal
 import time
 
+import yaml
+
 from launch import LaunchContext, LaunchDescription, LaunchService
 from launch.actions import DeclareLaunchArgument, EmitEvent, ExecuteProcess, RegisterEventHandler, IncludeLaunchDescription
 from launch.actions import SetLaunchConfiguration, TimerAction
@@ -97,6 +99,38 @@ def test_evidence_and_verification_settings_reach_their_owners():
                 break
     else:
         raise AssertionError("voice launch did not receive the evidence/configuration arguments")
+    face_include = next(
+        action for action in description.entities
+        if isinstance(action, IncludeLaunchDescription)
+        and "photos_root" in dict(action.launch_arguments)
+    )
+    face_arguments = {
+        name: perform_substitutions(context, normalize_to_list_of_substitutions(value))
+        for name, value in face_include.launch_arguments
+    }
+    assert face_arguments["photos_root"] == "/tmp/patrol photos"
+    assert face_arguments["photos_enabled"] == "true"
+
+
+def test_formal_face_assets_enable_reviewed_runtime_and_match_build_output():
+    perception_root = Path(__file__).resolve().parents[2]
+    runtime_config = (
+        perception_root / "dog_patrol_perception_assets_20260813/runtime/face.yaml"
+    )
+    values = yaml.safe_load(runtime_config.read_text(encoding="utf-8"))
+    assert values["initial_face_window_seconds"] == 3.0
+    assert values["dual_verification_window_seconds"] == 10.0
+    assert values["evidence_photo_enabled"] is True
+
+    build_script = (
+        perception_root
+        / "dog_patrol_perception_face/scripts/build_mobilefacenet_engine.sh"
+    ).read_text(encoding="utf-8")
+    launch_file = (
+        Path(__file__).resolve().parents[1] / "launch/perception_stack.launch.py"
+    ).read_text(encoding="utf-8")
+    assert 'DETECTOR_ENGINE_PATH="$ASSETS_ROOT/face/detector.engine"' in build_script
+    assert '[assets_root, "face", "detector.engine"]' in launch_file
 
 
 def test_reid_exit_shuts_down_the_launch_group(tmp_path):
