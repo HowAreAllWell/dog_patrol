@@ -503,6 +503,57 @@ def test_initial_first_crop_survives_factory_delay_and_latest_only_queue():
         controller.stop()
 
 
+def test_initial_first_crop_is_fixed_when_images_arrive_after_window_starts():
+    window_waiting = threading.Event()
+    release_queue = threading.Event()
+
+    class AlwaysMiss:
+        def reset(self):
+            pass
+
+        def verify(self, _crop):
+            return FaceVerification(False, True, "no match")
+
+    evidence = []
+    saved_frames = []
+    controller = FaceEvidenceController(
+        AlwaysMiss,
+        evidence.append,
+        config=_fast_config(window_timeout_seconds=0.12, initial_face_window_seconds=0.12),
+        evidence_photo_callback=lambda crop, _request, _result: (
+            saved_frames.append(crop.source_frame_number) or "file:///start.jpg"
+        ),
+    )
+    original_pop = controller._pop_latest_crop
+    first_call = True
+
+    def gated_pop(*args, **kwargs):
+        nonlocal first_call
+        if first_call:
+            first_call = False
+            window_waiting.set()
+            release_queue.wait(timeout=2.0)
+        return original_pop(*args, **kwargs)
+
+    controller._pop_latest_crop = gated_pop
+    session = FaceVerificationSession(1, 1)
+    try:
+        controller.observe_session(session)
+        controller.request(FaceVerificationRequest(session, FaceVerificationStage.INITIAL_FACE))
+        assert window_waiting.wait(timeout=1.0)
+        controller.observe_crop(_decoded_crop(10))
+        controller.observe_crop(_decoded_crop(11))
+        release_queue.set()
+        deadline = time.monotonic() + 1.0
+        while not evidence and time.monotonic() < deadline:
+            time.sleep(0.01)
+        assert saved_frames == [10]
+        assert evidence[0].result is FaceEvidenceResult.NOT_PASSED
+    finally:
+        release_queue.set()
+        controller.stop()
+
+
 def test_controller_discards_inflight_result_when_a_newer_crop_arrives():
     class LatestVerifier:
         def __init__(self):

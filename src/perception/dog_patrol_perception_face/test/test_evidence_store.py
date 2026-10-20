@@ -1,3 +1,4 @@
+import os
 from pathlib import Path
 
 import numpy as np
@@ -76,8 +77,42 @@ def test_cleanup_is_bounded_and_preserves_unrelated_files(tmp_path: Path):
         enabled=True, root=str(tmp_path), retention_seconds=60, max_files=1
     )
     store.save(_crop(1), state_seq=1, target_id=17, stage="initial_face", outcome="passed")
-    store.save(_crop(2), state_seq=1, target_id=17, stage="initial_face", outcome="passed")
+    latest_url = store.save(
+        _crop(2), state_seq=1, target_id=17,
+        stage="initial_face", outcome="passed",
+    )
     assert [path.name for path in tmp_path.rglob("*.jpg")] == [
-        "initial_face_passed_2.jpg"
+        "123456789_target-17_initial_face_passed_f2.jpg"
     ]
+    assert latest_url == next(tmp_path.rglob("*.jpg")).resolve().as_uri()
     assert unrelated.read_text(encoding="utf-8") == "keep"
+
+
+def test_cleanup_keeps_just_saved_photo_when_mtimes_are_equal(
+    tmp_path: Path, monkeypatch
+):
+    fixed_ns = 1_800_000_000_000_000_000
+    real_link = os.link
+
+    def link_with_fixed_mtime(source, destination):
+        real_link(source, destination)
+        os.utime(destination, ns=(fixed_ns, fixed_ns))
+
+    monkeypatch.setattr(os, "link", link_with_fixed_mtime)
+    store = EvidencePhotoStore(
+        enabled=True, root=str(tmp_path), retention_seconds=60, max_files=1
+    )
+    first_url = store.save(
+        _crop(1), state_seq=1, target_id=17,
+        stage="initial_face", outcome="passed",
+    )
+    latest_url = store.save(
+        _crop(2), state_seq=1, target_id=17,
+        stage="initial_face", outcome="passed",
+    )
+
+    saved = list(tmp_path.rglob("*.jpg"))
+    assert len(saved) == 1
+    assert saved[0].name.endswith("_f2.jpg")
+    assert latest_url == saved[0].resolve().as_uri()
+    assert first_url != latest_url
