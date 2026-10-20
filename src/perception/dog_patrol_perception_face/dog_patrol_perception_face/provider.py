@@ -406,13 +406,7 @@ class FaceEvidenceController:
         deadline = time.monotonic() + self._window_timeout_for(request.stage)
         last_detail = ""
         last_source_box = None
-        with self._condition:
-            first_crop = (
-                self._first_crop[1]
-                if self._first_crop is not None
-                and self._first_crop[0] == generation
-                else None
-            )
+        first_crop = self._first_crop_for(generation)
         best_similarity = 0.0
         while True:
             crop_and_arrival = self._pop_latest_crop(
@@ -423,13 +417,18 @@ class FaceEvidenceController:
                     FaceEvidenceResult.NOT_PASSED,
                     "verification window elapsed without a match",
                     None,
-                    first_crop if request.stage is FaceVerificationStage.INITIAL_FACE else None,
+                    self._initial_failure_crop(request, generation, first_crop),
                     "",
                     best_similarity,
                 )
             crop, arrival_ns = crop_and_arrival
             if first_crop is None:
-                first_crop = replace(crop, image=crop.image.copy())
+                # A crop may arrive after this window starts. Prefer the
+                # receive-side snapshot because the latest-only queue may
+                # already have replaced the actual first crop.
+                first_crop = self._first_crop_for(generation)
+                if first_crop is None:
+                    first_crop = replace(crop, image=crop.image.copy())
             verdict = self._verify(verifier, crop)
             best_similarity = max(best_similarity, float(verdict.similarity))
             if verdict.detail:
@@ -472,10 +471,26 @@ class FaceEvidenceController:
                     FaceEvidenceResult.NOT_PASSED,
                     detail,
                     last_source_box,
-                    first_crop if request.stage is FaceVerificationStage.INITIAL_FACE else None,
+                    self._initial_failure_crop(request, generation, first_crop),
                     "",
                     best_similarity,
                 )
+
+    def _first_crop_for(self, generation: int) -> DecodedCrop | None:
+        with self._condition:
+            if self._first_crop is not None and self._first_crop[0] == generation:
+                return self._first_crop[1]
+        return None
+
+    def _initial_failure_crop(
+        self,
+        request: FaceVerificationRequest,
+        generation: int,
+        fallback: DecodedCrop | None,
+    ) -> DecodedCrop | None:
+        if request.stage is not FaceVerificationStage.INITIAL_FACE:
+            return None
+        return self._first_crop_for(generation) or fallback
 
     def _window_timeout_for(self, stage: FaceVerificationStage) -> float:
         """Use the platform-configured face window for the active subtask stage."""

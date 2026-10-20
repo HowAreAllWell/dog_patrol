@@ -84,7 +84,10 @@ class EvidencePhotoStore:
         temporary = directory / f".{uuid4().hex}.tmp"
         temporary.write_bytes(encoded.tobytes())
         path = self._claim_unique_path(directory, stem, temporary)
-        self._cleanup()
+        # Never let the quota/retention sweep remove the photo whose URI is
+        # about to be returned, even when filesystem mtimes have coarse or
+        # identical resolution.
+        self._cleanup(protected=path)
         return path.resolve().as_uri()
 
     def _claim_unique_path(self, directory: Path, stem: str, temporary: Path) -> Path:
@@ -106,18 +109,29 @@ class EvidencePhotoStore:
     def _safe(value: str) -> str:
         return _SAFE_PART.sub("-", str(value).strip()).strip("-") or "unknown"
 
-    def _cleanup(self) -> None:
-        files = sorted(
-            (
-                path
-                for path in self.root.glob("state-*/target-*/*")
-                if path.is_file() and path.suffix.lower() in {".jpg", ".png"}
-            ),
-            key=lambda path: path.stat().st_mtime,
-        )
-        cutoff = time.time() - self.retention_seconds
-        expired = [path for path in files if path.stat().st_mtime < cutoff]
-        overflow = max(0, len(files) - len(expired) - self.max_files)
-        victims = expired + [path for path in files if path not in expired][:overflow]
+    def _cleanup(self, protected: Path | None = None) -> None:
+        protected = protected.resolve() if protected is not None else None
+        entries: list[tuple[Path, int]] = []
+        for path in self.root.glob("state-*/target-*/*"):
+            if not path.is_file() or path.suffix.lower() not in {".jpg", ".png"}:
+                continue
+            try:
+                entries.append((path, path.stat().st_mtime_ns))
+            except FileNotFoundError:
+                continue
+        entries.sort(key=lambda entry: (entry[1], entry[0].as_posix()))
+        cutoff_ns = time.time_ns() - self.retention_seconds * 1_000_000_000
+
+        def is_protected(path: Path) -> bool:
+            return protected is not None and path.resolve() == protected
+
+        expired = [
+            path for path, mtime_ns in entries
+            if mtime_ns < cutoff_ns and not is_protected(path)
+        ]
+        survivors = [path for path, _ in entries if path not in expired]
+        overflow = max(0, len(survivors) - self.max_files)
+        overflow_candidates = [path for path in survivors if not is_protected(path)]
+        victims = expired + overflow_candidates[:overflow]
         for path in victims:
             path.unlink(missing_ok=True)
