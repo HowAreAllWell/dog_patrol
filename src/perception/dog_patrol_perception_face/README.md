@@ -145,3 +145,40 @@ ros2 launch dog_patrol_perception_bringup perception_stack.launch.py \
 `face_metrics` 定期及退出时记录输入、队列丢弃、过期丢弃、窗口和推理耗时；最终整流程脚本同时保存
 CPU/GPU/RAM、温度、阶段耗时和 tracking preview 指标。更详细的模块边界见
 [`COLLABORATION.md`](COLLABORATION.md)。
+
+## 巡检子任务平台配置
+
+生产模型固定使用迁移包中的 `yolo26n_face_det.onnx`、`w600k_mbf.onnx` 和
+`face_detection_yunet_2023mar.onnx`。构建脚本会先校验三个源模型的 SHA-256，再在目标 Orin
+上生成匹配当前 TensorRT/JetPack 的 FP16 engine；engine 不从其他机器复制。
+
+运行白名单继续采用现有的“每人一个目录、目录内一个或多个 512 维 `.npy`”格式。provider
+启动时一次性加载到内存，运行期间不会逐次读取磁盘。该格式便于平台按人员增删和保留多个现场
+样本；不要直接把旧的单文件 `.npz` 当作 `whitelist_dir` 使用。
+
+人脸 provider 支持《巡检子任务配置》的分阶段时长：
+
+```yaml
+window_timeout_seconds: 3.0            # 旧配置兼容回退值
+initial_face_window_seconds: 3.0       # 纯人脸核验时长
+dual_verification_window_seconds: 10.0 # 每轮联合核验中持续识别人脸的时长
+
+evidence_photo_enabled: true
+evidence_photo_root: "/data/face_evidence"
+evidence_photo_format: "jpg"
+evidence_photo_jpeg_quality: 90
+evidence_photo_retention_seconds: 604800
+evidence_photo_max_files: 10000
+```
+
+两个分阶段时长为 `0` 时使用原 `window_timeout_seconds`，旧 YAML 不会失效。配置由平台生成或
+更新后，在下次启动 provider 时生效。
+
+人脸算法的唯一图像输入仍是 tracking 发布的主目标 crop，本模块所称结果“帧”就是未经再次
+裁剪或绘制的该输入 crop。纯人脸通过时保存实际通过帧；纯人脸未通过时保存本阶段收到的第一帧。
+联合阶段人脸通过同样保存实际通过帧；联合阶段未通过的口令开始帧由语音流程负责。保存路径以
+`file://` URL 写入 `AuthorizationEvidence.image_url`。同时返回匹配的 `person_id` 和
+`similarity`；照片写入失败只追加诊断，不改变已经得到的人脸业务结果。
+
+口令内容、正确回答、口令次数、目标跟踪/丢失、总核验超时及重复核验忽略时长不由人脸 provider
+维护；这些配置由 voice、tracking、处置/总控读取。人脸 provider 只按命令阶段运行并返回证据。
