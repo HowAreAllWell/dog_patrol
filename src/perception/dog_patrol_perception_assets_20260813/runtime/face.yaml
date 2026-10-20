@@ -10,7 +10,16 @@ size_weighting_enabled: false
 temporal_window: 10
 min_frames_for_decision: 5
 window_timeout_seconds: 3.0
+initial_face_window_seconds: 3.0
+dual_verification_window_seconds: 10.0
 crop_freshness_timeout_seconds: 1.0
+evidence_photo_enabled: true
+# Complete bringup overrides this with <photos_root>/face.
+evidence_photo_root: "/data/dog_patrol/photos/face"
+evidence_photo_format: "jpg"
+evidence_photo_jpeg_quality: 90
+evidence_photo_retention_seconds: 604800
+evidence_photo_max_files: 10000
 overlay_inference_hz: 10.0
 face_min_score: 0.4
 face_min_box_ratio: 0.01
