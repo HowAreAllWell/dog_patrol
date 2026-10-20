@@ -164,7 +164,7 @@ initial_face_window_seconds: 3.0       # 纯人脸核验时长
 dual_verification_window_seconds: 10.0 # 每轮联合核验中持续识别人脸的时长
 
 evidence_photo_enabled: true
-evidence_photo_root: "/data/face_evidence"
+evidence_photo_root: "/data/dog_patrol/photos/face" # 单独启动时的回退目录
 evidence_photo_format: "jpg"
 evidence_photo_jpeg_quality: 90
 evidence_photo_retention_seconds: 604800
@@ -172,12 +172,15 @@ evidence_photo_max_files: 10000
 ```
 
 两个分阶段时长为 `0` 时使用原 `window_timeout_seconds`，旧 YAML 不会失效。配置由平台生成或
-更新后，在下次启动 provider 时生效。
+更新后，在下次启动 provider 时生效。完整感知启动会把统一 `photos_root` 传给人脸节点，人脸
+照片固定写入 `<photos_root>/face/`；`evidence_photo_enabled` 仍是人脸模块独立开关，而总入口的
+`photos_enabled=false` 会统一关闭各模块照片输出。
 
 人脸算法的唯一图像输入仍是 tracking 发布的主目标 crop，本模块所称结果“帧”就是未经再次
 裁剪或绘制的该输入 crop。纯人脸通过时保存实际通过帧；纯人脸未通过时保存本阶段收到的第一帧。
 联合阶段人脸通过同样保存实际通过帧；联合阶段未通过的口令开始帧由语音流程负责。保存路径以
-`file://` URL 写入 `AuthorizationEvidence.image_url`。同时返回匹配的 `person_id` 和
+`file://` URL 写入 `AuthorizationEvidence.image_url`。文件名以源拍摄时间开头并包含目标 ID；
+碰撞时追加序号，节点重启也不会覆盖保留期内的旧照片。同时返回匹配的 `person_id` 和
 `similarity`；照片写入失败只追加诊断，不改变已经得到的人脸业务结果。
 
 口令内容、正确回答、口令次数、目标跟踪/丢失、总核验超时及重复核验忽略时长不由人脸 provider
