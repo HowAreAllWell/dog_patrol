@@ -41,8 +41,6 @@ def generate_launch_description():
                 "recognition_engine": recognition_engine,
                 "whitelist_dir": whitelist_dir,
                 "state_timeout": ParameterValue(state_timeout, value_type=float),
-                "photos_root": ParameterValue(photos_root, value_type=str),
-                "photos_enabled": ParameterValue(photos_enabled, value_type=bool),
             }
         ],
     )
@@ -65,6 +63,8 @@ def generate_launch_description():
                 "recognition_engine": recognition_engine,
                 "whitelist_dir": whitelist_dir,
                 "state_timeout": ParameterValue(state_timeout, value_type=float),
+                "photos_root": ParameterValue(photos_root, value_type=str),
+                "photos_enabled": ParameterValue(photos_enabled, value_type=bool),
             }
         ],
     )
