@@ -28,6 +28,8 @@ class FaceVerification:
     # Face bounding box in crop-image coordinates: (x1, y1, x2, y2).
     # None when no face was detected. Consumed by the overlay visualizer.
     box: tuple[int, int, int, int] | None = None
+    person_id: str = ""
+    similarity: float = 0.0
 
 
 class FaceVerifier:
@@ -150,12 +152,15 @@ class ProductionFaceVerifier(FaceVerifier):
                 decided=True,
                 detail=f"face not in whitelist (sim={sim:.3f})",
                 box=box,
+                similarity=float(sim),
             )
         return FaceVerification(
             accepted=True,
             decided=True,
             detail=f"face matched whitelist (sim={sim:.3f})",
             box=box,
+            person_id=str(matched_name),
+            similarity=float(sim),
         )
 
     def close(self) -> None:

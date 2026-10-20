@@ -23,8 +23,18 @@ class FaceConfig:
     size_weighting_enabled: bool = False
     temporal_window: int = 10
     min_frames_for_decision: int = 5
+    # Backward-compatible default used when a stage-specific value is zero.
     window_timeout_seconds: float = 3.0
+    # Platform patrol-subtask settings for the face-only and joint stages.
+    initial_face_window_seconds: float = 0.0
+    dual_verification_window_seconds: float = 0.0
     crop_freshness_timeout_seconds: float = 1.0
+    evidence_photo_enabled: bool = False
+    evidence_photo_root: str = "/data/face_evidence"
+    evidence_photo_format: str = "jpg"
+    evidence_photo_jpeg_quality: int = 90
+    evidence_photo_retention_seconds: int = 604800
+    evidence_photo_max_files: int = 10000
     overlay_inference_hz: float = 10.0
     face_min_score: float = 0.4
     face_min_box_ratio: float = 0.01
@@ -91,4 +101,19 @@ def load_face_config(path) -> FaceConfig:
     for key in ("window_timeout_seconds", "crop_freshness_timeout_seconds"):
         if values[key] <= 0.0:
             raise ValueError(f"face config field {key!r} must be positive")
+    for key in (
+        "initial_face_window_seconds",
+        "dual_verification_window_seconds",
+    ):
+        if values[key] < 0.0:
+            raise ValueError(f"face config field {key!r} must not be negative")
+    if values["evidence_photo_format"].lower().lstrip(".") not in {"jpg", "png"}:
+        raise ValueError("face config field 'evidence_photo_format' must be jpg or png")
+    if not 1 <= values["evidence_photo_jpeg_quality"] <= 100:
+        raise ValueError("face config field 'evidence_photo_jpeg_quality' must be in [1, 100]")
+    for key in ("evidence_photo_retention_seconds", "evidence_photo_max_files"):
+        if values[key] <= 0:
+            raise ValueError(f"face config field {key!r} must be positive")
+    if values["evidence_photo_enabled"] and not values["evidence_photo_root"].strip():
+        raise ValueError("face config field 'evidence_photo_root' must not be empty")
     return FaceConfig(**values)
