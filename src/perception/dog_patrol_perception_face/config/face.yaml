@@ -22,7 +22,7 @@ crop_freshness_timeout_seconds: 1.0
 
 # Image evidence is the unmodified tracking crop received by this node.
 evidence_photo_enabled: true
-evidence_photo_root: "/data/face_evidence"
+evidence_photo_root: "/data/dog_patrol/photos/face"
 evidence_photo_format: "jpg"
 evidence_photo_jpeg_quality: 90
 evidence_photo_retention_seconds: 604800
