@@ -462,6 +462,47 @@ def test_initial_not_passed_evidence_selects_first_crop():
         controller.stop()
 
 
+def test_initial_first_crop_survives_factory_delay_and_latest_only_queue():
+    release_factory = threading.Event()
+
+    class AlwaysMiss:
+        def reset(self):
+            pass
+
+        def verify(self, _crop):
+            return FaceVerification(False, True, "no match")
+
+    def delayed_factory():
+        release_factory.wait(timeout=2.0)
+        return AlwaysMiss()
+
+    evidence = []
+    saved_frames = []
+    controller = FaceEvidenceController(
+        delayed_factory,
+        evidence.append,
+        config=_fast_config(window_timeout_seconds=0.12, initial_face_window_seconds=0.12),
+        evidence_photo_callback=lambda crop, _request, _result: (
+            saved_frames.append(crop.source_frame_number) or "file:///start.jpg"
+        ),
+    )
+    session = FaceVerificationSession(1, 1)
+    try:
+        controller.observe_session(session)
+        controller.request(FaceVerificationRequest(session, FaceVerificationStage.INITIAL_FACE))
+        controller.observe_crop(_decoded_crop(10))
+        controller.observe_crop(_decoded_crop(11))
+        release_factory.set()
+        deadline = time.monotonic() + 1.0
+        while not evidence and time.monotonic() < deadline:
+            time.sleep(0.01)
+        assert saved_frames == [10]
+        assert evidence[0].result is FaceEvidenceResult.NOT_PASSED
+    finally:
+        release_factory.set()
+        controller.stop()
+
+
 def test_controller_discards_inflight_result_when_a_newer_crop_arrives():
     class LatestVerifier:
         def __init__(self):

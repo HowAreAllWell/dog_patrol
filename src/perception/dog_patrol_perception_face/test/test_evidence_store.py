@@ -33,8 +33,29 @@ def test_saves_atomic_file_url_with_traceable_name(tmp_path: Path):
     )
     assert url.startswith("file:")
     saved = list(tmp_path.rglob("*.jpg"))
-    assert [path.name for path in saved] == ["initial_face_passed_7.jpg"]
+    assert [path.name for path in saved] == [
+        "123456789_target-17_initial_face_passed_f7.jpg"
+    ]
     assert not list(tmp_path.rglob("*.tmp"))
+
+
+def test_restart_collision_keeps_both_photos(tmp_path: Path):
+    first = EvidencePhotoStore(
+        enabled=True, root=str(tmp_path), retention_seconds=60, max_files=10
+    )
+    second = EvidencePhotoStore(
+        enabled=True, root=str(tmp_path), retention_seconds=60, max_files=10
+    )
+    first_url = first.save(
+        _crop(), state_seq=12, target_id=17,
+        stage="initial_face", outcome="not_passed",
+    )
+    second_url = second.save(
+        _crop(), state_seq=12, target_id=17,
+        stage="initial_face", outcome="not_passed",
+    )
+    assert first_url != second_url
+    assert len(list(tmp_path.rglob("*.jpg"))) == 2
 
 
 def test_disabled_store_does_not_write(tmp_path: Path):
