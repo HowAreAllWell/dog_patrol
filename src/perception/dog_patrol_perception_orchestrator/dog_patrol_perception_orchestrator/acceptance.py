@@ -53,22 +53,18 @@ def acceptance_case_passes(
             )
         )
     if case == "dual_pass":
-        dual_first_providers = {
-            item.provider
-            for item in dual
-            if item.stage is AuthorizationStage.DUAL_FIRST
-        }
         return (
             outcome is AuthorizationResult.PASSED
             and bool(initial_face)
             and initial_face[0].result is AuthorizationResult.NOT_PASSED
-            and dual_first_providers == {AuthorizationProvider.FACE, AuthorizationProvider.VOICE}
             and any(item.result is AuthorizationResult.PASSED for item in dual)
+            and not any(item.result is AuthorizationResult.ERROR for item in dual)
         )
     if case == "dual_reject":
+        # This acceptance case uses the default two-prompt policy. Continuous
+        # joint face verification has no per-round NOT_PASSED evidence.
         required_misses = {
-            (provider, stage)
-            for provider in (AuthorizationProvider.FACE, AuthorizationProvider.VOICE)
+            (AuthorizationProvider.VOICE, stage)
             for stage in (
                 AuthorizationStage.DUAL_FIRST,
                 AuthorizationStage.DUAL_SECOND,
@@ -84,5 +80,9 @@ def acceptance_case_passes(
             and bool(initial_face)
             and initial_face[0].result is AuthorizationResult.NOT_PASSED
             and required_misses.issubset(actual_misses)
+            and not any(
+                item.result in (AuthorizationResult.PASSED, AuthorizationResult.ERROR)
+                for item in dual
+            )
         )
     raise ValueError(f"unknown acceptance case: {case}")

@@ -75,7 +75,7 @@ class ScriptedFaceVerifier:
         return self._results.popleft()
 
 
-def test_stage_specific_face_windows_preserve_legacy_fallback():
+def test_only_initial_face_window_has_a_deadline_with_legacy_fallback():
     controller = FaceEvidenceController(
         lambda: ScriptedFaceVerifier([]),
         lambda _evidence: None,
@@ -87,8 +87,8 @@ def test_stage_specific_face_windows_preserve_legacy_fallback():
     )
     try:
         assert controller._window_timeout_for(FaceVerificationStage.INITIAL_FACE) == 3.0
-        assert controller._window_timeout_for(FaceVerificationStage.DUAL_FIRST) == 10.0
-        assert controller._window_timeout_for(FaceVerificationStage.DUAL_SECOND) == 10.0
+        assert controller._window_timeout_for(FaceVerificationStage.DUAL_FIRST) is None
+        assert controller._window_timeout_for(FaceVerificationStage.DUAL_SECOND) is None
     finally:
         controller.stop()
 
@@ -99,7 +99,7 @@ def test_stage_specific_face_windows_preserve_legacy_fallback():
     )
     try:
         assert legacy._window_timeout_for(FaceVerificationStage.INITIAL_FACE) == 4.0
-        assert legacy._window_timeout_for(FaceVerificationStage.DUAL_FIRST) == 4.0
+        assert legacy._window_timeout_for(FaceVerificationStage.DUAL_FIRST) is None
     finally:
         legacy.stop()
 
@@ -394,6 +394,66 @@ def _decoded_crop(frame):
         bbox_height=24,
         image=np.zeros((24, 32, 3), dtype=np.uint8),
     )
+
+
+def test_joint_face_match_survives_old_deadline_and_voice_round_transition():
+    class BlockingMatch:
+        def __init__(self):
+            self.resets = 0
+            self.missed = threading.Event()
+            self.entered = threading.Event()
+            self.release = threading.Event()
+
+        def reset(self):
+            self.resets += 1
+
+        def verify(self, crop):
+            if crop.source_frame_number == 1:
+                self.missed.set()
+                return FaceVerification(False, True, "no match")
+            self.entered.set()
+            assert self.release.wait(2.0)
+            return FaceVerification(True, True, "matched", person_id="employee-1", similarity=0.91)
+
+    verifier = BlockingMatch()
+    evidence = []
+    saved_frames = []
+    matched = threading.Event()
+
+    def publish(item):
+        evidence.append(item)
+        matched.set()
+
+    controller = FaceEvidenceController(
+        lambda: verifier, publish,
+        config=_fast_config(dual_verification_window_seconds=0.1),
+        evidence_photo_callback=lambda crop, _request, _result: (
+            saved_frames.append(crop.source_frame_number) or "file:///joint-pass.jpg"
+        ),
+    )
+    session = FaceVerificationSession(1, 1)
+    try:
+        controller.observe_session(session)
+        controller.request(FaceVerificationRequest(session, FaceVerificationStage.DUAL_FIRST))
+        controller.observe_crop(_decoded_crop(1))
+        assert verifier.missed.wait(1.0)
+        # The old independent cutoff must not emit NOT_PASSED or stop listening.
+        assert not matched.wait(0.25)
+        controller.observe_crop(_decoded_crop(2))
+        assert verifier.entered.wait(1.0)
+        controller.request(FaceVerificationRequest(session, FaceVerificationStage.DUAL_SECOND))
+        controller.request(FaceVerificationRequest(session, FaceVerificationStage.DUAL_SECOND))
+        verifier.release.set()
+        assert matched.wait(1.0)
+        assert [item.result for item in evidence] == [FaceEvidenceResult.PASSED]
+        assert evidence[0].stage is FaceVerificationStage.DUAL_FIRST
+        assert evidence[0].person_id == "employee-1"
+        assert evidence[0].image_url == "file:///joint-pass.jpg"
+        assert saved_frames == [2]
+        assert verifier.resets == controller.windows_started == 1
+    finally:
+        verifier.release.set()
+        controller.stop()
 
 
 def test_passed_evidence_selects_actual_pass_crop():

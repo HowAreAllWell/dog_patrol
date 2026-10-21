@@ -25,30 +25,33 @@ def test_initial_face_pass_requires_no_voice_work():
     )
 
 
-def test_dual_pass_requires_initial_face_miss_and_a_dual_pass():
+@pytest.mark.parametrize("provider", [Provider.FACE, Provider.VOICE])
+def test_dual_pass_requires_initial_face_miss_and_either_provider_pass(provider):
     evidence = [
         item(Provider.FACE, Stage.INITIAL_FACE, Result.NOT_PASSED),
-        item(Provider.FACE, Stage.DUAL_FIRST, Result.NOT_PASSED),
-        item(Provider.VOICE, Stage.DUAL_FIRST, Result.PASSED),
+        item(provider, Stage.DUAL_FIRST, Result.PASSED),
     ]
     assert acceptance_case_passes("dual_pass", Result.PASSED, evidence)
     assert not acceptance_case_passes(
         "dual_pass",
         Result.PASSED,
-        [evidence[0], evidence[1], item(Provider.FACE, Stage.DUAL_FIRST, Result.PASSED)],
+        [evidence[0]],
     )
 
 
-def test_dual_reject_requires_both_providers_to_miss_both_rounds():
+def test_dual_reject_requires_voice_rounds_exhausted_without_a_face_pass():
     evidence = [item(Provider.FACE, Stage.INITIAL_FACE, Result.NOT_PASSED)]
     evidence.extend(
-        item(provider, stage, Result.NOT_PASSED)
+        item(Provider.VOICE, stage, Result.NOT_PASSED)
         for stage in (Stage.DUAL_FIRST, Stage.DUAL_SECOND)
-        for provider in (Provider.FACE, Provider.VOICE)
     )
     assert acceptance_case_passes("dual_reject", Result.NOT_PASSED, evidence)
     assert not acceptance_case_passes(
         "dual_reject", Result.NOT_PASSED, evidence[:-1]
+    )
+    assert not acceptance_case_passes(
+        "dual_reject", Result.NOT_PASSED,
+        evidence + [item(Provider.FACE, Stage.DUAL_FIRST, Result.PASSED)],
     )
 
 

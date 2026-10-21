@@ -13,7 +13,7 @@ MissionState 只建立、替换或取消授权会话；`perception_face_provider
 
 只有 `TASK_RUNNING + VERIFY_IDENTITY + target_id>0` 才能建立人脸会话。READY（包括 PAUSE、
 RETURN、TERMINATE 后的 READY）或其他非 VERIFY 状态会取消会话；取消可记录 `CANCELLED`，
-不会发布 `UNAUTHORIZED`。旧 `state_seq`、target、stage 和 provider evidence 会被丢弃。
+不会发布 `UNAUTHORIZED`。旧会话和错误目标的 evidence 会被丢弃；同一联合核验的人脸结果跨口令轮次有效。
 
 `perception_face_readiness` 从与 provider 相同的 YAML 读取 engine 和白名单路径；它实际加载两个
 TensorRT engine、分别执行一次最小推理并读取白名单后才发布 `face=READY`。显式 ROS 参数可覆盖
@@ -156,12 +156,11 @@ CPU/GPU/RAM、温度、阶段耗时和 tracking preview 指标。更详细的模
 启动时一次性加载到内存，运行期间不会逐次读取磁盘。该格式便于平台按人员增删和保留多个现场
 样本；不要直接把旧的单文件 `.npz` 当作 `whitelist_dir` 使用。
 
-人脸 provider 支持《巡检子任务配置》的分阶段时长：
+人脸 provider 支持《巡检子任务配置》的纯人脸核验时长：
 
 ```yaml
 window_timeout_seconds: 3.0            # 旧配置兼容回退值
 initial_face_window_seconds: 3.0       # 纯人脸核验时长
-dual_verification_window_seconds: 10.0 # 每轮联合核验中持续识别人脸的时长
 
 evidence_photo_enabled: true
 evidence_photo_root: "/data/dog_patrol/photos/face" # 单独启动时的回退目录
@@ -171,8 +170,11 @@ evidence_photo_retention_seconds: 604800
 evidence_photo_max_files: 10000
 ```
 
-两个分阶段时长为 `0` 时使用原 `window_timeout_seconds`，旧 YAML 不会失效。配置由平台生成或
-更新后，在下次启动 provider 时生效。完整感知启动会把统一 `photos_root` 传给人脸节点，人脸
+`initial_face_window_seconds` 为 `0` 时使用原 `window_timeout_seconds`。联合核验没有独立的人脸
+截止时间：人脸从首次口令阶段持续识别，跨越播报、等待和后续轮次；任一模块通过、口令次数耗尽、
+目标丢失或任务取消时由编排/任务状态统一结束。后续口令命令不重置人脸模型或在途推理。
+旧 YAML 中的 `dual_verification_window_seconds` 仍可读取以兼容部署，但不再参与计时，应从配置中移除。
+配置由平台生成或更新后，在下次启动 provider 时生效。完整感知启动会把统一 `photos_root` 传给人脸节点，人脸
 照片固定写入 `<photos_root>/face/`；`evidence_photo_enabled` 仍是人脸模块独立开关，而总入口的
 `photos_enabled=false` 会统一关闭各模块照片输出。
 
