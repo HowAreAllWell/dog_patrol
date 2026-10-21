@@ -1,19 +1,20 @@
-# 配置项与照片使用说明：检测、跟踪、语音
+# 感知配置项与照片使用说明
 
 本文按需求截图中的名称和顺序，逐项对应配置项与照片，并说明如何启动、修改配置、保存配置和查找照片。
-我们负责检测、跟踪、语音口令及必要的任务编排；人脸和 ReID 的配置由对应模块负责。
+统一覆盖检测、跟踪、人脸、语音口令、ReID 及必要的任务编排。各模块仍分别读取自己的配置文件。
 
 当前默认规则：语音最多播报 **2 次**，每次播报结束后等待 **10 秒**；次数耗尽后停止播报和监听。
 开始时单独核验人脸，默认 **3 秒**；未通过后进入联合核验，人脸持续识别，覆盖口令播报、等待和所有后续轮次。
 联合核验不设独立的人脸截止时间。人脸或口令任一通过立即结束；口令次数耗尽且仍未通过时统一结束并进入入侵跟踪。
 进入入侵跟踪后最多跟踪 **60 秒**；目标连续丢失 **6 秒**判定丢失。当前不增加核验总时长，也不加入中文语音。
+同一人物核验通过后，默认 **24 小时**内免重复核验；跨午夜或正常持久化后的重启不重新起算这段时长。
 
 ## 一、平台可配置项：与截图逐项对应
 
 下表保留截图原名称。截图中的“核验口令”是机器人播报的内容，“正确回答”是人员需要说出的答案。
 当前提供 ROS 参数、启动参数和 YAML 配置入口；平台界面及网络配置下发需要平台侧接入这些入口。
 
-| 截图顺序 | 截图配置项 | 负责模块 | 对应节点参数 | 当前默认值 |
+| 截图顺序 | 截图配置项 | 负责模块 | 配置入口或节点参数 | 当前默认值 |
 |---|---|---|---|---|
 | 1 | 纯人脸核验时长 | 人脸 | `runtime/face.yaml` 中的 `initial_face_window_seconds` | `3.0` 秒 |
 | 2 | 单轮口令等待时长 | 语音 | `response_timeout_seconds` | `10.0` 秒 |
@@ -22,16 +23,17 @@
 | 5 | 正确回答 | 语音 | `passphrase` | `blue star` |
 | 6 | 入侵跟踪时长 | 主控、跟踪 | `intruder_tracking_timeout` | `60.0` 秒 |
 | 7 | 目标丢失判定时长 | 跟踪 | `target.lost_event_timeout_sec` | `6.0` 秒 |
-| 8 | 重复核验忽略时长 | ReID | 由 ReID 模块提供 | 本次不调整 |
+| 8 | 重复核验忽略时长 | ReID | `runtime/reid.yaml` 中的 `handled_ignore_seconds` | `86400.0` 秒，即 24 小时 |
 
-我们负责其中 **6 项业务设置，对应 7 个参数**；“核验口令”拆为首次、后续两段文本。
-另外提供照片开关和保存目录，共 **9 个业务参数**。内部消息话题单独列在文末。
+截图中的 **8 项业务设置对应 9 个参数**；“核验口令”拆为首次、后续两段文本。
+另有照片总开关、共享根目录和人脸专用照片设置，见第二节。内部消息话题单独列在文末。
 
 ### 1. 纯人脸核验时长
 
 对应截图中“开始人脸核验，直至开启口令核验前”的时长，由人脸模块负责。
 默认 3 秒；在人脸模块的 `runtime/face.yaml` 设置 `initial_face_window_seconds`，重启人脸节点后生效。
 设为 `0` 时回退到该文件的 `window_timeout_seconds`。此时长仅影响纯人脸阶段，不限制联合核验。
+该值是人脸 YAML 配置项，不是同名 ROS 参数；不要通过 `ros2 param set` 修改它。具体操作见第四节。
 
 ### 2. 单轮口令等待时长
 
@@ -95,32 +97,64 @@
 
 ### 8. 重复核验忽略时长
 
-对应截图中“同一人物核验通过后，在一定时长内再次识别时不重复核验”，由 ReID 负责。
-跟踪侧继续向 ReID 转发处理结果，并使用 ReID 返回的排除结论。
+对应截图中“同一人物核验通过后，在一定时长内再次识别时不重复核验”，参数
+`handled_ignore_seconds` 属于 `/perception_reid`，默认 `86400.0` 秒，即 24 小时；`0.0` 表示关闭免核验。
+
+跟踪侧将核验通过结果转发给 ReID，由 ReID 按人物外观延续资格；换了底层 track ID 也不重新计时。
+仅见过、未通过或取消核验的人不会因此获得资格，也不影响对其他人物发起核验。
+从本次核验通过结果落地时起计时，跨午夜继续有效，正常持久化后重启按剩余时间继续判断，停机期间也计入。
+重复识别、云端模板更新和服务响应延迟不会刷新原来的起点；真正到期后再次识别，需要重新完整核验。
+任务 reset 会清除免核验资格。
+
+完整感知启动读取 `<assets_root>/runtime/reid.yaml`；该文件采用 ROS 参数文件格式。
+参数在 **ReID 节点启动时读取**，修改 YAML 后重启对应节点或整套感知服务。
+当前不支持通过 `ros2 param set` 热更新此业务逻辑；跟踪侧无需再配一份忽略时长。
+配置、查询及验证步骤见第四节。
 
 ## 二、照片保存的补充配置
 
-这两项用于控制我们负责的事件照片，不属于截图中的八项核验业务设置。
+照片设置不属于截图中的八项核验业务设置。完整感知启动用下面两项统一控制跟踪、语音和人脸的任务照片：
 
 | 用途 | 跟踪节点参数 | 整套感知启动参数 | 默认值 | 生效时机 |
 |---|---|---|---|---|
 | 是否保存照片 | `photos.enabled` | `photos_enabled` | `true` | 节点启动 |
 | 照片根目录 | `photos.root` | `photos_root` | `~/.ros/dog_patrol/photos` | 节点启动 |
 
-关闭照片保存不会关闭检测、跟踪或语音核验，也不控制人脸或 ReID 自己的图片功能。
+`photos_enabled:=false` 同时关闭跟踪、语音和人脸任务照片，不关闭各模块核验功能。
+`photos_root` 是共享根目录，跟踪写入其 `tracking/`，语音写入 `voice/`，人脸写入 `face/`。
 当前照片功能用于任务模式；完整感知启动入口已使用该模式。
 根目录不能为空；建议使用绝对路径或 `~/...`。`~` 是运行节点的用户主目录，后台服务运行用户不同，默认保存位置也会不同。
 照片目录按需自动创建，运行节点的用户须能写入该路径。
 
+人脸还读取 `runtime/face.yaml` 中以下照片设置，均在启动时生效：
+
+| 人脸 YAML 配置项 | 部署默认值 | 用法 |
+|---|---|---|
+| `evidence_photo_enabled` | `true` | 人脸照片独立开关；必须与总开关同时开启才保存 |
+| `evidence_photo_root` | `/data/dog_patrol/photos/face` | 未传共享根目录时的回退位置，已包含 `face` 后缀 |
+| `evidence_photo_format` | `jpg` | 支持 `jpg`、`png`；只影响人脸照片 |
+| `evidence_photo_jpeg_quality` | `90` | JPEG 质量，整数 1～100 |
+| `evidence_photo_retention_seconds` | `604800` | 保留时长，默认 7 天，须大于 0 |
+| `evidence_photo_max_files` | `10000` | 人脸照片总数量上限，须为正整数 |
+
+完整感知入口会用 `<photos_root>/face/` 覆盖人脸回退路径，因此单改 `evidence_photo_root` 不会改变完整启动时的保存位置。
+单独启动 `face.launch.py` 时，传入 `photos_root` 也会自动追加 `/face`，不要把共享根目录写成已经带 `face` 的路径。
+不传 `photos_root` 才使用 YAML 的 `evidence_photo_root` 原值。
+
+人脸保存新照片时按文件修改时间清理过期照片，并删除最旧照片以满足数量上限；不是后台定时清理。
+跟踪和语音任务照片当前没有自动清理或保留天数配置。
+这些开关和路径不控制 ReID 的身份库、缩略图或 embedding 载荷；它们由 `runtime/reid.yaml` 中的 `data_dir` 等设置管理。
+
 ## 三、机器人回传照片：与截图逐项对应
 
 本节沿用截图的标题。当前实现将照片**保存到机器人本地目录**，没有增加平台上传功能。
-我们负责的照片均为**原始整帧 JPEG**，不裁剪、不绘制检测框。
+检测、跟踪和语音照片均为**原始整帧 JPEG**，不裁剪、不绘制检测框。
+人脸保存的是 tracking 提供的主目标局部图（crop），不再二次裁剪或绘制；文件格式由人脸照片配置决定。
 
 | 截图顺序 | 截图照片项 | 负责模块 | 本次保存位置（相对照片根目录） |
 |---|---|---|---|
 | 1 | 建立事件照片 | 检测、跟踪 | `tracking/event/` |
-| 2 | 图像检测结果照片 | 人脸 | 由人脸模块生成；`face/` 仅预留 |
+| 2 | 图像检测结果照片 | 人脸 | `face/state-<状态序号>/target-<语义ID>/` |
 | 3 | 口令检测结果照片 | 语音、照片记录 | 通过：`voice/passed/`；未通过：`voice/failed/` |
 | 4 | 目标丢失照片 | 跟踪 | `tracking/lost/` |
 
@@ -132,8 +166,24 @@
 
 ### 2. 图像检测结果照片
 
-截图指的是纯人脸核验阶段的通过、未通过照片，归人脸模块负责。
-本文不替人脸模块生成照片，也不改变其取帧规则；本次只预留 `face/` 目录。
+截图指的是纯人脸核验阶段的通过、未通过照片；联合核验中的人脸通过也会保存照片。
+
+| 人脸阶段及结果 | 取哪一帧 | 文件名中的标记 |
+|---|---|---|
+| 纯人脸通过 | 实际识别通过的输入局部图 | `initial_face_passed` |
+| 纯人脸未通过 | 纯人脸阶段收到的第一张有效局部图 | `initial_face_not_passed` |
+| 联合阶段人脸通过 | 实际识别通过的输入局部图 | 通常为 `dual_first_passed` |
+
+人脸在联合核验中持续识别，后续口令换轮不重启人脸任务，文件名保留启动该任务时的阶段标记。
+因此 `dual_first` 表示这项人脸任务从首次联合阶段开始，不能用它判断当时口令已进行到第几轮。
+联合阶段不另设人脸失败计时，也不为每轮口令生成一张人脸失败照片；每轮未通过照片按下一项的语音规则保存。
+没有有效输入图像时无法保存人脸照片；任务取消不会补造未通过照片。
+
+照片按状态序号和目标语义 ID 分目录，例如 `face/state-17/target-12/`。
+`state-17` 是任务消息的 `state_seq`，`target-12` 是目标语义 ID，不是人员姓名或人脸库身份编号。
+保存后的绝对本地地址写入 `AuthorizationEvidence.image_url`，例如
+`file:///data/dog_patrol/photos/face/state-17/target-12/1792438238000000000_target-12_initial_face_passed_f83.jpg`。
+这类 `file://` 地址只能指向机器人本地文件，平台需另行读取或上传，不能当成公网图片链接。
 
 ### 3. 口令检测结果照片
 
@@ -172,8 +222,10 @@
 │   │   └── 20261019_113038_t12_r1.jpg
 │   └── failed/
 │       └── 20261019_113048_t12_r2.jpg
-├── face/     # 预留
-└── reid/     # 预留
+└── face/
+    └── state-17/
+        └── target-12/
+            └── 1792438238000000000_target-12_initial_face_passed_f83.jpg
 ```
 
 | 文件名部分 | 含义 |
@@ -187,8 +239,18 @@
 跟踪照片格式为 `年月日_时分秒_t语义ID.jpg`；语音照片格式为 `年月日_时分秒_t语义ID_rN.jpg`。
 同目录发生重名时，例如已有 `20261019_113038_t12_r1.jpg`，下一张保存为 `20261019_113038_t12_r1_1.jpg`。
 
+人脸采用模块现有命名格式：`<拍摄时间戳>_target-<语义ID>_<阶段>_<结果>_f<帧号>.jpg`。
+其中拍摄时间戳是输入源图的纳秒时间戳；`f83` 是源帧号，源帧号不可用时为 `fna`。
+人脸通过、未通过由文件名区分，同名时在扩展名前追加 `-1`、`-2` 等短序号防止覆盖。
+修改人脸格式为 PNG 后，扩展名为 `.png`；跟踪、语音仍使用上表中的 JPEG 命名。
+
+截图四项回传照片不包含 ReID 专用任务照片，因此这里不自动创建 `reid/` 子目录。
+ReID 的缩略图和特征文件是去重及云端交互载荷，位于 `data_dir` 下，不能当作本表中的任务照片。
+实际路径可通过 `ros2 param get /perception_reid data_dir` 查询。只有启用云端交互且生成载荷时，才会出现
+`<data_dir>/<请求ID>/thumbnail.webp`（编码回退时为 `thumbnail.jpg`）和 `embedding.bin`；它们不受总照片开关或共享照片根目录控制。
+
 首次写照片时创建模块目录和跟踪分类目录；`voice/passed/`、`voice/failed/` 在首次保存相应结果时创建。
-尚未出现对应结果时，相关目录可能还不存在。当前没有自动清理或保留天数设置。
+尚未出现对应结果时，相关目录可能还不存在。人脸目录在保存时按上述保留期、数量上限清理；跟踪、语音目录需按部署需求另行维护。
 
 ## 四、怎么用
 
@@ -201,12 +263,14 @@ source install/setup.bash
 export DOG_PATROL_ASSETS_ROOT=/path/to/dog_patrol_perception_assets_20260813
 ```
 
-本次消息接口有新增字段，部署时需统一重新编译接口和使用它的节点，包括既有人脸节点；不能混用旧消息接口。
+部署版本需同时包含人脸、语音照片和 ReID 忽略时长的接口及实现。
+更新时统一重新编译消息接口和使用它们的节点，尤其是 `dog_patrol_reid_provider` 与 tracking，不能混用新旧 `ReIDDedup` 接口。
 完整安装与构建说明见[仓库 README](../../README.md)。
 
 ### 1. 启动时设置配置
 
-完整感知入口的示例：保持 2 次播报、每次等待 10 秒、连续丢失 6 秒，并将首次和后续提示设为同一句英文。
+先按本节第 3 项检查人脸和 ReID 的部署 YAML，再运行完整感知入口。
+下面示例保持 2 次播报、每次等待 10 秒、连续丢失 6 秒，并将首次和后续提示设为同一句英文：
 
 ```bash
 ros2 launch dog_patrol_perception_bringup perception_stack.launch.py \
@@ -222,7 +286,9 @@ ros2 launch dog_patrol_perception_bringup perception_stack.launch.py \
 ```
 
 使用自定义照片目录时，将最后一行改为 `photos_root:=/data/dog_patrol/photos`。
-不保存照片时，将 `photos_enabled` 改为 `false`。语音四项设置可以省略，省略时读取部署 YAML。
+不保存任务照片时，将 `photos_enabled` 改为 `false`，跟踪、语音和人脸照片都会关闭。
+语音四项设置可以省略，省略时读取部署 YAML。
+完整感知入口没有 `initial_face_window_seconds` 或 `handled_ignore_seconds` 同名启动参数；这两项分别修改人脸和 ReID 的 YAML。
 
 入侵跟踪时长由主控独立配置，不是感知启动参数：
 
@@ -250,8 +316,8 @@ ros2 param set /perception_voice_provider passphrase 'green light'
 等待新会话再验证改动，不要把第二轮理解为“下一次会话”。
 命令只修改当前进程的参数，不会写回 YAML，也不会在节点重启后自动保留。
 
-入侵跟踪时长、目标丢失判定时长、照片开关和照片路径是**启动时读取**的设置。
-应修改启动配置并重启对应节点，不使用 `ros2 param set` 作为它们的生效方式。
+纯人脸核验时长、ReID 忽略时长、入侵跟踪时长、目标丢失判定时长，以及照片开关、路径和人脸照片设置
+都是**启动时读取**的设置。应修改对应 YAML 或启动配置并重启，不使用 `ros2 param set` 作为它们的生效方式。
 
 ### 3. 重启后仍然使用修改后的配置
 
@@ -271,7 +337,8 @@ ros2 param set /perception_voice_provider passphrase 'green light'
 | 口令播报次数 | 感知启动命令中的 `voice_prompt_count`，传给编排节点 |
 | 目标丢失判定时长、照片开关和路径 | 感知启动命令中的 `lost_event_timeout_sec`、`photos_enabled`、`photos_root`，覆盖 `runtime/perception_tracking.yaml` 中对应值 |
 | 入侵跟踪时长 | 主控启动命令中的 `intruder_tracking_timeout` |
-| 人脸、ReID 设置 | 分别由 `runtime/face.yaml`、`runtime/reid.yaml` 及对应模块的启动参数管理 |
+| 纯人脸核验时长及人脸独立照片设置 | `runtime/face.yaml`；共享照片开关和根目录由完整感知启动参数统一传入 |
+| 重复核验忽略时长及 ReID 身份库、载荷目录 | `runtime/reid.yaml` 中 `/perception_reid/ros__parameters` 下的对应项 |
 
 修改该文件中以下四项，保留文件内其他硬件和音频设置：
 
@@ -287,11 +354,69 @@ response_timeout_seconds: 8.0
 - 语音四项：显式启动参数覆盖 YAML；启动参数省略或留空时沿用 YAML。运行时设置覆盖当前进程的待生效配置。
 - 修改 YAML 不会自动通知正在运行的节点；重启读取，或用上一节的命令同步更新当前进程。
 - `voice_prompt_count` 仍由编排节点的启动参数配置，不能追加到上述语音 YAML 中。
-- 语音 YAML 使用上面的平铺格式，不能直接用 `ros2 param dump` 生成的 `节点/ros__parameters` 格式替换。
+- 语音、人脸 YAML 使用平铺格式，不能直接用 `ros2 param dump` 生成的 `节点/ros__parameters` 格式替换；ReID YAML 使用 ROS 参数文件格式，见下面示例。
 - 完整感知启动读取 `<assets_root>/runtime/perception_tracking.yaml`，但随后用启动参数覆盖目标丢失时长、照片开关和照片根目录。
   即使没有显式传入，也会使用启动入口的默认值 `6.0`、`true`、`~/.ros/dog_patrol/photos`。调整这三项时应同步修改启动命令。
 - 资产目录的 `voice/voice_verification.yaml` 和源码包的 `config/voice_verification.yaml` 是参考配置；整套感知启动时为语音模块选择 `runtime/voice_verification.yaml`，不能只修改参考文件。
 - 单独启动 `voice.launch.py` 时，使用 `config_file:=/实际路径/voice_verification.yaml` 指定语音 YAML；其四个同名启动参数仍具有覆盖优先级。
+
+**人脸的设置方法：**
+
+编辑机器人实际使用的 `$DOG_PATROL_ASSETS_ROOT/runtime/face.yaml`，按需修改下面这些已有字段，保留模型路径、识别阈值等其他内容：
+
+```yaml
+initial_face_window_seconds: 3.0
+evidence_photo_enabled: true
+evidence_photo_format: jpg
+evidence_photo_jpeg_quality: 90
+evidence_photo_retention_seconds: 604800
+evidence_photo_max_files: 10000
+```
+
+例如改为 `initial_face_window_seconds: 5.0`，会把纯人脸阶段改为 5 秒；联合阶段仍持续识别。
+只关闭人脸照片时设 `evidence_photo_enabled: false`，同时保持总入口 `photos_enabled:=true`，跟踪和语音照片继续保存。
+修改后重启人脸节点或整套感知服务；修改文件不会自动通知正在运行的节点。
+
+完整启动仍用 `photos_root` 决定人脸照片路径。只有单独调试、且不传共享根目录时，才按需修改 YAML 的
+`evidence_photo_root`。单独启动人脸的示例为：
+
+```bash
+ros2 launch dog_patrol_perception_face face.launch.py \
+  config_file:="$DOG_PATROL_ASSETS_ROOT/runtime/face.yaml" \
+  photos_root:="$HOME/.ros/dog_patrol/photos" \
+  photos_enabled:=true
+```
+
+该命令会同时启动人脸核验和人脸就绪检查，不要与已经运行的完整感知栈重复启动。
+
+**ReID 的设置方法：**
+
+编辑机器人实际使用的 `$DOG_PATROL_ASSETS_ROOT/runtime/reid.yaml`，在已有节点和 `ros__parameters` 下修改这一项，保留其他配置：
+
+```yaml
+/perception_reid:
+  ros__parameters:
+    handled_ignore_seconds: 86400.0
+```
+
+示例中的层级是必需的，不要把这一个字段写成顶层的平铺 YAML，也不要用此片段覆盖整份模型配置。
+保持 `86400.0` 就是默认 24 小时；改成 `3600.0` 是 1 小时，`0.0` 是关闭免核验。
+完整感知启动会读取这份文件，tracking 无需配置同名参数。修改后重启 ReID 或整套感知服务。
+启动时恢复的资格继续使用保存的核验通过时刻判断，重启不会把计时起点改成当前时间。
+
+免核验资格保存在 ReID 的身份库中；`persist.enable: true` 为部署默认值，库文件位于 `data_dir/library.bin`。
+正常保存后重启可以恢复；异常断电最多丢失最后一个 `persist.save_interval_sec` 周期内的更新，默认周期 10 秒。
+`data_dir` 需要可写并持久保留；停服后删除库文件，或执行任务 reset，会清除原有免核验资格。
+
+单独调试时可加载同一份部署文件，并用 `-p` 覆盖本次进程的忽略时长：
+
+```bash
+ros2 run dog_patrol_reid_provider reid_node --ros-args \
+  --params-file "$DOG_PATROL_ASSETS_ROOT/runtime/reid.yaml" \
+  -p handled_ignore_seconds:=3600.0
+```
+
+该覆盖不会写回 YAML。此命令也不能与完整感知栈中的 ReID 节点重复运行。
 
 ### 4. 确认参数值
 
@@ -305,10 +430,17 @@ ros2 param get /mission_supervisor intruder_tracking_timeout
 ros2 param get /dog_patrol_perception_tracking_node target.lost_event_timeout_sec
 ros2 param get /dog_patrol_perception_tracking_node photos.enabled
 ros2 param get /dog_patrol_perception_tracking_node photos.root
+ros2 param get /perception_face_provider config_file
+ros2 param get /perception_face_provider photos_enabled
+ros2 param get /perception_face_provider photos_root
+ros2 param get /perception_reid handled_ignore_seconds
+ros2 param get /perception_reid data_dir
 ```
 
 语音参数查询显示已经接受的新设置；正在进行的会话可能仍按旧设置执行，下一次会话才使用新值。
 上述节点名使用默认部署名称；如果部署增加了命名空间，查询和修改命令需使用对应完整节点名。
+人脸的 `initial_face_window_seconds` 和独立照片设置不以同名 ROS 参数公开；根据 `config_file` 查询结果核对实际 YAML，并在修改后重启。
+ReID 的查询结果应与启动时读取的 YAML 或 `-p` 覆盖一致；不要用运行时 `ros2 param set` 改出的参数显示值判断业务已经热更新。
 
 ### 5. 查找并核对照片
 
@@ -321,12 +453,31 @@ ls -R "$HOME/.ros/dog_patrol/photos"
 按一次正常任务检查：
 
 1. 实际建立目标事件后，在 `tracking/event/` 查看整帧照片。
-2. 目标进入口令核验后，本轮通过查看 `voice/passed/`，本轮未通过查看 `voice/failed/`，核对文件名中的 `t<ID>` 和 `rN`。
-3. 连续丢失达到配置时长后，在 `tracking/lost/` 查看最后可见画面；其拍摄时间会早于丢失判定时间。
+2. 人脸有核验结果后，在 `face/state-<序号>/target-<语义ID>/` 查看目标局部图；按 `initial_face_passed`、`initial_face_not_passed` 或联合阶段的 `passed` 标记核对取帧规则。
+3. 目标进入口令核验后，本轮通过查看 `voice/passed/`，本轮未通过查看 `voice/failed/`，核对文件名中的 `t<ID>` 和 `rN`。
+4. 连续丢失达到配置时长后，在 `tracking/lost/` 查看最后可见画面；其拍摄时间会早于丢失判定时间。
+
+也可监听人脸证据消息，查看 `provider: face` 的 `image_url`、目标 ID 和阶段：
+
+```bash
+ros2 topic echo /perception/authorization_evidence
+```
+
+`image_url` 为空时检查人脸照片总开关、独立开关、有效输入和写盘日志；核验结果本身不保证一定有图片。
 
 没有照片时，先确认照片开关、实际根目录、对应事件是否发生，再查看 tracking 节点中的 `event photo:` 错误日志。
 相机缺帧、语音事件与相机时间不一致、写队列满或目录不可写会导致对应照片无法保存，并报告错误。
-照片异步编码和写盘；事件到来后文件可能稍后出现。当前没有平台上传和自动清理功能。
+跟踪和语音照片异步编码、写盘，事件到来后文件可能稍后出现；人脸在保存后随证据消息给出本地文件地址。
+跟踪、语音当前没有自动清理；人脸按配置在保存新照片时执行清理。各模块均没有在本流程中增加平台上传。
+
+### 6. 验证重复核验忽略时长
+
+先用 `ros2 param get /perception_reid handled_ignore_seconds` 确认启动值，再完成一次真实的人脸或口令核验通过。
+在忽略时长内重新识别同一人物，应跳过重复核验；换底层 track ID、跨午夜或正常重启后仍按原截止时间判断。
+换成另一人物时应照常核验。真正到期后再次识别原人物，应重新走纯人脸和必要的口令流程。
+
+联调可临时在 YAML 配置较短时间并重启，便于观察到期；验证结束后改回 `86400.0` 并再次重启。
+只检测到人、核验失败或取消任务不能作为“已通过”样本；不要通过清空库、任务 reset 来测试正常重启是否保留资格。
 
 ## 五、截图中的边界规则与当前实现
 
@@ -335,7 +486,7 @@ ls -R "$HOME/.ros/dog_patrol/photos"
 | 核验总计时从首次检测开始，重复播报、短暂丢失不重置 | 当前不增加核验总时长；只配置进入入侵跟踪后的时长，默认 60 秒 |
 | 目标短暂丢失不足阈值，重新发现后继续原流程 | 按此规则执行；清零丢失计时，不重置入侵跟踪计时 |
 | 核验通过、时限内未通过、目标丢失是互斥最终结果 | 当前沿用任务事件流程：主控按状态及 `state_seq` 拒绝失效结果；核验未通过后进入入侵跟踪，之后仍可能因丢失或跟踪到期结束。本次未新增平台统一最终结果上报 |
-| 重复核验忽略仅针对同一人物 | 由 ReID 负责，跟踪侧使用 ReID 返回的排除结论 |
+| 重复核验忽略仅针对同一人物 | 由 ReID 维护默认 24 小时资格；跨天、正常持久化后的重启按原通过时刻继续判断，其他人物不继承 |
 | 播报次数耗尽后继续跟踪入侵者 | 停止播报和监听，按配置的入侵跟踪时长跟踪；没有额外的超时照片 |
 
 ## 六、部署集成补充
@@ -348,7 +499,7 @@ ls -R "$HOME/.ros/dog_patrol/photos"
 | tracking 的 `photos.voice_event_topic` | 必须与语音节点的 `voice_verification_event_topic` 一致；完整感知启动会统一传入 |
 | `use_sim_time` | 默认 `false`；仿真时保持相机、语音、主控在同一时间域，供选帧使用 |
 
-保存照片使用源图副本，JPEG 编码和写盘在后台线程中执行。帧历史和写队列默认各最多 16 帧，退出时排空已经入队的照片。
+跟踪、语音保存照片使用源图副本，JPEG 编码和写盘在后台线程中执行。帧历史和写队列默认各最多 16 帧，退出时排空已经入队的照片。
 这些缓存大小没有作为本次面向使用者的 ROS 配置项开放。
 
 `AuthorizationCommand`、`AuthorizationEvidence` 新增 `round_number`，另有 `VoiceVerificationEvent`。
@@ -356,6 +507,12 @@ ls -R "$HOME/.ros/dog_patrol/photos"
 第三轮及以后语音继续使用 `DUAL_SECOND` 接口并携带轮次；人脸保留首次联合命令的 stage，
 跨口令轮次持续提供有效结果，后续口令命令不重新启动人脸核验。
 成功结果继续转发 ReID，旧放行缓存作废；下一次确认重新询问 ReID，服务不可用时保留已有旁路规则。
+ReID 的 `ReIDDedup` 通过 `handled_until` 给出免核验固定截止时刻，单位为系统墙钟 epoch 秒。
+tracking 自动换算并释放到期排除项，调用方不应把“收到响应时刻”作为新的忽略期起点。
+此业务截止使用系统墙钟，不使用 `use_sim_time` 的仿真时钟；现场与仿真联调时都要保持运行进程的系统时间一致。
+
+人脸图像和路径配置细节见[人脸模块说明](../../src/perception/dog_patrol_perception_face/README.md)；
+去重接口与联调细节见[ReID 模块说明](../../src/perception/dog_patrol_reid_provider/README.md)。
 
 照片相关 22 项自动化测试已通过，覆盖取帧、语义 ID、轮次、目录、同名防覆盖和实际跟踪事件。
 普通环境可通过 `TRACKING_ENABLE_ORIN_RUNTIME=OFF` 编译检查；相机、R818 收音播报和 Orin 连续运行仍需部署设备验收。
