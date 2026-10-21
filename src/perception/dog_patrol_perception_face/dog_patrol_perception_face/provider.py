@@ -152,7 +152,6 @@ class FaceEvidenceController:
         self._hardware_faulted = False
         self._stopping = False
         self._queue: deque[tuple[DecodedCrop, int]] = deque()
-        self._first_crop: tuple[int, DecodedCrop] | None = None
         self._last_crop_wall_ns: int | None = None
         self._worker_cuda_ctx = None
         self._worker_verifier: FaceVerifier | None = None
@@ -184,7 +183,6 @@ class FaceEvidenceController:
             if self._active_cancel is not None:
                 self._active_cancel.set()
             self._queue.clear()
-            self._first_crop = None
             self._last_crop_wall_ns = None
             self._condition.notify_all()
 
@@ -211,7 +209,6 @@ class FaceEvidenceController:
             if self._active_cancel is not None:
                 self._active_cancel.set()
             self._queue.clear()
-            self._first_crop = None
             self._last_crop_wall_ns = None
             self._condition.notify_all()
 
@@ -223,13 +220,6 @@ class FaceEvidenceController:
             if crop.target_id != self._desired_request.session.target_id:
                 self.crops_dropped_target += 1
                 return
-            if self._first_crop is None or self._first_crop[0] != self._generation:
-                # Preserve the actual first valid crop received for this stage.
-                # The inference queue remains latest-only and may discard it.
-                self._first_crop = (
-                    self._generation,
-                    replace(crop, image=crop.image.copy()),
-                )
             self.crops_dropped_queue += len(self._queue)
             self._queue.clear()
             arrival_ns = time.monotonic_ns()
@@ -414,8 +404,8 @@ class FaceEvidenceController:
         deadline = None if timeout is None else time.monotonic() + timeout
         last_detail = ""
         last_source_box = None
-        first_crop = self._first_crop_for(generation)
-        best_similarity = 0.0
+        first_face_crop = None
+        first_face_similarity = 0.0
         while True:
             crop_and_arrival = self._pop_latest_crop(
                 request, generation, cancel_event, deadline
@@ -425,20 +415,18 @@ class FaceEvidenceController:
                     FaceEvidenceResult.NOT_PASSED,
                     "verification window elapsed without a match",
                     None,
-                    self._initial_failure_crop(request, generation, first_crop),
+                    first_face_crop,
                     "",
-                    best_similarity,
+                    first_face_similarity,
                 )
             crop, arrival_ns = crop_and_arrival
-            if first_crop is None:
-                # A crop may arrive after this window starts. Prefer the
-                # receive-side snapshot because the latest-only queue may
-                # already have replaced the actual first crop.
-                first_crop = self._first_crop_for(generation)
-                if first_crop is None:
-                    first_crop = replace(crop, image=crop.image.copy())
             verdict = self._verify(verifier, crop)
-            best_similarity = max(best_similarity, float(verdict.similarity))
+            if first_face_crop is None and verdict.box is not None:
+                # Bind failed evidence to the first inference that actually
+                # detected a face.  Its image and similarity must come from
+                # the same verdict; do not substitute a later peak value.
+                first_face_crop = replace(crop, image=crop.image.copy())
+                first_face_similarity = float(verdict.similarity)
             if verdict.detail:
                 last_detail = verdict.detail
             if verdict.box is not None:
@@ -479,26 +467,10 @@ class FaceEvidenceController:
                     FaceEvidenceResult.NOT_PASSED,
                     detail,
                     last_source_box,
-                    self._initial_failure_crop(request, generation, first_crop),
+                    first_face_crop,
                     "",
-                    best_similarity,
+                    first_face_similarity,
                 )
-
-    def _first_crop_for(self, generation: int) -> DecodedCrop | None:
-        with self._condition:
-            if self._first_crop is not None and self._first_crop[0] == generation:
-                return self._first_crop[1]
-        return None
-
-    def _initial_failure_crop(
-        self,
-        request: FaceVerificationRequest,
-        generation: int,
-        fallback: DecodedCrop | None,
-    ) -> DecodedCrop | None:
-        if request.stage is not FaceVerificationStage.INITIAL_FACE:
-            return None
-        return self._first_crop_for(generation) or fallback
 
     def _window_timeout_for(self, stage: FaceVerificationStage) -> float | None:
         """Only face-only verification has a deadline; joint work ends on cancel."""
