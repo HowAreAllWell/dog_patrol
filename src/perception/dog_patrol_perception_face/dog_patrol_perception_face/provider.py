@@ -110,7 +110,7 @@ def _to_source_box(
 
 
 class FaceEvidenceController:
-    """Run one latest-crop face window for each orchestrator command."""
+    """Run an initial face window, then continuous joint face verification."""
 
     def __init__(
         self,
@@ -135,10 +135,6 @@ class FaceEvidenceController:
         self._initial_face_window = max(
             0.1,
             float(config.initial_face_window_seconds) or legacy_timeout,
-        )
-        self._dual_verification_window = max(
-            0.1,
-            float(config.dual_verification_window_seconds) or legacy_timeout,
         )
         self._freshness_timeout = max(
             0.1, float(config.crop_freshness_timeout_seconds)
@@ -198,6 +194,17 @@ class FaceEvidenceController:
             if request is not None and request.session != self._mission_session:
                 return
             if request == self._desired_request:
+                return
+            joint_stages = (FaceVerificationStage.DUAL_FIRST, FaceVerificationStage.DUAL_SECOND)
+            if (
+                request is not None
+                and self._desired_request is not None
+                and request.session == self._desired_request.session
+                and request.stage in joint_stages
+                and self._desired_request.stage in joint_stages
+            ):
+                # Later voice rounds must not reset the face model, discard an
+                # in-flight match, or open another independently timed window.
                 return
             self._desired_request = request
             self._generation += 1
@@ -403,7 +410,8 @@ class FaceEvidenceController:
         FaceEvidenceResult, str, tuple[int, int, int, int] | None,
         DecodedCrop | None, str, float,
     ]:
-        deadline = time.monotonic() + self._window_timeout_for(request.stage)
+        timeout = self._window_timeout_for(request.stage)
+        deadline = None if timeout is None else time.monotonic() + timeout
         last_detail = ""
         last_source_box = None
         first_crop = self._first_crop_for(generation)
@@ -463,7 +471,7 @@ class FaceEvidenceController:
                     FaceEvidenceResult.PASSED, verdict.detail, box, crop,
                     verdict.person_id, verdict.similarity,
                 )
-            if time.monotonic() >= deadline:
+            if deadline is not None and time.monotonic() >= deadline:
                 detail = "verification window elapsed without a match"
                 if last_detail:
                     detail += f"; last_verdict={last_detail}"
@@ -492,11 +500,11 @@ class FaceEvidenceController:
             return None
         return self._first_crop_for(generation) or fallback
 
-    def _window_timeout_for(self, stage: FaceVerificationStage) -> float:
-        """Use the platform-configured face window for the active subtask stage."""
+    def _window_timeout_for(self, stage: FaceVerificationStage) -> float | None:
+        """Only face-only verification has a deadline; joint work ends on cancel."""
         if stage is FaceVerificationStage.INITIAL_FACE:
             return self._initial_face_window
-        return self._dual_verification_window
+        return None
 
     def _verify(self, verifier: FaceVerifier, crop: DecodedCrop):
         started_ns = time.monotonic_ns()

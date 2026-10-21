@@ -14,10 +14,9 @@ temporal_window: 10
 min_frames_for_decision: 5
 
 window_timeout_seconds: 3.0
-# Platform patrol-subtask settings. Zero falls back to the legacy value above.
-# Face remains active for the whole voice wait during each joint round.
+# Face-only setting. Zero falls back to the legacy value above.
+# Joint face verification runs continuously until the orchestrator cancels it.
 initial_face_window_seconds: 3.0
-dual_verification_window_seconds: 10.0
 crop_freshness_timeout_seconds: 1.0
 
 # Image evidence is the unmodified tracking crop received by this node.

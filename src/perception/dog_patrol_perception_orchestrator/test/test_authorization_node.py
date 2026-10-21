@@ -138,7 +138,8 @@ def command_keys(messages):
     ]
 
 
-def test_ros_prompt_count_and_round_numbers_allow_third_round_without_face_change(harness):
+@pytest.mark.parametrize("passing_provider", ["face", "voice"])
+def test_ros_third_round_accepts_continuous_face_and_current_voice_only(harness, passing_provider):
     result = harness.node.set_parameters_atomically([Parameter("voice_prompt_count", value=3)])
     assert result.successful
     invalid = harness.node.set_parameters_atomically([Parameter("voice_prompt_count", value=0)])
@@ -149,11 +150,9 @@ def test_ros_prompt_count_and_round_numbers_allow_third_round_without_face_chang
     )
     for number, stage in ((1, AuthorizationEvidence.DUAL_FIRST), (2, AuthorizationEvidence.DUAL_SECOND)):
         assert harness.commands[-1].round_number == number
-        for provider in ("face", "voice"):
-            harness.publish_evidence(
-                17, 42, stage, provider, AuthorizationEvidence.NOT_PASSED,
-                round_number=number if provider == "voice" else 0,
-            )
+        harness.publish_evidence(
+            17, 42, stage, "voice", AuthorizationEvidence.NOT_PASSED, round_number=number,
+        )
     assert harness.commands[-1].round_number == 3
     harness.publish_evidence(
         17, 42, AuthorizationEvidence.DUAL_SECOND, "voice", AuthorizationEvidence.PASSED,
@@ -161,14 +160,16 @@ def test_ros_prompt_count_and_round_numbers_allow_third_round_without_face_chang
     )
     assert not harness.events
     harness.publish_evidence(
-        17, 42, AuthorizationEvidence.DUAL_SECOND, "voice", AuthorizationEvidence.PASSED,
-        round_number=3,
+        17, 42,
+        AuthorizationEvidence.DUAL_FIRST if passing_provider == "face" else AuthorizationEvidence.DUAL_SECOND,
+        passing_provider, AuthorizationEvidence.PASSED,
+        round_number=0 if passing_provider == "face" else 3,
     )
     assert harness.spin_until(lambda: len(harness.events) == 1)
     assert harness.events[0].event == MissionEvent.AUTHORIZED
 
 
-def test_two_round_internal_flow_only_rejects_after_both_second_round_miss(
+def test_two_round_internal_flow_rejects_when_voice_rounds_are_exhausted(
     harness,
 ):
     harness.publish_state(17, 42)
@@ -189,14 +190,9 @@ def test_two_round_internal_flow_only_rejects_after_both_second_round_miss(
         AuthorizationCommand.DUAL_FIRST,
     )
 
-    for provider in ("face", "voice"):
-        harness.publish_evidence(
-            17,
-            42,
-            AuthorizationEvidence.DUAL_FIRST,
-            provider,
-            AuthorizationEvidence.NOT_PASSED,
-        )
+    harness.publish_evidence(
+        17, 42, AuthorizationEvidence.DUAL_FIRST, "voice", AuthorizationEvidence.NOT_PASSED,
+    )
     assert not harness.events
     assert command_keys(harness.commands)[-1] == (
         17,
@@ -204,14 +200,9 @@ def test_two_round_internal_flow_only_rejects_after_both_second_round_miss(
         AuthorizationCommand.DUAL_SECOND,
     )
 
-    for provider in ("voice", "face"):
-        harness.publish_evidence(
-            17,
-            42,
-            AuthorizationEvidence.DUAL_SECOND,
-            provider,
-            AuthorizationEvidence.NOT_PASSED,
-        )
+    harness.publish_evidence(
+        17, 42, AuthorizationEvidence.DUAL_SECOND, "voice", AuthorizationEvidence.NOT_PASSED,
+    )
     assert harness.spin_until(lambda: len(harness.events) == 1)
     assert command_keys(harness.commands)[-1] == (
         17,

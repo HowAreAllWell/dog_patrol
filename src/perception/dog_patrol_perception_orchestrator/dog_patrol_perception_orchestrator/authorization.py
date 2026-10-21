@@ -71,7 +71,6 @@ class AuthorizationCoordinator:
         self.set_voice_prompt_count(voice_prompt_count)
         self._active_session: Optional[AuthorizationSession] = None
         self._active_stage: Optional[AuthorizationStage] = None
-        self._stage_results: dict[AuthorizationProvider, AuthorizationResult] = {}
         self._round_number = 0
         self._session_prompt_count = voice_prompt_count
         self._policy_session: Optional[AuthorizationSession] = None
@@ -112,16 +111,22 @@ class AuthorizationCoordinator:
     def _reset(self) -> None:
         self._active_session = None
         self._active_stage = None
-        self._stage_results.clear()
         self._round_number = 0
 
     def record_observation(
         self, observation: AuthorizationObservation
     ) -> AuthorizationTransition:
-        if (
-            observation.session != self._active_session
-            or observation.stage != self._active_stage
-        ):
+        if observation.session != self._active_session:
+            return AuthorizationTransition()
+        joint_stages = (AuthorizationStage.DUAL_FIRST, AuthorizationStage.DUAL_SECOND)
+        # Face runs continuously across voice rounds and keeps the stage of its
+        # original joint command. Voice evidence still belongs to one exact round.
+        continuous_face = (
+            observation.provider is AuthorizationProvider.FACE
+            and self._active_stage in joint_stages
+            and observation.stage in joint_stages
+        )
+        if observation.stage != self._active_stage and not continuous_face:
             return AuthorizationTransition()
         expected_providers = {
             AuthorizationStage.INITIAL_FACE: {AuthorizationProvider.FACE},
@@ -165,7 +170,6 @@ class AuthorizationCoordinator:
         ):
             self._active_stage = AuthorizationStage.DUAL_FIRST
             self._round_number = 1
-            self._stage_results.clear()
             return AuthorizationTransition(
                 commands=(
                     AuthorizationCommand(
@@ -176,44 +180,29 @@ class AuthorizationCoordinator:
         if (
             self._active_stage
             in (AuthorizationStage.DUAL_FIRST, AuthorizationStage.DUAL_SECOND)
-            and observation.provider
-            in (AuthorizationProvider.FACE, AuthorizationProvider.VOICE)
+            and observation.provider is AuthorizationProvider.VOICE
             and observation.result is AuthorizationResult.NOT_PASSED
         ):
-            self._stage_results[observation.provider] = observation.result
-            if set(self._stage_results) == {
-                AuthorizationProvider.FACE,
-                AuthorizationProvider.VOICE,
-            }:
-                if self._round_number < self._session_prompt_count:
-                    previous_stage = self._active_stage
-                    self._round_number += 1
-                    self._active_stage = AuthorizationStage.DUAL_SECOND
-                    if previous_stage is AuthorizationStage.DUAL_FIRST:
-                        self._stage_results.clear()
-                    else:
-                        # Face keeps its existing two-stage protocol. Reusing DUAL_SECOND
-                        # does not start another face window, so retain its completed result.
-                        self._stage_results.pop(AuthorizationProvider.VOICE, None)
-                    return AuthorizationTransition(
-                        commands=(
-                            AuthorizationCommand(
-                                observation.session,
-                                AuthorizationStage.DUAL_SECOND,
-                                self._round_number,
-                            ),
-                        )
-                    )
-                outcome = AuthorizationOutcome(
-                    observation.session, AuthorizationResult.NOT_PASSED
-                )
-                self._reset()
+            if self._round_number < self._session_prompt_count:
+                self._round_number += 1
+                self._active_stage = AuthorizationStage.DUAL_SECOND
                 return AuthorizationTransition(
                     commands=(
                         AuthorizationCommand(
-                            observation.session, AuthorizationStage.CANCEL
+                            observation.session,
+                            AuthorizationStage.DUAL_SECOND,
+                            self._round_number,
                         ),
                     ),
-                    outcome=outcome,
                 )
+            outcome = AuthorizationOutcome(
+                observation.session, AuthorizationResult.NOT_PASSED
+            )
+            self._reset()
+            return AuthorizationTransition(
+                commands=(
+                    AuthorizationCommand(observation.session, AuthorizationStage.CANCEL),
+                ),
+                outcome=outcome,
+            )
         return AuthorizationTransition()

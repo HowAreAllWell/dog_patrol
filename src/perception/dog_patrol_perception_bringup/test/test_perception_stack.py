@@ -119,7 +119,7 @@ def test_formal_face_assets_enable_reviewed_runtime_and_match_build_output():
     )
     values = yaml.safe_load(runtime_config.read_text(encoding="utf-8"))
     assert values["initial_face_window_seconds"] == 3.0
-    assert values["dual_verification_window_seconds"] == 10.0
+    assert "dual_verification_window_seconds" not in values
     assert values["evidence_photo_enabled"] is True
 
     build_script = (

@@ -41,10 +41,6 @@ def test_configured_round_count_exhausts_without_requiring_extra_face_windows(se
         command, = transition.commands
         assert command.round_number == number
         stage = AuthorizationStage.DUAL_FIRST if number == 1 else AuthorizationStage.DUAL_SECOND
-        if number <= 2:
-            coordinator.record_observation(AuthorizationObservation(
-                session, stage, AuthorizationProvider.FACE, AuthorizationResult.NOT_PASSED,
-            ))
         if number > 2:
             stale = coordinator.record_observation(AuthorizationObservation(
                 session, stage, AuthorizationProvider.VOICE, AuthorizationResult.PASSED,
@@ -113,7 +109,7 @@ def test_initial_face_miss_starts_first_dual_round(session):
     assert transition.outcome is None
 
 
-def test_dual_round_waits_for_both_providers(session):
+def test_joint_face_miss_does_not_advance_voice_round(session):
     coordinator = AuthorizationCoordinator()
     coordinator.observe(session)
     coordinator.record_observation(
@@ -137,6 +133,44 @@ def test_dual_round_waits_for_both_providers(session):
     assert transition.commands == ()
     assert transition.outcome is None
     assert coordinator.active_session == session
+
+
+@pytest.mark.parametrize("round_number", [2, 3, 5])
+@pytest.mark.parametrize("result", [AuthorizationResult.PASSED, AuthorizationResult.ERROR])
+def test_continuous_face_result_is_valid_in_later_voice_rounds(session, round_number, result):
+    coordinator = AuthorizationCoordinator(voice_prompt_count=5)
+    coordinator.observe(session)
+    coordinator.record_observation(AuthorizationObservation(
+        session, AuthorizationStage.INITIAL_FACE,
+        AuthorizationProvider.FACE, AuthorizationResult.NOT_PASSED,
+    ))
+    for number in range(1, round_number):
+        coordinator.record_observation(AuthorizationObservation(
+            session,
+            AuthorizationStage.DUAL_FIRST if number == 1 else AuthorizationStage.DUAL_SECOND,
+            AuthorizationProvider.VOICE, AuthorizationResult.NOT_PASSED, number,
+        ))
+    # The face provider retains its original joint-stage identity throughout.
+    transition = coordinator.record_observation(AuthorizationObservation(
+        session, AuthorizationStage.DUAL_FIRST, AuthorizationProvider.FACE, result,
+    ))
+    assert transition.outcome == AuthorizationOutcome(session, result)
+    assert transition.commands == (AuthorizationCommand(session, AuthorizationStage.CANCEL),)
+
+
+@pytest.mark.parametrize("result", [AuthorizationResult.PASSED, AuthorizationResult.ERROR])
+def test_joint_stage_still_rejects_stale_face_and_voice_results(session, result):
+    coordinator = _coordinator_at_stage(session, AuthorizationStage.DUAL_SECOND)
+    for observation in (
+        AuthorizationObservation(session, AuthorizationStage.INITIAL_FACE, AuthorizationProvider.FACE, result),
+        AuthorizationObservation(AuthorizationSession(16, 42), AuthorizationStage.DUAL_FIRST, AuthorizationProvider.FACE, result),
+        AuthorizationObservation(session, AuthorizationStage.DUAL_FIRST, AuthorizationProvider.VOICE, result, 1),
+    ):
+        assert coordinator.record_observation(observation) == AuthorizationTransition()
+    coordinator.observe(None)
+    assert coordinator.record_observation(AuthorizationObservation(
+        session, AuthorizationStage.DUAL_FIRST, AuthorizationProvider.FACE, result,
+    )) == AuthorizationTransition()
 
 
 def test_first_dual_round_misses_start_second_dual_round(session):

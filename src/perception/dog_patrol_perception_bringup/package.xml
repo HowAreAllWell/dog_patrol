@@ -16,6 +16,9 @@
   <exec_depend>launch</exec_depend>
   <exec_depend>launch_ros</exec_depend>
   <test_depend>python3-pytest</test_depend>
+  <test_depend>rclpy</test_depend>
+  <test_depend>dog_patrol_interfaces</test_depend>
+  <test_depend>dog_patrol_perception_interfaces</test_depend>
 
   <export>
     <build_type>ament_python</build_type>

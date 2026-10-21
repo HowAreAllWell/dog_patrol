@@ -25,8 +25,9 @@ class FaceConfig:
     min_frames_for_decision: int = 5
     # Backward-compatible default used when a stage-specific value is zero.
     window_timeout_seconds: float = 3.0
-    # Platform patrol-subtask settings for the face-only and joint stages.
+    # Platform patrol-subtask setting for the face-only stage.
     initial_face_window_seconds: float = 0.0
+    # Deprecated, accepted for old YAML only. Joint verification has no face deadline.
     dual_verification_window_seconds: float = 0.0
     crop_freshness_timeout_seconds: float = 1.0
     evidence_photo_enabled: bool = False
