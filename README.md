@@ -40,9 +40,10 @@
 - 人脸 bbox 已通过轻量 `FaceOverlay` 回传，在 tracking 既有 `VisualizerRecorder` 的同一 canvas/window
   上绘制；错目标、未来帧和过期结果不显示。最终还需用户参加一次仅导航 fake 的感知整流程现场验收，
   同时记录阶段耗时、CPU/GPU/RAM、温度及 tracking/face 指标。
-- 入侵跟踪默认最多 60 秒，连续目标丢失默认 6 秒；
-  免重复核验继续由 ReID 决定。检测、丢失照片按照片项分子目录；语音照片按结果存入 `voice/passed/`、`voice/failed/`，文件名额外包含轮次。所有照片保存原始整帧 JPEG，文件名包含拍摄时间和目标语义 ID。
-  参数、启动与修改方法、照片目录见[配置项与照片使用说明](docs/perception/verification_evidence.md)，按需求截图逐项对应。
+- 入侵跟踪默认最多 60 秒，连续目标丢失默认 6 秒；ReID 默认提供核验通过后 24 小时免重复核验。
+  检测、丢失照片按照片项分子目录；语音照片按结果存入 `voice/passed/`、`voice/failed/`，文件名额外包含轮次。
+  检测、跟踪及语音照片保存原始整帧 JPEG；人脸照片保存主目标 crop 原图，支持 JPEG/PNG。文件名均包含拍摄时间和目标语义 ID。
+  检测、跟踪、人脸、语音和 ReID 的配置方法、生效时机与照片目录见[感知配置项与照片使用说明](docs/perception/verification_evidence.md)，按需求截图逐项对应。
 - 目标公开远程：`https://github.com/HowAreAllWell/dog_patrol`
 
 ## 目录
