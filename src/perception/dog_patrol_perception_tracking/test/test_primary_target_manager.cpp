@@ -198,9 +198,9 @@ TEST(PrimaryTargetManagerTest, PatrolSelectionKeepsMultipleReidIdentitiesExclude
       MakeIdentity(22, 202, dog_patrol_perception_tracking::ClassId::kPerson, cv::Rect2f(0, 0, 80, 80));
   const auto eligible = MakeIdentity(33, 303, dog_patrol_perception_tracking::ClassId::kPerson, cv::Rect2f(0, 0, 60, 60));
 
-  mgr.ExcludeForReidDedup(11);
+  mgr.ExcludeForReidDedup(11, now + std::chrono::hours{24});
   mgr.UpdateForPatrol({first_handled}, now);
-  mgr.ExcludeForReidDedup(22);
+  mgr.ExcludeForReidDedup(22, now + std::chrono::hours{24});
   const auto state = mgr.UpdateForPatrol({first_handled, second_handled, eligible}, now);
 
   EXPECT_FALSE(mgr.IsMissionEligible(first_handled));
@@ -220,7 +220,8 @@ TEST(PrimaryTargetManagerTest, ReadyClearsPrimaryWithoutSelectingOrDeletingReidH
   const MissionSnapshot patrol{10U, MissionPhase::kPatrol, 0, 11};
   const MissionSnapshot ready{11U, MissionPhase::kReady, 0, 11};
 
-  mgr.ExcludeForReidDedup(11);
+  mgr.ExcludeForReidDedup(
+      11, PrimaryTargetManager::TimePoint{} + std::chrono::hours{24});
   const auto selected = mgr.UpdateForMission({person, eligible}, patrol, std::nullopt,
                                               PrimaryTargetManager::TimePoint{});
   ASSERT_EQ(selected.primary_target_id, 22);
@@ -239,7 +240,8 @@ TEST(PrimaryTargetManagerTest, StartupResetClearsPrimaryAndReidHistory) {
   const MissionSnapshot startup{11U, MissionPhase::kStartup, 0, 0};
 
   mgr.UpdateForMission({person}, patrol, std::nullopt, PrimaryTargetManager::TimePoint{});
-  mgr.ExcludeForReidDedup(11);
+  mgr.ExcludeForReidDedup(
+      11, PrimaryTargetManager::TimePoint{} + std::chrono::hours{24});
   EXPECT_FALSE(mgr.IsMissionEligible(person));
   const auto reset = mgr.UpdateForMission({person}, startup, patrol,
                                           PrimaryTargetManager::TimePoint{});

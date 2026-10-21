@@ -251,7 +251,9 @@ TEST_F(MissionRosAdapterTest, HandledSnapshotNeedsReidConclusionToExcludeTarget)
                          TrustedPerson(99, 8, cv::Rect2f{120, 10, 40, 40})},
                         MissionCoordinator::TimePoint{}, Metadata(1710000000000000000ULL));
   EXPECT_EQ(adapter.CurrentPrimary().primary_target_id, 42);
-  adapter.ExcludeForReidDedup(42);
+  // 排除截止给足余量（远超本用例的假时间轴 +100ms），等效"忽略时长内"
+  adapter.ExcludeForReidDedup(
+      42, MissionCoordinator::TimePoint{} + std::chrono::hours{24});
   adapter.ProcessFrame({TrustedPerson(42, 7, cv::Rect2f{10, 10, 80, 80}),
                         TrustedPerson(99, 8, cv::Rect2f{120, 10, 40, 40})},
                        MissionCoordinator::TimePoint{} + std::chrono::milliseconds{100},

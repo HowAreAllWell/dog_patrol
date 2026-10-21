@@ -48,16 +48,13 @@ RuntimeFrameOutput MissionTrackingRuntime::ProcessFrame(
     const SourceFrameMetadata &source_metadata,
     const cv::Mat &source_image) {
   if (reid_gate_ != nullptr && reid_gate_->enabled()) {
-    // N03：跨天同步放在每帧固定入口，不依赖 confirm 事件触发 Allow——
-    // 跨天时选人层的 ReID 排除项一并失效。
-    if (reid_gate_->SyncDay()) {
-      adapter_->ClearReidDedupExclusions();
-    }
     // R04：取走异步到达的"seen+handled"排除结论，注入选人资格边界——
-    // 被去重者不再占用 primary，同屏其他新人可被选择
-    reid_gate_->DrainExclusions([this](int semantic_id) {
-      adapter_->ExcludeForReidDedup(semantic_id);
-    });
+    // 被去重者不再占用 primary，同屏其他新人可被选择；排除携带有效期
+    //（"重复核验忽略时长"），到期自动释放、同人重新核验
+    reid_gate_->DrainExclusions(
+        [this](int semantic_id, PrimaryTargetManager::TimePoint valid_until) {
+          adapter_->ExcludeForReidDedup(semantic_id, valid_until);
+        });
     // R06-A/N06：把 supervisor 的 handled 结论转发 ReID 节点落库。转发按
     // "新的权威处置结果"去重，而非仅按 ID 是否变化：
     //   ① 转换检测：handled_target_id 相对上一观察快照发生变化（0→X 即新

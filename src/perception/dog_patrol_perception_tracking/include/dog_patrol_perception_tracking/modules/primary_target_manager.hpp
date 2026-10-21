@@ -3,7 +3,7 @@
 #include <chrono>
 #include <optional>
 #include <string>
-#include <unordered_set>
+#include <unordered_map>
 #include <vector>
 
 #include "dog_patrol_perception_tracking/modules/mission_coordinator.hpp"
@@ -33,14 +33,11 @@ class PrimaryTargetManager {
   void ResetForPatrolCycle();
 
   // ReID 去重排除（seen+handled 的外观结论，评审 R04/N04）：仅影响巡逻选人
-  // 资格；当日有效（契约：处置过的人当天免重复处置），不随持续不可见释放，
-  // 仅跨天或 STARTUP/reset 清除。
+  // 资格；有效期截止时刻由 provider"重复核验忽略时长"的剩余量决定（随
+  // gate 排除结论注入），到期在巡逻选人边界自动释放（同人重新可选、重新
+  // 核验）；跨天（N03）与 STARTUP/reset 提前全清。不随持续不可见释放。
   // 由帧处理路径经 MissionFrameTransaction 注入。
-  void ExcludeForReidDedup(int semantic_id);
-
-  // 跨天失效选人层的 ReID 排除项（评审 N03）：与 gate 锁存/provider 当日库
-  // 的日期清零同步。
-  void ClearReidDedupExclusions();
+  void ExcludeForReidDedup(int semantic_id, TimePoint valid_until);
 
   // Clears the current primary and ReID exclusion history. This is used
   // only for STARTUP/reset or a full process session boundary.
@@ -99,8 +96,9 @@ class PrimaryTargetManager {
   int pending_geometry_stable_frames_{0};
   std::string last_decision_reason_;
   std::string last_reject_reason_;
-  // ReID 去重排除（当日有效）：无需不可见计时，值即"今日已免处置"事实
-  std::unordered_set<int> reid_dedup_excluded_ids_;
+  // ReID 去重排除：值 = 排除有效期截止（provider"重复核验忽略时长"随 gate
+  // 结论注入；UpdateForPatrol 每帧先释放到期项，同人重新可选、重新核验）
+  std::unordered_map<int, TimePoint> reid_dedup_excluded_until_;
   std::optional<MissionSnapshot> last_mission_for_primary_;
 };
 

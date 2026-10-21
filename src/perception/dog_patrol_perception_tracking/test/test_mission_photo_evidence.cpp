@@ -239,6 +239,10 @@ TEST_F(MissionPhotoEvidenceTest, ReidSuppressedConfirmationDoesNotCreateDetectio
         response->status = 0;
         response->is_seen = true;
         response->handled = true;
+        response->handled_until =                     // 固定截止（gate 抑制需未过期）
+            std::chrono::duration<double>(
+                std::chrono::system_clock::now().time_since_epoch())
+                .count() + 3600.0;
       });
   ReidConfirmGate::Config gate_config;
   gate_config.service_name = service_name;
@@ -256,7 +260,10 @@ TEST_F(MissionPhotoEvidenceTest, ReidSuppressedConfirmationDoesNotCreateDetectio
   while (!suppressed && std::chrono::steady_clock::now() < deadline) {
     gate.Allow(42, image);
     executor.spin_some();
-    gate.DrainExclusions([&](int target) { suppressed = target == 42; });
+    gate.DrainExclusions(
+        [&](int target, std::chrono::steady_clock::time_point) {
+          suppressed = target == 42;
+        });
     std::this_thread::sleep_for(5ms);
   }
   ASSERT_TRUE(suppressed);

@@ -45,14 +45,12 @@ class MissionFrameTransaction {
   PrimaryTargetResult CurrentPrimary() const;
 
   // ReID 去重排除注入（评审 R04）：转发给 primary_manager_，仅影响巡逻选人
-  // 资格（当日有效；STARTUP 全清）。
-  void ExcludeForReidDedup(int semantic_id) {
-    primary_manager_.ExcludeForReidDedup(semantic_id);
+  // 资格；携带有效期截止（"重复核验忽略时长"随 gate 结论下发，到期自动
+  // 释放重新核验；STARTUP 全清）。
+  void ExcludeForReidDedup(int semantic_id,
+                           PrimaryTargetManager::TimePoint valid_until) {
+    primary_manager_.ExcludeForReidDedup(semantic_id, valid_until);
   }
-
-  // 跨天清理选人层 ReID 排除项（评审 N03）：与 gate 锁存/provider 当日库
-  // 的日期清零同步。
-  void ClearReidDedupExclusions() { primary_manager_.ClearReidDedupExclusions(); }
 
  private:
   static bool IsTrustedPrimary(const PrimaryTargetResult &primary, int semantic_id);

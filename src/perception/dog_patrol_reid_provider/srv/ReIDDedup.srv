@@ -15,6 +15,15 @@ string event_id             # 感知事件 ID，可空（透传扩展位，当�
 uint8 status                # 0=调用成功 1=失败(参数缺失/图不可用/提特征失败)
 string track_id             # 回显请求的 track_id（对齐用）
 bool is_seen                # 今天是否见过（外观事实：本狗端侧或其他狗云端命中）
-bool handled                # 今天是否已完成处置（supervisor handled 结论经
-                            #   ReID 外观延续；false=未处置/仅见过，不能免处置）
+bool handled                # 是否仍在"重复核验忽略时长"内（supervisor handled 结论经
+                            #   ReID 外观延续且未到期；false=未处置/仅见过/忽略
+                            #   时长已过，不能免核验）
+float64 handled_until       # 免核验资格的固定截止时刻（系统墙钟 epoch 秒，绝对值，
+                            #   生成响应时一次性算定；0=无资格）。**权威字段**：
+                            #   检测侧应以本地墙钟与本时刻比较/折算，不得用
+                            #   "收到时刻 + 剩余秒数"重建截止——那会把编码/传输/
+                            #   调度延迟追加到有效期之后。来源=置位时刻 + provider
+                            #   参数 handled_ignore_seconds（平台"重复核验忽略
+                            #   时长"，默认 86400=24h，0=关闭）；资格跨天持续、
+                            #   跨重启按墙钟精确倒计时，到期重新完整核验。
 string error_message        # status=1 时非空，其余为空

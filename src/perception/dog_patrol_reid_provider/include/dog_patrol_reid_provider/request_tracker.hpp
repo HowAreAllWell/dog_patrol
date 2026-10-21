@@ -31,6 +31,8 @@ struct PendingCloud {
   std::string request_id;
   std::string local_reid_id;    // 该请求关联的端侧身份（迟到绑定的落点）
   std::string track_id;
+  uint64_t day_generation = 0;  // 身份解析（持 gallery 锁）时代次快照（跨日清理
+                                //   +1）；绑定响应校验，防昨日请求迟到回绑
   double await_deadline = 0.0;  // service 等待截止（steady 秒）；<=0 表示不等待（fire-and-forget）
   double expire_at = 0.0;       // 条目最终保留截止（迟到响应窗口）
   bool completed = false;       // 已收到响应
@@ -39,14 +41,19 @@ struct PendingCloud {
 
 class RequestTracker {
  public:
-  // 登记一条请求。await_deadline <= 0 表示 fire-and-forget（不阻塞等待）
+  // 登记一条请求。await_deadline <= 0 表示 fire-and-forget（不阻塞等待）。
+  // day_generation：解析/创建关联身份时（持 gallery 锁）固定的代次快照；
+  // 不得在发布后重读当前值——发布与登记之间跨日清理会把昨日请求登记为
+  // 今日请求，昨日编号迟到回绑将通过校验。
   void add(const std::string& request_id, const std::string& local_reid_id,
-           const std::string& track_id, double await_deadline, double expire_at) {
+           const std::string& track_id, double await_deadline, double expire_at,
+           uint64_t day_generation = 0) {  // 0 = 不校验（测试/旧路径）
     std::lock_guard<std::mutex> lk(mtx_);
     PendingCloud p;
     p.request_id = request_id;
     p.local_reid_id = local_reid_id;
     p.track_id = track_id;
+    p.day_generation = day_generation;
     p.await_deadline = await_deadline;
     p.expire_at = expire_at;
     pending_[request_id] = std::move(p);

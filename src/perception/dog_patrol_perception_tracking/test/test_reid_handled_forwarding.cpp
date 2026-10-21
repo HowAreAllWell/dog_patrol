@@ -34,7 +34,6 @@ class ReidHandledForwardingTest : public ::testing::Test {
         ::testing::UnitTest::GetInstance()->current_test_info();
     const std::string suffix = std::string("_") + info->name();
     handled_topic_ = "/reid_forward_test/handled" + suffix;
-    day_ = "2026-10-11";
 
     sub_node_ = rclcpp::Node::make_shared("reid_forward_sub" + suffix);
     handled_sub_ =
@@ -71,7 +70,6 @@ class ReidHandledForwardingTest : public ::testing::Test {
     ReidConfirmGate::Config gate_config;
     gate_config.service_name = "/reid_forward_test/dedup" + suffix;  // 不会被调用
     gate_config.handled_topic = handled_topic_;
-    gate_config.day_provider = [this]() { return day_; };
     gate_ = std::make_unique<ReidConfirmGate>(*adapter_node_, gate_config);
 
     runtime_ = std::make_unique<MissionTrackingRuntime>(
@@ -140,7 +138,6 @@ class ReidHandledForwardingTest : public ::testing::Test {
   }
 
   std::string handled_topic_;
-  std::string day_;
   rclcpp::Node::SharedPtr sub_node_;
   rclcpp::Subscription<dog_patrol_reid_provider::msg::ReIDHandled>::SharedPtr handled_sub_;
   rclcpp::executors::SingleThreadedExecutor sub_executor_;
@@ -163,7 +160,8 @@ TEST_F(ReidHandledForwardingTest, SameIdNewDayCompletionIsForwardedAgain) {
   ASSERT_TRUE(WaitForHandled(1));
   EXPECT_EQ(LastTrack(), "semantic-7");
 
-  day_ = "2026-10-12";  // 跨天：gate/provider/选人层当日状态已清
+  // 跨天：免核验资格与日期无关（由截止时刻治理），同一 ID 的新处置结论
+  // 经转换检测照常再次转发
   ASSERT_TRUE(Store(*adapter_, 101U, MissionStateMsg::VERIFY_IDENTITY, 7U, 0U));
   RunFrame();
   ASSERT_TRUE(Store(*adapter_, 102U, MissionStateMsg::RECOVER_PATROL, 7U, 7U));
@@ -203,7 +201,6 @@ TEST_F(ReidHandledForwardingTest, CrossDayRetainedSnapshotDoesNotRegrantToday) {
   RunFrame();
   ASSERT_TRUE(WaitForHandled(1));
 
-  day_ = "2026-10-12";
   ASSERT_TRUE(Store(*adapter_, 101U, MissionStateMsg::PATROL, 0U, 7U));
   RunFrame();
   RunFrame();

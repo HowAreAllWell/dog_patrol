@@ -19,33 +19,21 @@
 
 namespace dog_patrol_perception_tracking {
 
-namespace {
-// 本地日期 "yyyy-mm-dd"（与 dog_patrol_reid_provider 的库日清零同口径）
-std::string local_today() {
-  const std::time_t tt = std::time(nullptr);
-  const std::tm* tm_ptr = std::localtime(&tt);
-  if (tm_ptr == nullptr) {
-    return "1970-01-01";
-  }
-  std::tm tm_buf = *tm_ptr;
-  char buf[16];
-  std::snprintf(buf, sizeof(buf), "%04d-%02d-%02d",
-                tm_buf.tm_year + 1900, tm_buf.tm_mon + 1, tm_buf.tm_mday);
-  return std::string(buf);
-}
-}  // namespace
-
 // pimpl：helper 节点/线程与 rosidl 类型细节不进头文件。
 struct ReidConfirmGate::Impl {
   enum class Decision { kNone, kPending, kAllow, kSuppress };
   struct Entry {
     Decision state{Decision::kNone};
     std::chrono::steady_clock::time_point decided_at{};
+    // kSuppress 的有效期截止（"重复核验忽略时长"，随 provider 响应下发）；
+    // 到期后 Allow 落回重问，排除同步失效，同人重新核验
+    std::chrono::steady_clock::time_point suppress_until{};
     std::uint64_t pending_request_id{0};  // 在途问询的请求号（迟到响应校验）
     cv::Mat crop_cache;  // 最近一次问询的裁剪（NotifyHandled 的外观兜底）
   };
 
   using DedupSrv = dog_patrol_reid_provider::srv::ReIDDedup;
+  using SteadyTime = std::chrono::steady_clock::time_point;
 
   Config config;
   rclcpp::Logger logger{rclcpp::get_logger("reid_confirm_gate")};
@@ -56,10 +44,10 @@ struct ReidConfirmGate::Impl {
   rclcpp::executors::SingleThreadedExecutor executor;
   std::thread spinner;
 
-  std::mutex mtx;  // entries/exclusions/day/generation：帧线程与 helper 回调线程共享
+  std::mutex mtx;  // entries/exclusions/generation：帧线程与 helper 回调线程共享
   std::unordered_map<int, Entry> entries;
-  std::deque<int> exclusions;  // seen+handled，待注入选人资格（R04）
-  std::string day;             // 锁存结论所属日期（本地口径，跨天失效）
+  // seen+handled，待注入选人资格（R04），携带排除有效期截止时刻
+  std::deque<std::pair<int, SteadyTime>> exclusions;
   // 取消代次（N02）：reset/跨天时递增，在途回调凭发起时捕获的代次比对，
   // 不一致的旧响应整体丢弃，不得重建条目或排除
   std::uint64_t generation{1};
@@ -71,11 +59,35 @@ struct ReidConfirmGate::Impl {
                   std::shared_future<DedupSrv::Response::SharedPtr> fut) {
     bool suppress = false;
     bool seen_only = false;
+    bool bad_validity = false;
+    SteadyTime suppress_until{};
     try {
       const auto response = fut.get();
       if (response->status == 0) {
-        if (response->is_seen && response->handled) {
-          suppress = true;  // R06-A：见过且已处置才抑制
+        if (response->is_seen && response->handled &&
+            response->handled_until > 0.0) {
+          // 权威截止 = provider 生成响应时算定的绝对墙钟（epoch 秒）。在
+          // 到达时刻同步采样墙钟/单调钟并按差值换算本地截止：编码/传输/
+          // 调度延迟已被墙钟差自然吸收，不会顺延资格；到达时已过期
+          //（含延迟越过到期点）不抑制，按需重新核验处理
+          const auto steady_at_receipt = std::chrono::steady_clock::now();
+          const double wall_at_receipt =
+              std::chrono::duration<double>(
+                  std::chrono::system_clock::now().time_since_epoch())
+                  .count();
+          const double slack_sec = response->handled_until - wall_at_receipt;
+          if (slack_sec > 0.0) {
+            suppress = true;
+            // 浮点秒需显式转到时钟的整数时长（duration<double> 不能隐式
+            // 收窄为 steady_clock::duration，直接相加无法编译）
+            suppress_until =
+                steady_at_receipt +
+                std::chrono::duration_cast<std::chrono::steady_clock::duration>(
+                    std::chrono::duration<double>(slack_sec));
+          } else {
+            suppress = false;
+            bad_validity = true;
+          }
         } else if (response->is_seen) {
           seen_only = true;  // 见过但未处置：照常走处置流程
         }
@@ -84,8 +96,8 @@ struct ReidConfirmGate::Impl {
       // future 异常（服务中断等）：按无结论处理
     }
     std::lock_guard<std::mutex> lk(mtx);
-    // N02：迟到/失效响应直接丢弃，不得用 operator[] 重建条目——reset/跨天
-    // 后的旧响应、超时 fail-open 后的迟到结论、被新问询替代的旧请求都在此
+    // N02：迟到/失效响应直接丢弃，不得用 operator[] 重建条目——reset 后的
+    // 旧响应、超时 fail-open 后的迟到结论、被新问询替代的旧请求都在此
     // 拦下，避免旧结论污染新业务上下文。
     if (generation != this->generation) {
       return;
@@ -98,10 +110,18 @@ struct ReidConfirmGate::Impl {
     Entry& e = it->second;
     e.state = suppress ? Decision::kSuppress : Decision::kAllow;
     e.decided_at = std::chrono::steady_clock::now();
+    e.suppress_until = suppress_until;
     if (suppress) {
-      exclusions.push_back(target_id);
+      exclusions.emplace_back(target_id, suppress_until);
       RCLCPP_INFO(logger,
-                  "[reid_gate] semantic_id=%d 今天已见过且已处置，抑制 confirm_target",
+                  "[reid_gate] semantic_id=%d 已见过且已处置，%.0f 秒内抑制 "
+                  "confirm_target（到期重新核验）",
+                  target_id,
+                  std::chrono::duration<double>(suppress_until - e.decided_at)
+                      .count());
+    } else if (bad_validity) {
+      RCLCPP_WARN(logger,
+                  "[reid_gate] semantic_id=%d 响应到达时忽略时长已尽，放行重新核验",
                   target_id);
     } else {
       RCLCPP_INFO(logger,
@@ -118,7 +138,6 @@ ReidConfirmGate::ReidConfirmGate(rclcpp::Node& node, Config config) {
   impl_ = std::make_unique<Impl>();
   impl_->config = config;
   impl_->logger = node.get_logger();
-  impl_->day = config.day_provider ? config.day_provider() : local_today();
   impl_->helper = std::make_shared<rclcpp::Node>("perception_reid_confirm_gate");
   impl_->client =
       impl_->helper->create_client<Impl::DedupSrv>(config.service_name);
@@ -156,15 +175,19 @@ bool ReidConfirmGate::Allow(int target_id, const cv::Mat& crop) {
   Impl& impl = *impl_;
   const auto now = std::chrono::steady_clock::now();
   std::lock_guard<std::mutex> lk(impl.mtx);
-  // 跨天失效不在Allow里做（N03）：全员被排除时没有 confirm 事件、Allow
-  // 不会被调用；日期推进由每帧固定入口 SyncDay() 独立处理。
+  // 状态全部由截止时刻治理（kSuppress→suppress_until、kAllow→重问窗口、
+  // kPending→超时），无按日清理：免核验资格跨天持续（需求方确认），
+  // 全员被排除时也由各截止时刻自然到期释放，不依赖日期事件。
   if (impl.entries.size() >= impl.config.max_tracked) {
     impl.entries.clear();  // 容量自愈：最坏情况多问一轮
   }
   Impl::Entry& e = impl.entries[target_id];
   switch (e.state) {
     case Impl::Decision::kSuppress:
-      return false;  // 已见且已处置：对该 semantic_id 持续抑制
+      if (now < e.suppress_until) {
+        return false;  // 忽略时长内：持续抑制
+      }
+      break;  // 忽略时长已到：落回重问（provider 侧标记同时到期，重新核验）
     case Impl::Decision::kAllow:
       if (now - e.decided_at <
           std::chrono::duration<double>(impl.config.retry_interval_sec)) {
@@ -221,41 +244,22 @@ bool ReidConfirmGate::Allow(int target_id, const cv::Mat& crop) {
 }
 
 void ReidConfirmGate::DrainExclusions(
-    const std::function<void(int target_id)>& sink) {
+    const std::function<void(int target_id,
+                             std::chrono::steady_clock::time_point valid_until)>&
+        sink) {
   if (!impl_ || !sink) {
     return;
   }
-  std::deque<int> taken;
+  std::deque<std::pair<int, Impl::SteadyTime>> taken;
   {
     std::lock_guard<std::mutex> lk(impl_->mtx);
     taken.swap(impl_->exclusions);
   }
-  for (const int target_id : taken) {
-    sink(target_id);
+  for (const auto& [target_id, valid_until] : taken) {
+    sink(target_id, valid_until);
   }
 }
 
-bool ReidConfirmGate::SyncDay() {
-  if (!impl_) {
-    return false;
-  }
-  const std::string today =
-      impl_->config.day_provider ? impl_->config.day_provider() : local_today();
-  std::lock_guard<std::mutex> lk(impl_->mtx);
-  if (today == impl_->day) {
-    return false;
-  }
-  // N03：跨天独立失效——provider 当日库清零后，锁存结论、待注入的排除
-  // 队列与在途问询一并作废；调用方据此同步清理选人层的 ReID 排除项。
-  impl_->day = today;
-  impl_->entries.clear();
-  impl_->exclusions.clear();
-  ++impl_->generation;
-  RCLCPP_INFO(impl_->logger,
-              "[reid_gate] 跨天 %s：清空当日问询锁存/排除队列并作废在途响应",
-              today.c_str());
-  return true;
-}
 
 void ReidConfirmGate::NotifyHandled(int target_id) {
   if (!impl_ || target_id <= 0) {

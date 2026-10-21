@@ -76,18 +76,15 @@ void PrimaryTargetManager::ResetForPatrolCycle() {
   ResetCurrentPrimary();
 }
 
-void PrimaryTargetManager::ExcludeForReidDedup(const int semantic_id) {
+void PrimaryTargetManager::ExcludeForReidDedup(const int semantic_id,
+                                               const TimePoint valid_until) {
   if (semantic_id > 0) {
-    reid_dedup_excluded_ids_.insert(semantic_id);
+    reid_dedup_excluded_until_[semantic_id] = valid_until;
   }
 }
 
-void PrimaryTargetManager::ClearReidDedupExclusions() {
-  reid_dedup_excluded_ids_.clear();
-}
-
 void PrimaryTargetManager::ResetMissionHistory() {
-  reid_dedup_excluded_ids_.clear();
+  reid_dedup_excluded_until_.clear();
   last_mission_for_primary_.reset();
   ResetCurrentPrimary();
 }
@@ -104,9 +101,12 @@ void PrimaryTargetManager::ResetCurrentPrimary() {
   last_reject_reason_.clear();
 }
 
+// 资格以"表中存在且未到期"为准；到期项由 UpdateForPatrol 的每帧扫描先于
+// 选人清除（此处只查存在性，不取时钟，保证与选人同一时间口径）
 bool PrimaryTargetManager::IsMissionEligible(const IdentityObservation &identity) const {
   return identity.semantic_id > 0 &&
-         reid_dedup_excluded_ids_.find(identity.semantic_id) == reid_dedup_excluded_ids_.end();
+         reid_dedup_excluded_until_.find(identity.semantic_id) ==
+             reid_dedup_excluded_until_.end();
 }
 
 bool PrimaryTargetManager::IsVisibleIdentity(const IdentityObservation &identity) const {
@@ -261,7 +261,17 @@ PrimaryTargetResult PrimaryTargetManager::Update(const std::vector<IdentityObser
 }
 
 PrimaryTargetResult PrimaryTargetManager::UpdateForPatrol(const std::vector<IdentityObservation> &identities,
-                                                          const TimePoint /*now*/) {
+                                                          const TimePoint now) {
+  // "重复核验忽略时长"到期扫描：先于选人释放到期的排除项，同人当帧即可
+  // 重新被选并与核验（含在位 primary 的让位重评）
+  for (auto it = reid_dedup_excluded_until_.begin();
+       it != reid_dedup_excluded_until_.end();) {
+    if (now >= it->second) {
+      it = reid_dedup_excluded_until_.erase(it);
+    } else {
+      ++it;
+    }
+  }
   // 巡逻选人边界重评当前 primary 的资格（N01）：ReID 排除结论可能在持有
   // 期间异步注入，在位者失去资格时让出 primary 并重选其他有效候选；活动
   // 目标阶段（UpdateForActiveMissionTarget）仍只绑定 supervisor.target_id，
@@ -270,7 +280,8 @@ PrimaryTargetResult PrimaryTargetManager::UpdateForPatrol(const std::vector<Iden
       primary_target_id_ > 0 ? primary_target_id_
                              : (state_.primary_target_id > 0 ? state_.primary_target_id : -1);
   if (current_primary_id > 0 &&
-      reid_dedup_excluded_ids_.find(current_primary_id) != reid_dedup_excluded_ids_.end()) {
+      reid_dedup_excluded_until_.find(current_primary_id) !=
+          reid_dedup_excluded_until_.end()) {
     ResetCurrentPrimary();
   }
   return UpdateInternal(identities, true);

@@ -333,14 +333,10 @@ MissionFrameTransaction::Output MissionRosAdapter::ProcessFrame(
   return output;
 }
 
-void MissionRosAdapter::ExcludeForReidDedup(const int semantic_id) {
+void MissionRosAdapter::ExcludeForReidDedup(
+    const int semantic_id, const PrimaryTargetManager::TimePoint valid_until) {
   std::lock_guard<std::mutex> lock(mission_mutex_);
-  frame_transaction_.ExcludeForReidDedup(semantic_id);
-}
-
-void MissionRosAdapter::ClearReidDedupExclusions() {
-  std::lock_guard<std::mutex> lock(mission_mutex_);
-  frame_transaction_.ClearReidDedupExclusions();
+  frame_transaction_.ExcludeForReidDedup(semantic_id, valid_until);
 }
 
 }  // namespace dog_patrol_perception_tracking

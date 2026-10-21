@@ -16,8 +16,10 @@
 //   S6b 狗A关机充电(当日库落盘)->重启恢复：端侧直接命中（不依赖云端）
 //   S7 人脸结论落云端库(set_match_type)：后续命中透传 match_type=白
 //   S8 云端超时降级+迟到绑定（RequestTracker）
-//   S9 跨天：端侧库+云端库同时清零，序号重计
+//   S9 跨天：当日事实清零（无有效免核验标记时全清）、序号重计
 //   S10 handled语义(R06-A)：处置完成换新track再遇 -> seen+handled 透传
+//   S11 在途请求跨日：代次随身份解析固定，登记/响应晚于跨日清理 ->
+//       昨日编号迟到回绑被拒（评审竞态回归）
 #include <cmath>
 #include <cstdio>
 #include <map>
@@ -278,7 +280,7 @@ int main() {
     CHECK(ga3->get(lid, rec) && rec.global_person_id == "global-person-00003");
   }
 
-  // S9 跨天：所有库清零、序号重计
+  // S9 跨天：当日事实清零、序号重计（本剧本人员无有效免核验标记）
   *day = "2026-09-29";
   r = encounter(w, *ga3, "m20-001", unit(0), "t-a1");
   report("S9", "次日狗A 遇 P1——全部清零，重新当新人", r);
@@ -301,10 +303,46 @@ int main() {
   CHECK(r.is_seen && !r.via_cloud && r.handled);
   delete ga5;
 
+  // S11 在途请求跨日（评审竞态回归）：代次必须在解析身份的临界区固定。
+  // 竞态时序：昨日解析身份并发布请求 -> 跨日清理（代次+1、剥离绑定）->
+  // 登记沿用解析时快照（不得重读当前值）-> 昨日编号迟到响应按快照拒绝回绑
+  {
+    auto day2 = std::make_shared<std::string>("2026-09-30");
+    IdentityGallery::Config cfg;
+    IdentityGallery gy(cfg, [day2] { return *day2; });
+    const std::string lid = gy.create(unit(9), "t-z1", w.now);
+    CHECK(gy.set_handled_by_track("t-z1"));
+    const uint64_t gen_req = gy.day_generation();  // 解析身份时固定（持锁快照）
+
+    *day2 = "2026-10-01";  // 发布与登记之间发生跨日清理（竞态窗口）
+    CHECK(gy.check_daily_reset());
+    CHECK(gy.day_generation() == gen_req + 1);
+    IdentityRecord rz;
+    CHECK(gy.get(lid, rz) && rz.handled && rz.global_person_id.empty());
+
+    RequestTracker tr2;
+    tr2.add("req-cross-day", lid, "t-z1", 0.0, w.now + 60.0, gen_req);
+    CloudOutcome oc2;
+    oc2.succeeded = true;
+    oc2.is_match = true;
+    oc2.global_person_id = "global-person-00009";  // 昨日编号（云端每日清零复用）
+    oc2.match_type = 0;
+    PendingCloud info2;
+    CHECK(tr2.on_response("req-cross-day", oc2, info2));
+    CHECK(info2.day_generation == gen_req);
+    CHECK(!gy.bind_global(info2.local_reid_id, oc2.global_person_id,
+                          oc2.match_type, info2.day_generation));  // 拒绝回绑
+    CHECK(gy.get(lid, rz) && rz.global_person_id.empty() && rz.handled);
+    CHECK(gy.bind_global(lid, "global-person-00009", 0,
+                         gy.day_generation()));  // 今日请求正常绑定
+    std::printf("[S11] 在途请求跨日：解析时代次登记，昨日编号迟到回绑被拒"
+                "（handled 资格保留）\n");
+  }
+
   delete ga3;
   delete gb;
   std::printf("\n%d/%d passed — 逻辑链路(端侧判定/云端合并/扇出/重启找回/"
-              "迟到绑定/跨天清零)全部按预期\n",
+              "迟到绑定/跨天清零/跨日在途拒绝回绑)全部按预期\n",
               g_total - g_fail, g_total);
   return g_fail == 0 ? 0 : 1;
 }
