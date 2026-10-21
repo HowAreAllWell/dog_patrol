@@ -489,13 +489,15 @@ def test_passed_evidence_selects_actual_pass_crop():
         controller.stop()
 
 
-def test_initial_not_passed_evidence_selects_first_crop():
+def test_not_passed_evidence_selects_first_detected_face():
     class AlwaysMiss:
         def reset(self):
             pass
 
         def verify(self, _crop):
-            return FaceVerification(False, True, "no match", similarity=0.42)
+            return FaceVerification(
+                False, True, "no match", box=(1, 1, 8, 8), similarity=0.42
+            )
 
     evidence = []
     saved_frames = []
@@ -518,11 +520,12 @@ def test_initial_not_passed_evidence_selects_first_crop():
         assert saved_frames == [10]
         assert evidence[0].result is FaceEvidenceResult.NOT_PASSED
         assert evidence[0].image_url == "file:///start.jpg"
+        assert evidence[0].similarity == 0.42
     finally:
         controller.stop()
 
 
-def test_initial_first_crop_survives_factory_delay_and_latest_only_queue():
+def test_failure_uses_first_face_processed_after_factory_delay():
     release_factory = threading.Event()
 
     class AlwaysMiss:
@@ -530,7 +533,9 @@ def test_initial_first_crop_survives_factory_delay_and_latest_only_queue():
             pass
 
         def verify(self, _crop):
-            return FaceVerification(False, True, "no match")
+            return FaceVerification(
+                False, True, "no match", box=(1, 1, 8, 8), similarity=0.31
+            )
 
     def delayed_factory():
         release_factory.wait(timeout=2.0)
@@ -556,14 +561,15 @@ def test_initial_first_crop_survives_factory_delay_and_latest_only_queue():
         deadline = time.monotonic() + 1.0
         while not evidence and time.monotonic() < deadline:
             time.sleep(0.01)
-        assert saved_frames == [10]
+        assert saved_frames == [11]
         assert evidence[0].result is FaceEvidenceResult.NOT_PASSED
+        assert evidence[0].similarity == 0.31
     finally:
         release_factory.set()
         controller.stop()
 
 
-def test_initial_first_crop_is_fixed_when_images_arrive_after_window_starts():
+def test_failure_uses_first_face_processed_after_window_starts():
     window_waiting = threading.Event()
     release_queue = threading.Event()
 
@@ -572,7 +578,9 @@ def test_initial_first_crop_is_fixed_when_images_arrive_after_window_starts():
             pass
 
         def verify(self, _crop):
-            return FaceVerification(False, True, "no match")
+            return FaceVerification(
+                False, True, "no match", box=(1, 1, 8, 8), similarity=0.31
+            )
 
     evidence = []
     saved_frames = []
@@ -607,8 +615,9 @@ def test_initial_first_crop_is_fixed_when_images_arrive_after_window_starts():
         deadline = time.monotonic() + 1.0
         while not evidence and time.monotonic() < deadline:
             time.sleep(0.01)
-        assert saved_frames == [10]
+        assert saved_frames == [11]
         assert evidence[0].result is FaceEvidenceResult.NOT_PASSED
+        assert evidence[0].similarity == 0.31
     finally:
         release_queue.set()
         controller.stop()
