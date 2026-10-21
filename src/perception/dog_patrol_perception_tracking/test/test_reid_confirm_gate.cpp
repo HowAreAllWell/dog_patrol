@@ -42,6 +42,7 @@ class MockDedupService {
     int status{0};
     bool is_seen{false};
     bool handled{false};
+    double until_wall{0.0};     // handled=true 时随响应下发的固定截止（epoch 秒）
     std::string track_id;
   };
 
@@ -67,6 +68,7 @@ class MockDedupService {
           response->status = waiter->status;
           response->is_seen = waiter->is_seen;
           response->handled = waiter->handled;
+          response->handled_until = waiter->handled ? waiter->until_wall : 0.0;
           response->track_id = waiter->track_id;
           response->error_message.clear();
           (void)request;
@@ -108,8 +110,16 @@ class MockDedupService {
     return waiters_.size() > index;
   }
 
-  // 释放第 index 个请求并指定应答（未到达则记失败并返回）。
-  void Respond(const std::size_t index, const bool is_seen, const bool handled) {
+  static double WallEpochNow() {
+    return std::chrono::duration<double>(
+               std::chrono::system_clock::now().time_since_epoch())
+        .count();
+  }
+
+  // 释放第 index 个请求并指定应答（未到达则记失败并返回）。until_wall 为
+  // handled=true 时的固定截止（epoch 秒）；缺省 = 当前时刻 + 1 小时。
+  void Respond(const std::size_t index, const bool is_seen, const bool handled,
+               const double until_wall = -1.0) {
     const auto waiter = AwaitRequest(index);
     if (waiter == nullptr) {
       ADD_FAILURE() << "mock request " << index << " 未在期限内到达";
@@ -118,6 +128,7 @@ class MockDedupService {
     std::lock_guard<std::mutex> lk(waiter->mtx);
     waiter->is_seen = is_seen;
     waiter->handled = handled;
+    waiter->until_wall = until_wall > 0.0 ? until_wall : WallEpochNow() + 3600.0;
     waiter->released = true;
     waiter->cv.notify_all();
   }
@@ -139,7 +150,6 @@ class ReidConfirmGateTest : public ::testing::Test {
     const ::testing::TestInfo *info =
         ::testing::UnitTest::GetInstance()->current_test_info();
     service_name_ = std::string("/reid_gate_test_") + info->name();
-    day_ = "2026-10-10";
     mock_ = std::make_unique<MockDedupService>(service_name_);
     harness_ = rclcpp::Node::make_shared("reid_gate_test_harness");
   }
@@ -160,7 +170,6 @@ class ReidConfirmGateTest : public ::testing::Test {
     cfg.handled_topic = service_name_ + "_handled";
     cfg.timeout_ms = timeout_ms;
     cfg.retry_interval_sec = retry_sec;
-    cfg.day_provider = [this]() { return day_; };
     gate_ = std::make_unique<ReidConfirmGate>(*harness_, cfg);
     crop_ = cv::Mat(128, 64, CV_8UC3, cv::Scalar(30, 40, 50));
     // 给 DDS 一点发现时间（服务未就绪时 Allow 会 fail-open 短暂锁存）
@@ -194,14 +203,23 @@ class ReidConfirmGateTest : public ::testing::Test {
 
   std::vector<int> Drain() {
     std::vector<int> taken;
-    gate_->DrainExclusions([&taken](const int id) { taken.push_back(id); });
+    gate_->DrainExclusions(
+        [&taken](const int id, std::chrono::steady_clock::time_point) {
+          taken.push_back(id);
+        });
     return taken;
   }
 
-  // 有界轮询等待排除事件到达（正向观察，不用固定 sleep）
-  std::vector<int> AwaitExclusions(const int expected_count) {
+  // 有界轮询等待排除事件到达，返回 (目标 ID, 有效期截止) 对
+  std::vector<std::pair<int, std::chrono::steady_clock::time_point>>
+  AwaitExclusionsWithUntil(const int expected_count) {
+    std::vector<std::pair<int, std::chrono::steady_clock::time_point>> taken;
     for (int i = 0; i < 400; ++i) {
-      std::vector<int> taken = Drain();
+      taken.clear();
+      gate_->DrainExclusions(
+          [&taken](const int id, std::chrono::steady_clock::time_point until) {
+            taken.emplace_back(id, until);
+          });
       if (static_cast<int>(taken.size()) >= expected_count) {
         return taken;
       }
@@ -211,7 +229,6 @@ class ReidConfirmGateTest : public ::testing::Test {
   }
 
   std::string service_name_;
-  std::string day_;
   cv::Mat crop_;
   rclcpp::Node::SharedPtr harness_;
   std::unique_ptr<MockDedupService> mock_;
@@ -232,9 +249,9 @@ TEST_F(ReidConfirmGateTest, ResetInvalidatesInFlightResponse) {
   ASSERT_FALSE(gate_->Allow(7, crop_));  // reset 后重新问询（新代次）
   ASSERT_TRUE(mock_->AwaitRequest(1) != nullptr);
   mock_->Respond(1, true, true);
-  const auto drained = AwaitExclusions(1);
+  const auto drained = AwaitExclusionsWithUntil(1);
   ASSERT_EQ(drained.size(), 1u);
-  EXPECT_EQ(drained[0], 7);
+  EXPECT_EQ(drained[0].first, 7);
 }
 
 TEST_F(ReidConfirmGateTest, HandledResultInvalidatesCachedAllowAndQueriesReidAgain) {
@@ -247,9 +264,9 @@ TEST_F(ReidConfirmGateTest, HandledResultInvalidatesCachedAllowAndQueriesReidAga
   ASSERT_FALSE(gate_->Allow(7, crop_));
   ASSERT_TRUE(mock_->AwaitRequest(1) != nullptr);
   mock_->Respond(1, true, true);
-  const auto exclusions = AwaitExclusions(1);
+  const auto exclusions = AwaitExclusionsWithUntil(1);
   ASSERT_EQ(exclusions.size(), 1U);
-  EXPECT_EQ(exclusions.front(), 7);
+  EXPECT_EQ(exclusions.front().first, 7);
   EXPECT_FALSE(gate_->Allow(7, crop_));
 }
 
@@ -333,9 +350,9 @@ TEST_F(ReidConfirmGateTest, OutOfOrderQ2SuppressThenLateQ1AllowCannotUnlock) {
   ASSERT_TRUE(mock_->AwaitRequest(1) != nullptr);
 
   mock_->Respond(1, true, true);           // Q2 suppress 先返回
-  const auto drained = AwaitExclusions(1);
+  const auto drained = AwaitExclusionsWithUntil(1);
   ASSERT_EQ(drained.size(), 1u);
-  EXPECT_EQ(drained[0], 7);
+  EXPECT_EQ(drained[0].first, 7);
 
   mock_->Respond(0, false, false);         // Q1 allow 迟到
   std::this_thread::sleep_for(150ms);
@@ -343,23 +360,25 @@ TEST_F(ReidConfirmGateTest, OutOfOrderQ2SuppressThenLateQ1AllowCannotUnlock) {
   EXPECT_TRUE(Drain().empty());            // 无新增排除
 }
 
-// N03：跨天清理独立于 Allow 触发；锁存抑制与排除队列一并失效。
-TEST_F(ReidConfirmGateTest, DayRolloverClearsLatchedSuppressWithoutAllow) {
-  MakeGate(3000);
+// "重复核验忽略时长"到期：kSuppress 锁存失效并自动重问；排除截止时刻随
+// provider 响应的剩余量下发。
+TEST_F(ReidConfirmGateTest, SuppressExpiresWithIgnoreWindowAndRequeries) {
+  MakeGate(3000, 5.0);
   ASSERT_TRUE(UntilQueried(7));
-  mock_->Respond(0, true, true);  // seen+handled → 锁存 kSuppress + 排除
-  ASSERT_EQ(AwaitExclusions(1).size(), 1u);
-  ASSERT_FALSE(gate_->Allow(7, crop_));  // kSuppress：持续抑制
+  const auto before = std::chrono::steady_clock::now();
+  const double until = MockDedupService::WallEpochNow() + 0.15;  // 免核验 0.15 秒
+  mock_->Respond(0, true, true, until);
+  const auto taken = AwaitExclusionsWithUntil(1);
+  ASSERT_EQ(taken.size(), 1u);
+  EXPECT_EQ(taken[0].first, 7);
+  EXPECT_GT(taken[0].second, before);  // 截止时刻在未来，且与剩余量同量级
+  EXPECT_LT(taken[0].second, before + 2s);
+  ASSERT_FALSE(gate_->Allow(7, crop_));  // 忽略时长内：抑制
 
-  day_ = "2026-10-11";
-  EXPECT_TRUE(gate_->SyncDay());   // 跨天：不依赖任何 confirm 事件
-  EXPECT_FALSE(gate_->SyncDay());  // 同日重复调用
-  EXPECT_TRUE(Drain().empty());    // 待注入的旧排除也一并清掉
-
-  ASSERT_FALSE(gate_->Allow(7, crop_));  // 锁存已清：重新问询
+  std::this_thread::sleep_for(250ms);    // 越过忽略时长
+  EXPECT_FALSE(gate_->Allow(7, crop_));  // kSuppress 到期：落回重问（Q2 pending）
   ASSERT_TRUE(mock_->AwaitRequest(1) != nullptr);
-  mock_->Respond(1, true, false);        // 新一天口径：见过但未处置
-  // timeout=3000，此 true 只能来自 Q2 的真实响应（不会被 fail-open 满足）
+  mock_->Respond(1, true, false);        // 忽略时长已过：见过但需重新核验
   bool allowed = false;
   for (int i = 0; i < 30 && !allowed; ++i) {
     allowed = gate_->Allow(7, crop_);
@@ -371,17 +390,42 @@ TEST_F(ReidConfirmGateTest, DayRolloverClearsLatchedSuppressWithoutAllow) {
   EXPECT_TRUE(Drain().empty());
 }
 
-// N03：跨天同时作废在途问询——跨天后返回的旧响应直接丢弃。
-TEST_F(ReidConfirmGateTest, DayRolloverInvalidatesInFlightQuery) {
-  MakeGate(3000);
+// 响应到达时忽略时长已尽（含延迟越过到期点）：不得建立抑制/排除，
+// 按需重新核验处理。
+TEST_F(ReidConfirmGateTest, ExpiredResponseOnArrivalDoesNotSuppress) {
+  // retry=5s：放行窗口须覆盖下方 150ms 稳定等待——默认 0.1s 会在断言前
+  // 落回重问，轮询窗口内条目停留在 kPending 永远等不到放行
+  MakeGate(3000, 5.0);
   ASSERT_TRUE(UntilQueried(7));
-  ASSERT_TRUE(mock_->AwaitRequest(0) != nullptr);
-
-  day_ = "2026-10-11";
-  ASSERT_TRUE(gate_->SyncDay());
-  mock_->Respond(0, true, true);
+  // 截止定在"生成时刻"之前——即使 provider 判 handled=true，到达即过期
+  mock_->Respond(0, true, true, MockDedupService::WallEpochNow() - 0.05);
   std::this_thread::sleep_for(150ms);
-  EXPECT_TRUE(Drain().empty());
+  EXPECT_TRUE(Drain().empty());              // 无排除建立
+  bool allowed = false;                      // 条目落为放行（timeout=3000，
+  for (int i = 0; i < 30 && !allowed; ++i) { // 不会被 fail-open 满足）
+    allowed = gate_->Allow(7, crop_);
+    if (!allowed) {
+      std::this_thread::sleep_for(10ms);
+    }
+  }
+  EXPECT_TRUE(allowed);
+}
+
+// 有传输延迟但未过期：抑制截止锚定 provider 生成的固定截止时刻，
+// 不因"到达时刻 + 剩余量"顺延。
+TEST_F(ReidConfirmGateTest, DelayedResponseKeepsProviderDeadline) {
+  MakeGate(3000, 5.0);
+  ASSERT_TRUE(UntilQueried(7));
+  const double deadline = MockDedupService::WallEpochNow() + 0.4;  // 生成时刻起 0.4s
+  std::this_thread::sleep_for(250ms);       // 模拟编码/传输/调度延迟
+  const auto before_receipt = std::chrono::steady_clock::now();
+  mock_->Respond(0, true, true, deadline);
+  const auto taken = AwaitExclusionsWithUntil(1);
+  ASSERT_EQ(taken.size(), 1u);
+  EXPECT_EQ(taken[0].first, 7);
+  // 截止 ≈ 生成时刻 + 0.4s（到达后剩余 ≈ 0.15s），而非 到达时刻 + 0.4s（≈0.65s）
+  EXPECT_GT(taken[0].second, before_receipt);
+  EXPECT_LT(taken[0].second, before_receipt + 250ms);
 }
 
 // 未启用的 gate 恒放行（reid.enable=false 与 merge 行为一致）。

@@ -87,12 +87,10 @@ class MissionRosAdapter {
       const std::function<bool(int target_id)> *confirm_gate = nullptr);
 
   // ReID 去重排除注入（评审 R04）：进入选人资格边界（PrimaryTargetManager
-  // 排除表）。线程安全：内部持 mission_mutex_，可在帧处理路径调用。
-  void ExcludeForReidDedup(int semantic_id);
-
-  // 跨天清理选人层 ReID 排除项（评审 N03）：与 gate 的 SyncDay 配对调用；
-  // 线程安全：内部持 mission_mutex_。
-  void ClearReidDedupExclusions();
+  // 排除表），携带有效期截止（"重复核验忽略时长"随 gate 结论下发）。
+  // 线程安全：内部持 mission_mutex_，可在帧处理路径调用。
+  void ExcludeForReidDedup(int semantic_id,
+                           PrimaryTargetManager::TimePoint valid_until);
 
  private:
   static std::optional<MissionPhase> MissionPhaseFromMessage(std::uint8_t state);

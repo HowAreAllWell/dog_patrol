@@ -6,15 +6,21 @@
 #include "dog_patrol_perception_tracking/modules/mission_coordinator.hpp"
 #include "dog_patrol_perception_tracking/modules/primary_target_manager.hpp"
 
-// ReID 去重排除与选人边界的行为回归（评审 N01/N03/N04）。
-// 契约（N04，与 gate/provider 同口径）：supervisor 处置过的人当天免重复
-// 处置——ReID 排除项当日有效，不随持续不可见释放；跨天（ClearReidDedup
-// Exclusions）与 STARTUP/reset（ResetMissionHistory）才清除；业务 handled
-// 表的 60 秒不可见释放规则不受影响。
+// ReID 去重排除与选人边界的行为回归（评审 N01/N03/N04 + 重复核验忽略时长）。
+// 契约（与 gate/provider 同口径）：核验通过的人在"重复核验忽略时长"内免
+// 重复核验——ReID 排除项携带有效期截止，到期在巡逻选人边界自动释放（同人
+// 重新可选、重新核验）；不随持续不可见释放，跨天持续（资格由截止时刻
+// 治理，无按日清理）；STARTUP/reset（ResetMissionHistory）提前全清。
 namespace {
 
 using namespace dog_patrol_perception_tracking;
 using namespace std::chrono_literals;
+
+// 测试辅助：相对本文件假时间轴（epoch 附近）的排除截止时刻；默认给足
+// 余量等效"长忽略时长"，到期释放行为单独用例覆盖
+PrimaryTargetManager::TimePoint ExcludedUntil() {
+  return PrimaryTargetManager::TimePoint{} + 24h;
+}
 
 dog_patrol_perception_tracking::IdentityObservation MakePerson(const int sid, const int raw_id,
                                                    const cv::Rect2f &bbox) {
@@ -52,7 +58,7 @@ TEST(ReidDedupExclusionTest, ExclusionReleasesCurrentPatrolPrimaryForNextCandida
   const auto first = mgr.UpdateForPatrol({a, b}, now);
   ASSERT_EQ(first.primary_target_id, 11);
 
-  mgr.ExcludeForReidDedup(11);
+  mgr.ExcludeForReidDedup(11, ExcludedUntil());
   const auto second = mgr.UpdateForPatrol({a, b}, now + 1s);
   ASSERT_TRUE(second.primary_track.has_value());
   EXPECT_EQ(second.primary_target_id, 22);
@@ -71,8 +77,8 @@ TEST(ReidDedupExclusionTest, ExclusionOfEveryVisibleCandidateLeavesPatrolIdle) {
 
   ASSERT_EQ(mgr.UpdateForPatrol({a, b}, now).primary_target_id, 11);
 
-  mgr.ExcludeForReidDedup(11);
-  mgr.ExcludeForReidDedup(22);
+  mgr.ExcludeForReidDedup(11, ExcludedUntil());
+  mgr.ExcludeForReidDedup(22, ExcludedUntil());
   const auto state = mgr.UpdateForPatrol({a, b}, now + 1s);
   EXPECT_EQ(state.state, PrimaryState::kIdle);
   EXPECT_EQ(state.primary_target_id, -1);
@@ -91,7 +97,7 @@ TEST(ReidDedupExclusionTest, ExclusionOfNonPrimaryDoesNotDisturbCurrentPrimary) 
 
   ASSERT_EQ(mgr.UpdateForPatrol({a, b}, now).primary_target_id, 11);
 
-  mgr.ExcludeForReidDedup(22);
+  mgr.ExcludeForReidDedup(22, ExcludedUntil());
   const auto state = mgr.UpdateForPatrol({a, b}, now + 1s);
   ASSERT_TRUE(state.primary_track.has_value());
   EXPECT_EQ(state.primary_target_id, 11);
@@ -111,7 +117,7 @@ TEST(ReidDedupExclusionTest, ExclusionDoesNotReplaceActiveMissionTarget) {
 
   ASSERT_EQ(mgr.UpdateForMission({a}, patrol, std::nullopt, now).primary_target_id, 11);
 
-  mgr.ExcludeForReidDedup(11);
+  mgr.ExcludeForReidDedup(11, ExcludedUntil());
   const auto state =
       mgr.UpdateForMission({a, larger_other}, approach, patrol, now + 1s);
   ASSERT_EQ(state.state, PrimaryState::kLocked);
@@ -131,7 +137,7 @@ TEST(ReidDedupExclusionTest, ExclusionSurvivesAbsenceAndNewPatrolCycle) {
 
   ASSERT_EQ(mgr.UpdateForPatrol({a, b}, start).primary_target_id, 11);
 
-  mgr.ExcludeForReidDedup(11);
+  mgr.ExcludeForReidDedup(11, ExcludedUntil());
   mgr.UpdateForPatrol({}, start + 1s);
   mgr.UpdateForPatrol({}, start + 61s);
   EXPECT_FALSE(mgr.IsMissionEligible(a));
@@ -142,25 +148,38 @@ TEST(ReidDedupExclusionTest, ExclusionSurvivesAbsenceAndNewPatrolCycle) {
   EXPECT_EQ(state.primary_target_id, 22);
 }
 
-// 跨天清理让所有被 ReID 排除的身份重新具备巡逻选择资格。
-TEST(ReidDedupExclusionTest, ClearReidDedupExclusionsRestoresEligibility) {
+// "重复核验忽略时长"到期：排除在巡逻选人边界自动释放，A 恢复选人资格；
+// 在位的可见 primary（B）不因此被抢占（保持 merge 的选人连续性），B 离开
+// 后 A 重新当选。
+TEST(ReidDedupExclusionTest, ExclusionExpiresAtDeadlineAndPersonIsReselectable) {
   PrimaryTargetManager::Config cfg;
   cfg.min_person_area_px = 100.0F;
   PrimaryTargetManager mgr(cfg);
-  const PrimaryTargetManager::TimePoint now{};
+  const PrimaryTargetManager::TimePoint start{};
 
   const auto a = MakePerson(11, 101, cv::Rect2f(0, 0, 80, 80));
   const auto b = MakePerson(22, 202, cv::Rect2f(100, 0, 60, 60));
 
-  mgr.ExcludeForReidDedup(22);
-  mgr.ExcludeForReidDedup(11);
-  mgr.ClearReidDedupExclusions();
+  ASSERT_EQ(mgr.UpdateForPatrol({a, b}, start).primary_target_id, 11);
 
-  EXPECT_TRUE(mgr.IsMissionEligible(a));
-  EXPECT_TRUE(mgr.IsMissionEligible(b));
-  const auto state = mgr.UpdateForPatrol({a, b}, now);
+  const auto ignore_until = start + 60s;  // 忽略时长 60 秒
+  mgr.ExcludeForReidDedup(11, ignore_until);
+  EXPECT_EQ(mgr.UpdateForPatrol({a, b}, start + 1s).primary_target_id, 22);
+  EXPECT_EQ(mgr.UpdateForPatrol({a, b}, start + 59s).primary_target_id, 22);
+  EXPECT_FALSE(mgr.IsMissionEligible(a));
+
+  // 到期释放：A 资格恢复；B 仍可见且在位，保持为 primary（不按面积抢占；
+  // B 单帧消失只进入遮挡等待，不触发换选——与选人保持逻辑一致）
+  const auto state = mgr.UpdateForPatrol({a, b}, start + 60s);
   ASSERT_TRUE(state.primary_track.has_value());
-  EXPECT_EQ(state.primary_target_id, 11);
+  EXPECT_EQ(state.primary_target_id, 22);
+  EXPECT_TRUE(mgr.IsMissionEligible(a));
+
+  // 新巡逻周期重选：资格恢复的 A 按面积重新当选
+  mgr.ResetForPatrolCycle();
+  const auto reselected = mgr.UpdateForPatrol({a, b}, start + 61s);
+  ASSERT_TRUE(reselected.primary_track.has_value());
+  EXPECT_EQ(reselected.primary_target_id, 11);
 }
 
 // reset（重进 STARTUP）清除 ReID 排除项，被排除者恢复可选。
@@ -175,7 +194,7 @@ TEST(ReidDedupExclusionTest, StartupResetClearsReidDedupExclusions) {
   const MissionSnapshot startup{20U, MissionPhase::kStartup, 0, 0};
 
   ASSERT_EQ(mgr.UpdateForMission({a}, patrol, std::nullopt, now).primary_target_id, 11);
-  mgr.ExcludeForReidDedup(11);
+  mgr.ExcludeForReidDedup(11, ExcludedUntil());
   EXPECT_FALSE(mgr.IsMissionEligible(a));
 
   mgr.UpdateForMission({a}, startup, patrol, now + 1s);

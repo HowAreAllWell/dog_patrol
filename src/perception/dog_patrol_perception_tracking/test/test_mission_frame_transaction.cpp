@@ -228,7 +228,7 @@ TEST(MissionFrameTransactionTest, FailedPeopleRemainSelectableAfterReidExcludesA
   transaction.Update({verify, std::nullopt, people, start, Metadata()});
   transaction.Update({authorized_recovery, verify, people, start + 1s, Metadata()});
   // Only an explicit ReID conclusion excludes A from subsequent selection.
-  transaction.ExcludeForReidDedup(11);
+  transaction.ExcludeForReidDedup(11, start + std::chrono::hours{24});
   auto output = transaction.Update(
       {patrol_after_a, authorized_recovery, people, start + 2s, Metadata()});
   ASSERT_EQ(output.primary.primary_target_id, 22);

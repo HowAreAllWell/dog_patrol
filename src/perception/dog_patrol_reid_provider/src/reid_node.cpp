@@ -182,6 +182,18 @@ class ReidNode : public rclcpp::Node {
         declare_parameter<double>("track_assoc_threshold", 0.50));
     gcfg.max_identities =
         static_cast<size_t>(declare_parameter<int>("max_identities", 10000));
+    // 平台配置项"重复核验忽略时长"：核验通过后该秒数内同人免重复核验，
+    // 到期重新完整核验（资格跨天持续，凌晨清库保留仍有效的标记）；0=关闭。
+    // 负值按 0 处理。
+    handled_ignore_sec_ = declare_parameter<double>("handled_ignore_seconds",
+                                                    86400.0);
+    if (handled_ignore_sec_ < 0.0) {
+      RCLCPP_WARN(get_logger(),
+                  "handled_ignore_seconds=%f 为负，按 0（关闭免核验）处理",
+                  handled_ignore_sec_);
+      handled_ignore_sec_ = 0.0;
+    }
+    gcfg.handled_ttl_sec = handled_ignore_sec_;
     gallery_ = std::make_unique<IdentityGallery>(gcfg);
     track_ttl_sec_ = declare_parameter<double>("track_ttl_sec", 300.0);
     update_min_delta_ = declare_parameter<double>("update_min_delta", 0.01);
@@ -205,18 +217,21 @@ class ReidNode : public rclcpp::Node {
       const auto lr = gallery_->LoadLatest(persist_path_, meta);
       switch (lr.status) {
         case IdentityGallery::LoadStatus::kOk:
-          RCLCPP_INFO(get_logger(),
-                      "已从 %s 恢复当日库：%zu 个身份%s（重启不清零，跨天自动作废）",
-                      persist_path_.c_str(), lr.records,
-                      lr.from_tmp ? "，自残留临时文件提升" : "");
+          if (lr.adopted_cross_day) {
+            RCLCPP_INFO(get_logger(),
+                        "库文件 %s 为其他日期：仅恢复 %zu 条仍在忽略期内的免核验"
+                        "记录（资格跨天持续），其余当日事实按每日清零丢弃",
+                        persist_path_.c_str(), lr.records);
+          } else {
+            RCLCPP_INFO(get_logger(),
+                        "已从 %s 恢复当日库：%zu 个身份%s（当日事实每日清零；免核验"
+                        "资格按墙钟跨天/跨重启持续）",
+                        persist_path_.c_str(), lr.records,
+                        lr.from_tmp ? "，自残留临时文件提升" : "");
+          }
           break;
         case IdentityGallery::LoadStatus::kMissing:
           break;  // 首次启动，无文件属正常
-        case IdentityGallery::LoadStatus::kWrongDay:
-          RCLCPP_INFO(get_logger(),
-                      "库文件 %s 为其他日期（每日清零设计），从空库开始",
-                      persist_path_.c_str());
-          break;
         case IdentityGallery::LoadStatus::kModelMismatch:
           RCLCPP_WARN(get_logger(),
                       "库文件 %s 模型/版本不符，不加载，从空库开始",
@@ -413,24 +428,37 @@ class ReidNode : public rclcpp::Node {
       }
     }
     IdentityRecord rec;
+    uint64_t req_gen = 0;
     {
       std::lock_guard<std::mutex> lk(gallery_mtx_);
       gallery_->get(sr.local_reid_id, rec);
+      // 代次与身份读取同一临界区固定：解析与发布/登记之间跨日时，请求仍按
+      // 解析时的代次校验（宁可误拒一次今日边界绑定，下次命中自愈）
+      req_gen = gallery_->day_generation();
     }
     resp.status = kStatusOk;
     resp.is_seen = true;
-    resp.handled = rec.handled;  // 已处置结论随命中透传（换 track/重启仍有效）
+    // 已处置结论随命中透传（换 track 仍有效）。截止时刻为生成响应时一次性
+    // 算定的绝对墙钟（置位时刻+忽略时长）：编码/传输/调度延迟不再顺延资格，
+    // 检测侧按 handled_until 与本地墙钟比较即可。
+    resp.handled_until =
+        rec.handled && rec.handled_epoch_sec > 0.0
+            ? rec.handled_epoch_sec + handled_ignore_sec_
+            : 0.0;
+    resp.handled = resp.handled_until > IdentityGallery::WallEpochSec();
 
     if (cloud_enable_ && quality_ok && delta >= 0.0F &&
         delta >= update_min_delta_) {
-      publish_upsert(sr.local_reid_id, req.track_id, rec.tmpl, crop, req, now);
+      publish_upsert(sr.local_reid_id, req.track_id, rec.tmpl, crop, req, now,
+                     req_gen);
     }
     RCLCPP_INFO(get_logger(),
                 "[dedup] track=%s -> EDGE_HIT %s (sim=%.3f%s, merges=%u, "
-                "handled=%u)",
+                "handled=%u, 免核验剩余=%.0fs)",
                 req.track_id.c_str(), sr.local_reid_id.c_str(), sr.similarity,
                 sr.via_track ? ", 经track兜底" : "", rec.merge_count,
-                rec.handled ? 1u : 0u);
+                resp.handled ? 1u : 0u,
+                resp.handled_until - IdentityGallery::WallEpochSec());
   }
 
   // 端侧未命中：建身份；云端可用则 search_and_upsert 限时等待。
@@ -448,9 +476,14 @@ class ReidNode : public rclcpp::Node {
     }
 
     std::string local_id;
+    uint64_t req_gen = 0;
     {
       std::lock_guard<std::mutex> lk(gallery_mtx_);
       local_id = gallery_->create(feat, req.track_id, now);
+      // 代次与建身份同一临界区固定，登记沿用该快照：发布后重读当前值会把
+      // 夹在发布与登记之间的跨日清理漏过去——昨日请求被登记为今日代次，
+      // 昨日编号迟到回绑就会通过校验
+      req_gen = gallery_->day_generation();
     }
     resp.status = kStatusOk;
 
@@ -474,7 +507,7 @@ class ReidNode : public rclcpp::Node {
                            pl, req));
     const double deadline = now + cloud_timeout_ms_ / 1000.0;
     tracker_.add(rid, local_id, req.track_id, deadline,
-                 deadline + cloud_grace_sec_);
+                 deadline + cloud_grace_sec_, req_gen);
 
     CloudOutcome oc;
     bool got = false;
@@ -516,7 +549,8 @@ class ReidNode : public rclcpp::Node {
 
   void publish_upsert(const std::string& local_id, const std::string& track_id,
                       const std::vector<float>& tmpl, const cv::Mat& crop,
-                      const ReIDDedup::Request& svc_req, double now) {
+                      const ReIDDedup::Request& svc_req, double now,
+                      uint64_t req_gen) {
     const std::string rid = gen_request_id();
     const PayloadResult pl = write_payload(rid, crop, tmpl);
     if (!pl.ok) {
@@ -527,7 +561,8 @@ class ReidNode : public rclcpp::Node {
     cloud_pub_->publish(
         make_cloud_request(rid, "upsert", track_id, local_id, pl, svc_req));
     tracker_.add(rid, local_id, track_id, /*await_deadline=*/0.0,
-                 now + cloud_grace_sec_);  // fire-and-forget，仅收迟到绑定
+                 now + cloud_grace_sec_,           // fire-and-forget，仅收迟到绑定
+                 req_gen);                         // 解析身份时固定的代次快照
   }
 
   ReIDRequest make_cloud_request(const std::string& rid,
@@ -588,13 +623,30 @@ class ReidNode : public rclcpp::Node {
       // 命中=绑定已有全局身份；未命中=云端本次新建的身份 ID，同样绑定
       //（后续 upsert/扇出跳过、跨狗关联都靠它）
       std::lock_guard<std::mutex> lk(gallery_mtx_);
+      // 代次校验：跨日清理（+1 并剥离绑定）之后到达的昨日响应不得回绑
       if (gallery_->bind_global(info.local_reid_id, oc.global_person_id,
-                                oc.match_type)) {
+                                oc.match_type, info.day_generation)) {
         RCLCPP_INFO(get_logger(),
                     "[cloud] %s 绑定全局身份 %s（match_type=%u, sim=%.3f%s）",
                     info.local_reid_id.c_str(), oc.global_person_id.c_str(),
                     oc.match_type, oc.similarity,
                     info.timed_out_reported ? ", 迟到绑定" : "");
+      } else {
+        // bind 失败仅两种成因（编号非空已由外层保证）：本地记录不在、代次不符
+        IdentityRecord probe;
+        if (!gallery_->get(info.local_reid_id, probe)) {
+          RCLCPP_WARN(get_logger(),
+                      "[cloud] %s 拒绝绑定 %s：本地记录已不存在（淘汰/清库）",
+                      info.local_reid_id.c_str(), oc.global_person_id.c_str());
+        } else {
+          RCLCPP_WARN(get_logger(),
+                      "[cloud] %s 拒绝绑定 %s：请求跨日（代次 %llu != 当前 %llu），"
+                      "昨日编号已随清库失效",
+                      info.local_reid_id.c_str(), oc.global_person_id.c_str(),
+                      static_cast<unsigned long long>(info.day_generation),
+                      static_cast<unsigned long long>(
+                          gallery_->day_generation()));
+        }
       }
     } else if (!oc.succeeded) {
       RCLCPP_WARN(get_logger(),
@@ -879,6 +931,7 @@ class ReidNode : public rclcpp::Node {
   double threshold_ = 0.70;
   double track_ttl_sec_ = 300.0;
   double update_min_delta_ = 0.01;
+  double handled_ignore_sec_ = 86400.0;  // 重复核验忽略时长（平台配置项）
   double min_det_conf_ = 0.0;
   int thumb_width_ = 96, thumb_height_ = 192, thumb_quality_ = 60;
   double model_idle_unload_sec_ = 300.0;

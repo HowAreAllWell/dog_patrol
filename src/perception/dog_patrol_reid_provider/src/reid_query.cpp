@@ -92,12 +92,21 @@ int main(int argc, char** argv) {
     return 4;
   }
   const auto resp = fut.get();
+  const double remaining =
+      resp->handled_until > 0.0
+          ? resp->handled_until -
+                std::chrono::duration<double>(
+                    std::chrono::system_clock::now().time_since_epoch())
+                    .count()
+          : 0.0;
   std::printf("track_id : %s\n"
               "status   : %u (0=OK 1=ERROR)\n"
               "is_seen  : %s   <- 今天是否见过\n"
-              "handled  : %s   <- 今天是否已处置（免处置需 is_seen 且 handled）\n",
+              "handled  : %s   <- 是否仍在重复核验忽略时长内（免核验需 is_seen 且 handled）\n"
+              "valid_sec: %.0f  <- 免核验剩余秒数（0=需重新核验；截止=%.0f epoch 秒）\n",
               resp->track_id.c_str(), static_cast<unsigned>(resp->status),
-              resp->is_seen ? "True" : "False", resp->handled ? "True" : "False");
+              resp->is_seen ? "True" : "False", resp->handled ? "True" : "False",
+              remaining > 0.0 ? remaining : 0.0, resp->handled_until);
   if (!resp->error_message.empty()) {
     std::printf("error    : %s\n", resp->error_message.c_str());
   }

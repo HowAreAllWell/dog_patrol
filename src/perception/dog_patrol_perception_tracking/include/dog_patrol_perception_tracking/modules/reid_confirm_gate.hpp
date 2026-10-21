@@ -40,10 +40,6 @@ class ReidConfirmGate {
     int timeout_ms{3000};            // 问询在途超时：fail-open 放行
     double retry_interval_sec{2.0};  // 放行结论的有效窗口，窗口过后可重问
     std::size_t max_tracked{64};     // 结论表容量，超限整体清空（自愈）
-    // 日期源（"yyyy-mm-dd"，本地日期口径，与 provider 端侧库一致）。跨天时
-    // 锁存结论整体失效——provider 库每日清零后，昨天的结论必须一并作废。
-    // 默认取系统本地日期；测试可注入假日期。
-    std::function<std::string()> day_provider;
   };
 
   ReidConfirmGate(rclcpp::Node &node, Config config);
@@ -59,15 +55,14 @@ class ReidConfirmGate {
   // 的 BGR 裁剪（空图/服务不在线按 fail-open 放行）。
   bool Allow(int target_id, const cv::Mat &crop);
 
-  // 取走自上次调用以来新产生的"seen+handled"排除结论（R04）。每条应送入
-  // 选人资格边界（MissionRosAdapter::ExcludeForReidDedup）。
-  void DrainExclusions(const std::function<void(int target_id)> &sink);
-
-  // 每帧固定调用一次（在 DrainExclusions 之前）：独立处理跨天（N03），不依赖
-  // Allow 被触发。发生跨天时清空当日问询锁存与排除队列、作废在途问询，并
-  // 返回 true——调用方应同步清理选人层的 ReID 排除项
-  // （MissionRosAdapter::ClearReidDedupExclusions）。
-  bool SyncDay();
+  // 取走自上次调用以来新产生的"seen+handled"排除结论（R04）。每条携带
+  // 有效期截止时刻（= provider"重复核验忽略时长"的剩余量，随响应下发），
+  // 应送入选人资格边界（MissionRosAdapter::ExcludeForReidDedup）；到期后
+  // 排除自动失效，同人重新可选、重新核验。
+  void DrainExclusions(
+      const std::function<void(int target_id,
+                               std::chrono::steady_clock::time_point valid_until)>
+          &sink);
 
   // supervisor handled 结论转发：请求 ReID 节点把该 track_id 的身份标记
   // 已处置。自动附带该目标最近一次问询的 crop 作为外观兜底。

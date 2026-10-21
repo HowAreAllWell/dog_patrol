@@ -30,8 +30,13 @@ string event_id             # 感知事件 ID，可空（透传扩展位，当�
 uint8 status                # 0=调用成功 1=失败(参数缺失/图不可用/提特征失败)
 string track_id             # 回显请求的 track_id（对齐用）
 bool is_seen                # 今天是否见过（外观事实：本狗端侧或其他狗云端命中）
-bool handled                # 今天是否已完成处置（supervisor handled 结论经
-                            #   ReID 外观延续；false=未处置/仅见过，不能免处置）
+bool handled                # 是否仍在"重复核验忽略时长"内（supervisor handled
+                            #   结论经 ReID 外观延续且未到期；false=未处置/
+                            #   仅见过/忽略时长已过，不能免核验）
+float64 handled_until       # 免核验资格的固定截止时刻（系统墙钟 epoch 秒，绝对
+                            #   值，生成响应时一次性算定；0=无资格）。检测侧以本地
+                            #   墙钟与本时刻比较/折算，不得用"收到时刻+剩余秒数"
+                            #   重建截止
 string error_message        # status=1 时非空，其余为空
 ```
 
@@ -39,7 +44,11 @@ string error_message        # status=1 时非空，其余为空
 "这个 track 的人今天是否见过"，**不做白/黑名单判定**。"是否处置完成"以
 supervisor 下发的 handled 结论为准（经 `/perception/reid/handled` 落到
 ReID 身份上，ReID 负责把该结论延续到同人换 track/重启后的新问询）——
-**is_seen=true 且 handled=false 的人不豁免**，应照常走处置流程。
+**is_seen=true 且 handled=false 的人不豁免**，应照常走处置流程。核验通过
+后的免核验资格受"重复核验忽略时长"约束（平台配置项，provider 参数
+`handled_ignore_seconds`，默认 86400=24h，0=关闭）：资格从核验通过时刻起
+完整持续，跨天不清、跨重启按墙钟精确倒计时；到期后 `handled` 变为 false，
+同人重新出现应重新完整核验。
 
 ## 3. 请求字段怎么填
 
@@ -59,7 +68,8 @@ ReID 身份上，ReID 负责把该结论延续到同人换 track/重启后的新
 | `status` | 0 成功 / 1 失败 | 1 时按"无结论"处理（可重试一次），**不要当作新人**；error_message 有原因 |
 | `track_id` | 回显 | 多目标并发问询时确认对应关系 |
 | `is_seen` | 这个人**今天**是否出现过（端侧特征库命中） | false → 首次出现，正常走你们的事件上报/后续流程；true → 今天已见过，是否抑制重复上报由你们/总控的策略决定，ReID 只给事实 |
-| `handled` | 这个人今天是否**已完成处置**（supervisor 结论，按外观延续） | **免处置判定必须 is_seen && handled 同时成立**；仅 is_seen=true（见过但未处置/处置失败/被取消）不应跳过处置流程 |
+| `handled` | 这个人是否**仍在重复核验忽略时长内**（supervisor 结论，按外观延续） | **免核验判定必须 is_seen && handled 同时成立**；仅 is_seen=true（见过但未处置/处置失败/被取消）不应跳过处置流程 |
+| `handled_until` | 免核验资格的固定截止（epoch 秒，0=需重新核验） | 有效期来源为 provider 参数 `handled_ignore_seconds`（平台"重复核验忽略时长"，默认 24h，资格从核验通过时刻起完整持续、跨天不清）；以本地墙钟折算成本地截止，编码/传输延迟不顺延 |
 | `error_message` | 失败原因 | 日志/调试用 |
 
 ## 5. 调用约定
