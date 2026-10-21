@@ -3,11 +3,12 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+from dataclasses import replace
 import threading
 from typing import Protocol
 
 from .config import VoiceConfig
-from .result import VoiceWindowEvent, VoiceWindowResult
+from .result import VoiceWindowObservation, VoiceWindowResult
 
 
 class TaskStream(Protocol):
@@ -22,7 +23,7 @@ class WindowRecognizer(Protocol):
         attempt_number: int,
         timeout_seconds: float,
         *,
-        on_event: Callable[[VoiceWindowEvent], None] | None = None,
+        on_event: Callable[[VoiceWindowObservation], None] | None = None,
     ) -> VoiceWindowResult: ...
 
 
@@ -214,7 +215,7 @@ class R818TaskSession:
         *,
         timeout_seconds: float | None = None,
         retry: bool = False,
-        on_event: Callable[[VoiceWindowEvent], None] | None = None,
+        on_event: Callable[[VoiceWindowObservation], None] | None = None,
     ) -> VoiceWindowResult:
         self._raise_if_cancelled()
         if not self._active:
@@ -251,16 +252,7 @@ class R818TaskSession:
         if result.attempt_number not in (0, self._attempt_number):
             raise ValueError("recognizer returned a result for the wrong response window")
         if result.attempt_number == 0:
-            return VoiceWindowResult(
-                accepted=result.accepted,
-                decision_time_seconds=result.decision_time_seconds,
-                attempt_number=self._attempt_number,
-                pcm_bytes=result.pcm_bytes,
-                captured_duration_seconds=result.captured_duration_seconds,
-                channel_results=result.channel_results,
-                matching_channels=result.matching_channels,
-                vote_counts=result.vote_counts,
-            )
+            return replace(result, attempt_number=self._attempt_number)
         return result
 
     def _raise_if_cancelled(self) -> None:

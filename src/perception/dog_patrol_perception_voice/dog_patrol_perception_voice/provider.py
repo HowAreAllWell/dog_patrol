@@ -26,7 +26,7 @@ from rclpy.qos import DurabilityPolicy, HistoryPolicy, QoSProfile, ReliabilityPo
 
 from .adapter import R818VoiceAdapter, VoiceTaskCancelled, VoiceTaskCleanupError
 from .config import VoiceConfig, load_voice_config
-from .result import VoiceWindowEvent, VoiceWindowResult
+from .result import VoiceWindowEvent, VoiceWindowObservation, VoiceWindowResult
 
 UINT32_MASK = (1 << 32) - 1
 UINT32_HALF_RANGE = 1 << 31
@@ -94,7 +94,7 @@ class VoiceTask(Protocol):
         self,
         *,
         retry: bool = False,
-        on_event: Callable[[VoiceWindowEvent], None] | None = None,
+        on_event: Callable[[VoiceWindowObservation], None] | None = None,
     ) -> VoiceWindowResult: ...
 
     def cancel(self) -> None: ...
@@ -121,7 +121,7 @@ class VoiceEvidenceController:
         self,
         adapter_factory: Callable[[], VoiceAdapter],
         publish: Callable[[VoiceEvidence], None],
-        publish_window_event: Callable[[VoiceVerificationRequest, VoiceWindowEvent], None] | None = None,
+        publish_window_event: Callable[[VoiceVerificationRequest, VoiceWindowObservation], None] | None = None,
     ) -> None:
         self._adapter_factory = adapter_factory
         self._publish = publish
@@ -304,7 +304,8 @@ class VoiceEvidenceController:
             evidence_result,
             f"voice response round {round_number} "
             f"{'passed' if result.accepted else 'not passed'}; "
-            f"decision_seconds={result.decision_time_seconds:.3f}",
+            f"decision_seconds={result.decision_time_seconds:.3f}; "
+            f"votes={result.vote_count}; confidence_percent={result.confidence_percent}",
         )
 
     def _on_window_event(
@@ -312,7 +313,7 @@ class VoiceEvidenceController:
         request: VoiceVerificationRequest,
         generation: int,
         cancel_event: threading.Event,
-        event: VoiceWindowEvent,
+        event: VoiceWindowObservation,
     ) -> None:
         with self._condition:
             if self._stopping or self._request_cancelled_locked(
@@ -651,7 +652,7 @@ class VoiceEvidenceProviderNode(Node):
         self._evidence_pub.publish(msg)
 
     def _publish_window_event(
-        self, request: VoiceVerificationRequest, event: VoiceWindowEvent
+        self, request: VoiceVerificationRequest, event: VoiceWindowObservation
     ) -> None:
         msg = VoiceVerificationEvent()
         msg.header.stamp = self.get_clock().now().to_msg()
@@ -662,7 +663,11 @@ class VoiceEvidenceProviderNode(Node):
             VoiceWindowEvent.WAIT_STARTED: VoiceVerificationEvent.WAIT_STARTED,
             VoiceWindowEvent.PASSED: VoiceVerificationEvent.PASSED,
             VoiceWindowEvent.NOT_PASSED: VoiceVerificationEvent.NOT_PASSED,
-        }[event]
+        }[event.event]
+        msg.confidence_valid = event.confidence_valid
+        msg.vote_count = event.vote_count
+        msg.confidence_percent = event.confidence_percent or 0
+        msg.matching_channels = list(event.matching_channels or ())
         self._window_event_pub.publish(msg)
 
     def _build_adapter(self) -> VoiceAdapter:

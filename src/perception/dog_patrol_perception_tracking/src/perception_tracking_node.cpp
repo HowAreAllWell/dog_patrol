@@ -370,9 +370,11 @@ class PerceptionTrackingNode : public rclcpp::Node {
     crop_config.padding_ratio = static_cast<float>(
         this->get_parameter("target_image.crop_padding_ratio").as_double());
     if (mode == RuntimeMode::kMission) {
-      if (this->get_parameter("photos.enabled").as_bool()) {
+      // Keep receiving per-round voice confidence even when photos are disabled.
+      {
         dog_patrol_perception_tracking::EventPhotoRecorder::Config photos;
         photos.root = this->get_parameter("photos.root").as_string();
+        photos.photos_enabled = this->get_parameter("photos.enabled").as_bool();
         photo_recorder_ = std::make_shared<
             dog_patrol_perception_tracking::EventPhotoRecorder>(
                 photos, [logger = this->get_logger()](const std::string &error) {
@@ -389,9 +391,14 @@ class PerceptionTrackingNode : public rclcpp::Node {
               }
               const auto stamp = static_cast<std::uint64_t>(message->header.stamp.sec) *
                                      1000000000ULL + message->header.stamp.nanosec;
+              std::optional<dog_patrol_perception_tracking::EventPhotoRecorder::VoiceConfidence> confidence;
+              if (message->confidence_valid) {
+                confidence = dog_patrol_perception_tracking::EventPhotoRecorder::VoiceConfidence{
+                    message->vote_count, message->confidence_percent, message->matching_channels};
+              }
               recorder->RecordVoice(message->observed_state_seq,
                                     static_cast<int>(message->target_id),
-                                    message->round_number, message->event, stamp);
+                                    message->round_number, message->event, stamp, std::move(confidence));
             });
       }
       // 短时 ReID 去重闸门（confirm_target 发布前问询 /perception/reid/dedup）。

@@ -64,6 +64,76 @@ std::string Filename(std::uint64_t stamp_ns, int semantic_id) {
   return name.str();
 }
 
+bool ValidConfidence(std::uint8_t event,
+                     const std::optional<EventPhotoRecorder::VoiceConfidence> &confidence) {
+  if (!confidence) {
+    return true;  // Older/injected providers have no measurement; persist null, not zero.
+  }
+  const auto &value = *confidence;
+  constexpr std::uint8_t percentages[]{0, 50, 75, 90, 100, 100, 100};
+  if (event == EventPhotoRecorder::WAIT_STARTED || value.vote_count > 6 ||
+      value.vote_count != value.matching_channels.size() ||
+      value.confidence_percent != percentages[value.vote_count] ||
+      (event == EventPhotoRecorder::PASSED) != (value.vote_count > 0)) {
+    return false;
+  }
+  bool seen[6]{};
+  for (auto channel : value.matching_channels) {
+    if (channel >= 6 || seen[channel]) {
+      return false;
+    }
+    seen[channel] = true;
+  }
+  return true;
+}
+
+void WriteBytes(int fd, const unsigned char *bytes, std::size_t size) {
+  std::size_t offset = 0;
+  while (offset < size) {
+    const auto count = ::write(fd, bytes + offset, size - offset);
+    if (count < 0 && errno == EINTR) {
+      continue;
+    }
+    if (count <= 0) {
+      throw std::system_error(count == 0 ? EIO : errno, std::generic_category(), "write evidence");
+    }
+    offset += static_cast<std::size_t>(count);
+  }
+}
+
+void CloseFile(int &fd) {
+  const int result = ::close(fd);
+  fd = -1;
+  if (result != 0) {
+    throw std::system_error(errno, std::generic_category(), "close evidence");
+  }
+}
+
+void PublishJson(const std::filesystem::path &path, const std::string &json) {
+  const auto temporary = std::filesystem::path(path.string() + ".tmp");
+  int fd = ::open(temporary.c_str(), O_CREAT | O_EXCL | O_WRONLY | O_CLOEXEC, 0600);
+  if (fd < 0) {
+    throw std::system_error(errno, std::generic_category(), "create voice JSON temporary file");
+  }
+  try {
+    WriteBytes(fd, reinterpret_cast<const unsigned char *>(json.data()), json.size());
+    CloseFile(fd);
+    // Publish a complete JSON without overwriting any prior record.
+    if (::link(temporary.c_str(), path.c_str()) != 0) {
+      throw std::system_error(errno, std::generic_category(), "publish voice JSON");
+    }
+  } catch (...) {
+    if (fd >= 0) {
+      ::close(fd);
+    }
+    std::error_code ignored;
+    std::filesystem::remove(temporary, ignored);
+    throw;
+  }
+  std::error_code ignored;
+  std::filesystem::remove(temporary, ignored);
+}
+
 }  // namespace
 
 class EventPhotoRecorder::Impl {
@@ -108,7 +178,7 @@ class EventPhotoRecorder::Impl {
       UpdateMission(mission, mission_stamp_ns == 0 ? stamp : mission_stamp_ns,
                     mission_stamp_ns == 0 ? previous_frame_stamp : mission_stamp_ns);
 
-      const bool valid_image = !image.empty() && image.type() == CV_8UC3 &&
+      const bool valid_image = config_.photos_enabled && !image.empty() && image.type() == CV_8UC3 &&
                                image.cols == metadata.image_width &&
                                image.rows == metadata.image_height;
       const auto closed_session = std::find_if(sessions_.rbegin(), sessions_.rend(), [&](const auto &session) {
@@ -139,6 +209,9 @@ class EventPhotoRecorder::Impl {
         }
       }
       for (const auto &event : events) {
+        if (!config_.photos_enabled) {
+          break;
+        }
         if (!mission || event.observed_state_seq != mission->state_seq || event.target_id <= 0) {
           Invalid("photo event does not match the current mission", errors);
           continue;
@@ -175,14 +248,16 @@ class EventPhotoRecorder::Impl {
   }
 
   void RecordVoice(std::uint32_t seq, int target, std::uint32_t round,
-                   std::uint8_t event, std::uint64_t stamp) {
+                   std::uint8_t event, std::uint64_t stamp,
+                   std::optional<VoiceConfidence> confidence) {
     std::vector<std::string> errors;
     {
       std::lock_guard<std::mutex> lock(mutex_);
-      if (seq == 0 || target <= 0 || round == 0 || stamp == 0 || event > NOT_PASSED) {
+      if (seq == 0 || target <= 0 || round == 0 || stamp == 0 || event > NOT_PASSED ||
+          !ValidConfidence(event, confidence)) {
         Invalid("invalid voice photo event", errors);
       } else {
-        const VoiceEvent value{seq, target, round, event, stamp};
+        const VoiceEvent value{seq, target, round, event, stamp, std::move(confidence)};
         if (!Resolve(value, errors)) {
           const auto duplicate = std::find_if(pending_.begin(), pending_.end(), [&](const auto &old) {
             return old.seq == seq && old.target == target && old.round == round &&
@@ -249,11 +324,19 @@ class EventPhotoRecorder::Impl {
     std::uint32_t round;
     std::uint8_t event;
     std::uint64_t stamp;
+    std::optional<VoiceConfidence> confidence;
+  };
+  struct VoiceRecord {
+    VoiceEvent event;
+    std::uint64_t wait_started_stamp;
+    std::optional<std::uint64_t> image_stamp;
+    std::string photo_status;
   };
   struct WriteJob {
     Frame frame;
     std::string directory;
     std::string filename_suffix;
+    std::optional<VoiceRecord> voice;
   };
 
   void UpdateMission(const std::optional<MissionSnapshot> &mission, std::uint64_t stamp,
@@ -354,7 +437,7 @@ class EventPhotoRecorder::Impl {
       if (round != session->rounds.end() || event.round <= session->completed_through) {
         return true;
       }
-      if (!finalizing && latest_frame_stamp_ < event.stamp) {
+      if (config_.photos_enabled && !finalizing && latest_frame_stamp_ < event.stamp) {
         return false;
       }
       auto frame = FindFrame(*session, event.stamp);
@@ -363,7 +446,7 @@ class EventPhotoRecorder::Impl {
         errors.push_back("voice photo round capacity exceeded");
         return true;
       }
-      if (!frame) {
+      if (config_.photos_enabled && !frame) {
         Missing("voice wait-start photo has no sufficiently recent source frame", errors);
       }
       session->rounds.emplace(event.round, Round{event.stamp, std::move(frame)});
@@ -379,19 +462,23 @@ class EventPhotoRecorder::Impl {
       Invalid("voice photo result precedes its wait-start event", errors);
       return true;
     }
-    if (event.event == PASSED && !finalizing && latest_frame_stamp_ < event.stamp) {
+    if (config_.photos_enabled && event.event == PASSED && !finalizing && latest_frame_stamp_ < event.stamp) {
       return false;
     }
     auto frame = event.event == PASSED ? FindFrame(*session, event.stamp)
                                       : round->second.start_frame;
+    const auto started_at = round->second.started_at;
     session->completed_through = std::max(session->completed_through, event.round);
     session->rounds.erase(round);
-    if (frame) {
-      Enqueue(*frame, event.event == PASSED ? "voice/passed" : "voice/failed", errors,
-              "r" + std::to_string(event.round));
-    } else {
+    if (config_.photos_enabled && !frame) {
       Missing("voice result photo has no matching source frame", errors);
     }
+    const VoiceRecord record{
+        event, started_at, frame ? std::make_optional(frame->stamp) : std::nullopt,
+        !config_.photos_enabled ? "disabled" : (frame ? "saved" : "missing_frame")};
+    Enqueue(frame.value_or(Frame{event.stamp, session->lifecycle, event.target, {}}),
+            event.event == PASSED ? "voice/passed" : "voice/failed", errors,
+            "r" + std::to_string(event.round), record);
     return true;
   }
 
@@ -412,13 +499,14 @@ class EventPhotoRecorder::Impl {
   }
 
   void Enqueue(const Frame &frame, const std::string &directory,
-               std::vector<std::string> &errors, const std::string &filename_suffix = {}) {
+               std::vector<std::string> &errors, const std::string &filename_suffix = std::string{},
+               std::optional<VoiceRecord> voice = std::nullopt) {
     if (queue_.size() >= config_.write_queue_capacity) {
       ++metrics_.queue_dropped;
       errors.push_back("photo write queue full; " + directory + " discarded");
       return;
     }
-    queue_.push_back({frame, directory, filename_suffix});
+    queue_.push_back({frame, directory, filename_suffix, std::move(voice)});
     ++metrics_.enqueued;
     wake_.notify_one();
   }
@@ -447,15 +535,62 @@ class EventPhotoRecorder::Impl {
     }
   }
 
-  void Write(const WriteJob &job) {
+  std::string VoiceJson(const VoiceRecord &record, const std::string &image_file,
+                        const std::string &photo_status) const {
+    const auto &event = record.event;
+    std::ostringstream json;
+    // All strings below are fixed labels or the generated ASCII photo basename.
+    // No recognized speech, passphrase, or arbitrary path is serialized.
+    json << "{\n  \"state_seq\": " << event.seq
+         << ",\n  \"target_id\": " << event.target
+         << ",\n  \"round_number\": " << event.round
+         << ",\n  \"result\": \"" << (event.event == PASSED ? "passed" : "not_passed")
+         << "\",\n  \"confidence_valid\": " << (event.confidence ? "true" : "false")
+         << ",\n  \"vote_count\": ";
+    if (event.confidence) {
+      json << static_cast<unsigned>(event.confidence->vote_count);
+    } else {
+      json << "null";
+    }
+    json << ",\n  \"matching_channels\": [";
+    if (event.confidence) {
+      for (std::size_t index = 0; index < event.confidence->matching_channels.size(); ++index) {
+        if (index != 0) {
+          json << ", ";
+        }
+        json << static_cast<unsigned>(event.confidence->matching_channels[index]);
+      }
+    }
+    json << "],\n  \"confidence_percent\": ";
+    if (event.confidence) {
+      json << static_cast<unsigned>(event.confidence->confidence_percent);
+    } else {
+      json << "null";
+    }
+    json << ",\n  \"confidence_method\": \"channel_votes_50_75_90_100_v1\""
+         << ",\n  \"wait_started_stamp_ns\": " << record.wait_started_stamp
+         << ",\n  \"result_stamp_ns\": " << event.stamp
+         << ",\n  \"image_stamp_ns\": ";
+    if (record.image_stamp) {
+      json << *record.image_stamp;
+    } else {
+      json << "null";
+    }
+    json << ",\n  \"image_file\": ";
+    if (image_file.empty()) {
+      json << "null";
+    } else {
+      json << '"' << image_file << '"';
+    }
+    json << ",\n  \"photo_status\": \"" << photo_status << "\"\n}\n";
+    return json.str();
+  }
+
+  std::string Write(const WriteJob &job) {
     for (const char *directory : {"tracking/event", "tracking/lost", "face", "voice", "reid"}) {
       std::filesystem::create_directories(root_ / directory);
     }
     std::filesystem::create_directories(root_ / job.directory);
-    std::vector<unsigned char> jpeg;
-    if (!cv::imencode(".jpg", job.frame.image, jpeg)) {
-      throw std::runtime_error("JPEG encoding failed");
-    }
     const auto base = Filename(job.frame.stamp, job.frame.target) +
                       (job.filename_suffix.empty() ? "" : "_" + job.filename_suffix);
     std::filesystem::path path;
@@ -463,8 +598,29 @@ class EventPhotoRecorder::Impl {
     for (std::uint32_t collision = 0; collision < 100000; ++collision) {
       path = root_ / job.directory /
              (base + (collision == 0 ? "" : "_" + std::to_string(collision)) + ".jpg");
+      auto json_path = path;
+      json_path.replace_extension(".json");
+      if (std::filesystem::exists(json_path) ||
+          std::filesystem::exists(std::filesystem::path(json_path.string() + ".tmp"))) {
+        continue;
+      }
+      // The exclusively created JPEG also reserves the basename for JSON-only
+      // records until their complete JSON is published.
       fd = ::open(path.c_str(), O_CREAT | O_EXCL | O_WRONLY | O_CLOEXEC, 0600);
       if (fd >= 0) {
+        // A metadata-only writer may have published JSON and removed its JPEG
+        // reservation between the first existence check and our open.
+        if (std::filesystem::exists(json_path)) {
+          const int result = ::close(fd);
+          const int close_error = errno;
+          fd = -1;
+          std::error_code ignored;
+          std::filesystem::remove(path, ignored);
+          if (result != 0) {
+            throw std::system_error(close_error, std::generic_category(), "close photo reservation");
+          }
+          continue;
+        }
         break;
       }
       if (errno != EEXIST) {
@@ -474,22 +630,38 @@ class EventPhotoRecorder::Impl {
     if (fd < 0) {
       throw std::runtime_error("photo filename collision limit exceeded");
     }
+    std::string photo_status = job.voice ? job.voice->photo_status : "saved";
+    std::string photo_error;
+    bool saved = false;
     try {
-      std::size_t offset = 0;
-      while (offset < jpeg.size()) {
-        const auto count = ::write(fd, jpeg.data() + offset, jpeg.size() - offset);
-        if (count < 0 && errno == EINTR) {
-          continue;
+      if (!job.frame.image.empty()) {
+        try {
+          std::vector<unsigned char> jpeg;
+          if (!cv::imencode(".jpg", job.frame.image, jpeg)) {
+            throw std::runtime_error("JPEG encoding failed");
+          }
+          WriteBytes(fd, jpeg.data(), jpeg.size());
+          CloseFile(fd);
+          saved = true;
+        } catch (const std::exception &error) {
+          if (!job.voice) {
+            throw;
+          }
+          photo_status = "write_failed";
+          photo_error = std::string("voice photo unavailable; confidence retained: ") + error.what();
         }
-        if (count <= 0) {
-          throw std::system_error(count == 0 ? EIO : errno, std::generic_category(), "write photo");
-        }
-        offset += static_cast<std::size_t>(count);
       }
-      const int close_result = ::close(fd);
-      fd = -1;
-      if (close_result != 0) {
-        throw std::system_error(errno, std::generic_category(), "close photo");
+      if (fd >= 0) {
+        CloseFile(fd);
+      }
+      if (job.voice) {
+        auto json_path = path;
+        json_path.replace_extension(".json");
+        PublishJson(json_path, VoiceJson(*job.voice, saved ? path.filename().string() : "", photo_status));
+      }
+      if (!saved) {
+        std::error_code ignored;
+        std::filesystem::remove(path, ignored);
       }
     } catch (...) {
       if (fd >= 0) {
@@ -499,6 +671,7 @@ class EventPhotoRecorder::Impl {
       std::filesystem::remove(path, ignored);
       throw;
     }
+    return photo_error;
   }
 
   void Run() {
@@ -516,9 +689,13 @@ class EventPhotoRecorder::Impl {
       }
       std::vector<std::string> errors;
       try {
-        Write(job);
+        const auto photo_error = Write(job);
         std::lock_guard<std::mutex> lock(mutex_);
         ++metrics_.written;
+        if (!photo_error.empty()) {
+          ++metrics_.write_errors;
+          errors.push_back(photo_error);
+        }
       } catch (const std::exception &error) {
         std::lock_guard<std::mutex> lock(mutex_);
         ++metrics_.write_errors;
@@ -577,8 +754,9 @@ void EventPhotoRecorder::ObserveFrame(const std::optional<MissionSnapshot> &miss
 
 void EventPhotoRecorder::RecordVoice(std::uint32_t state_seq, int target_id,
                                    std::uint32_t round_number, std::uint8_t event,
-                                   std::uint64_t event_stamp_ns) {
-  impl_->RecordVoice(state_seq, target_id, round_number, event, event_stamp_ns);
+                                   std::uint64_t event_stamp_ns,
+                                   std::optional<VoiceConfidence> confidence) {
+  impl_->RecordVoice(state_seq, target_id, round_number, event, event_stamp_ns, std::move(confidence));
 }
 
 void EventPhotoRecorder::Flush() { impl_->Flush(); }

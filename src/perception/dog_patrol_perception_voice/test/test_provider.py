@@ -20,7 +20,7 @@ from rclpy.qos import DurabilityPolicy, HistoryPolicy, QoSProfile, ReliabilityPo
 
 from dog_patrol_perception_voice.adapter import VoiceTaskCleanupError
 from dog_patrol_perception_voice.provider import VoiceEvidenceProviderNode
-from dog_patrol_perception_voice.result import VoiceWindowEvent, VoiceWindowResult
+from dog_patrol_perception_voice.result import VoiceWindowEvent, VoiceWindowObservation, VoiceWindowResult
 
 
 def _qos(*, transient: bool, depth: int) -> QoSProfile:
@@ -68,14 +68,14 @@ class FakeTask:
         del args, kwargs
         self.calls.append(bool(retry))
         if on_event is not None:
-            on_event(VoiceWindowEvent.WAIT_STARTED)
+            on_event(VoiceWindowObservation(VoiceWindowEvent.WAIT_STARTED))
         if self._wait_for_release:
             assert self.release.wait(timeout=3.0)
         if self._error is not None:
             raise self._error
         result = self._results.popleft()
         if on_event is not None:
-            on_event(VoiceWindowEvent.PASSED if result.accepted else VoiceWindowEvent.NOT_PASSED)
+            on_event(result.observation)
         return result
 
     def cancel(self):
@@ -247,7 +247,10 @@ def test_photo_events_precede_hardware_restore(accepted):
             assert allow_restore.wait(timeout=3.0)
             super().__exit__(*args)
 
-    task = SlowRestoreTask([VoiceWindowResult(accepted, 0.1 if accepted else 10.0)])
+    task = SlowRestoreTask([VoiceWindowResult(
+        accepted, 0.1 if accepted else 10.0,
+        matching_channels=(1, 4) if accepted else (),
+    )])
     harness = ProviderHarness(FakeAdapterFactory([task]))
     try:
         harness.publish_state(17, 42)
@@ -261,6 +264,12 @@ def test_photo_events_precede_hardware_restore(accepted):
             VoiceVerificationEvent.PASSED if accepted else VoiceVerificationEvent.NOT_PASSED,
         ]
         assert all(item.observed_state_seq == 17 and item.target_id == 42 for item in harness.window_events)
+        assert harness.window_events[0].confidence_valid is False
+        snapshot = harness.window_events[1]
+        assert snapshot.confidence_valid is True
+        assert snapshot.vote_count == (2 if accepted else 0)
+        assert snapshot.confidence_percent == (75 if accepted else 0)
+        assert list(snapshot.matching_channels) == ([1, 4] if accepted else [])
         allow_restore.set()
         assert harness.wait(lambda: len(harness.evidence) == 1)
     finally:

@@ -17,7 +17,7 @@ from typing import Any, Callable, Protocol
 import numpy as np
 
 from .config import VoiceConfig, normalize_answer
-from .result import VoiceWindowEvent, VoiceWindowResult
+from .result import VoiceWindowEvent, VoiceWindowObservation, VoiceWindowResult
 
 R818_SAMPLE_RATE = 16_000
 R818_ORIGIN_CHANNELS = 8
@@ -503,7 +503,7 @@ class R818StreamingVoskSession:
         attempt_number: int,
         timeout_seconds: float,
         *,
-        on_event: Callable[[VoiceWindowEvent], None] | None = None,
+        on_event: Callable[[VoiceWindowObservation], None] | None = None,
     ) -> VoiceWindowResult:
         if isinstance(attempt_number, bool) or attempt_number < 1:
             raise ValueError("attempt_number must be positive")
@@ -512,7 +512,7 @@ class R818StreamingVoskSession:
         chunks = iter(self._stream.window_chunks(timeout_seconds))
         try:
             if on_event is not None:
-                on_event(VoiceWindowEvent.WAIT_STARTED)
+                on_event(VoiceWindowObservation(VoiceWindowEvent.WAIT_STARTED))
             grammar = json.dumps([self._config.passphrase, "[unk]"])
             channel_recognizers = tuple(
                 self._recognizer_factory(self._model, R818_SAMPLE_RATE, grammar)
@@ -529,6 +529,27 @@ class R818StreamingVoskSession:
         elapsed_seconds = 0.0
         target_seen_at: float | None = None
         accepted_at: float | None = None
+
+        def finish(decision_time: float) -> VoiceWindowResult:
+            matching_channels = tuple(
+                channel for channel, text in enumerate(channel_results)
+                if text == self._config.passphrase
+            )
+            result = VoiceWindowResult(
+                accepted=bool(matching_channels),
+                decision_time_seconds=decision_time,
+                attempt_number=attempt_number,
+                pcm_bytes=pcm_bytes,
+                captured_duration_seconds=elapsed_seconds,
+                channel_results=tuple(channel_results),
+                matching_channels=matching_channels,
+                vote_counts={self._config.passphrase: len(matching_channels)}
+                if matching_channels else {},
+            )
+            if on_event is not None:
+                on_event(result.observation)
+            return result
+
         try:
             for chunk in chunks:
                 if len(chunk) % R818_ORIGIN_FRAME_BYTES:
@@ -554,9 +575,7 @@ class R818StreamingVoskSession:
                         target_seen_at = elapsed_seconds
                     if elapsed_seconds >= target_seen_at + self._config.vote_guard_seconds:
                         accepted_at = target_seen_at + self._config.vote_guard_seconds
-                        if on_event is not None:
-                            on_event(VoiceWindowEvent.PASSED)
-                        break
+                        return finish(accepted_at)
         finally:
             close = getattr(chunks, "close", None)
             if close is not None:
@@ -569,32 +588,7 @@ class R818StreamingVoskSession:
                     channel_results[channel] = text
             if any(text == self._config.passphrase for text in channel_results):
                 accepted_at = elapsed_seconds
-                if on_event is not None:
-                    on_event(VoiceWindowEvent.PASSED)
-            elif on_event is not None:
-                on_event(VoiceWindowEvent.NOT_PASSED)
-
-        matching_channels = tuple(
-            channel
-            for channel, text in enumerate(channel_results)
-            if text == self._config.passphrase
-        )
-        accepted = bool(matching_channels)
-        decision_time = accepted_at if accepted_at is not None else (
-            elapsed_seconds if accepted else timeout_seconds
-        )
-        return VoiceWindowResult(
-            accepted=accepted,
-            decision_time_seconds=decision_time,
-            attempt_number=attempt_number,
-            pcm_bytes=pcm_bytes,
-            captured_duration_seconds=elapsed_seconds,
-            channel_results=tuple(channel_results),
-            matching_channels=matching_channels,
-            vote_counts={self._config.passphrase: len(matching_channels)}
-            if matching_channels
-            else {},
-        )
+        return finish(accepted_at if accepted_at is not None else timeout_seconds)
 
 
 def _result_text(payload: str) -> str:
