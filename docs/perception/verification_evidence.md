@@ -27,6 +27,7 @@
 
 截图中的 **8 项业务设置对应 9 个参数**；“核验口令”拆为首次、后续两段文本。
 另有照片总开关、共享根目录和人脸专用照片设置，见第二节。内部消息话题单独列在文末。
+表中的 `runtime/*.yaml` 位于资产根目录下；仓库中的完整路径和实际部署文件的确认方法见第四节第 3 项。
 
 ### 1. 纯人脸核验时长
 
@@ -372,6 +373,37 @@ ros2 param set /perception_voice_provider passphrase 'green light'
 都是**启动时读取**的设置。应修改对应 YAML 或启动配置并重启，不使用 `ros2 param set` 作为它们的生效方式。
 
 ### 3. 重启后仍然使用修改后的配置
+
+**这些 YAML 文件在哪里：**
+
+仓库中的文件集中在[资产包的 runtime 目录](../../src/perception/dog_patrol_perception_assets_20260813/runtime/)，从仓库根目录查找：
+
+```text
+src/perception/dog_patrol_perception_assets_20260813/runtime/
+├── face.yaml                 # 人脸核验及人脸照片配置
+├── voice_verification.yaml   # 语音口令、提示语、等待时长和音频设备
+├── reid.yaml                 # ReID 忽略时长、模型及数据目录
+└── perception_tracking.yaml  # 检测、跟踪及照片配置
+```
+
+本文中的 `runtime/face.yaml` 等写法均相对资产根目录 `assets_root`。
+例如 `runtime/face.yaml` 在仓库中的完整路径为
+`src/perception/dog_patrol_perception_assets_20260813/runtime/face.yaml`。
+`assets_root` 应指向上面的 `dog_patrol_perception_assets_20260813` 目录，配置文件位于其 `runtime/` 子目录中。
+
+**确认机器人实际读取哪一份：**
+
+完整感知启动时，显式传入的 `assets_root:=...` 优先；未传时读取启动进程的 `DOG_PATROL_ASSETS_ROOT` 环境变量。
+两者均未设置时，启动入口使用 `/mnt/nvme/workspace/dog_patrol/src/perception/dog_patrol_perception_assets_20260813`。
+如果现场指定了其他资产目录，应修改 `<实际 assets_root>/runtime/` 中的配置文件，并重启相应节点或服务。
+修改当前终端的环境变量不会改变已经运行的服务所用路径。
+
+运行中的人脸、语音节点可通过下面的命令查询实际配置文件路径：
+
+```bash
+ros2 param get /perception_face_provider config_file
+ros2 param get /perception_voice_provider config_file
+```
 
 把所需参数写入机器人实际使用的启动脚本或服务启动命令；主控参数写入主控启动入口。
 语音的四个参数也可以保存到部署 YAML。整套感知启动过程中，语音模块读取的配置文件是：
