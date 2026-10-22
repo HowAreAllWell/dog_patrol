@@ -22,4 +22,7 @@ uint32 round_number
 # Voice providers leave these fields empty/zero.
 string person_id
 float32 similarity
+# Face similarity state: "measured", "no_face_detected",
+# "measurement_error", or "not_applicable".
+string similarity_status
 string image_url

@@ -489,13 +489,16 @@ def test_passed_evidence_selects_actual_pass_crop():
         controller.stop()
 
 
-def test_initial_not_passed_evidence_selects_first_crop():
+def test_not_passed_evidence_selects_first_detected_face():
     class AlwaysMiss:
         def reset(self):
             pass
 
         def verify(self, _crop):
-            return FaceVerification(False, True, "no match", similarity=0.42)
+            return FaceVerification(
+                False, True, "no match", box=(1, 1, 8, 8), similarity=0.42,
+                similarity_valid=True,
+            )
 
     evidence = []
     saved_frames = []
@@ -518,11 +521,125 @@ def test_initial_not_passed_evidence_selects_first_crop():
         assert saved_frames == [10]
         assert evidence[0].result is FaceEvidenceResult.NOT_PASSED
         assert evidence[0].image_url == "file:///start.jpg"
+        assert evidence[0].similarity == 0.42
+        assert evidence[0].similarity_status == "measured"
     finally:
         controller.stop()
 
 
-def test_initial_first_crop_survives_factory_delay_and_latest_only_queue():
+def test_not_passed_keeps_first_recognized_crop_and_its_measured_similarity():
+    verifier = ScriptedFaceVerifier([
+        FaceVerification(
+            False, False, "collecting frames", box=(1, 1, 8, 8),
+            similarity=0.27, similarity_valid=True,
+        ),
+        FaceVerification(
+            False, True, "no match", box=(1, 1, 8, 8),
+            similarity=0.73, similarity_valid=True,
+        ),
+    ])
+    evidence = []
+    saved_frames = []
+    controller = FaceEvidenceController(
+        lambda: verifier,
+        evidence.append,
+        config=_fast_config(
+            window_timeout_seconds=0.12,
+            initial_face_window_seconds=0.12,
+        ),
+        evidence_photo_callback=lambda crop, _request, _result: (
+            saved_frames.append(crop.source_frame_number) or "file:///first-face.jpg"
+        ),
+    )
+    session = FaceVerificationSession(1, 1)
+    try:
+        controller.observe_session(session)
+        controller.request(FaceVerificationRequest(session, FaceVerificationStage.INITIAL_FACE))
+        controller.observe_crop(_decoded_crop(20))
+        deadline = time.monotonic() + 1.0
+        while verifier.calls < 1 and time.monotonic() < deadline:
+            time.sleep(0.01)
+        controller.observe_crop(_decoded_crop(21))
+        while not evidence and time.monotonic() < deadline:
+            time.sleep(0.01)
+        assert saved_frames == [20]
+        assert evidence[0].similarity == 0.27
+        assert evidence[0].similarity_status == "measured"
+    finally:
+        controller.stop()
+
+
+def test_not_passed_without_detected_face_has_no_photo_or_similarity():
+    class NoFace:
+        def reset(self):
+            pass
+
+        def verify(self, _crop):
+            return FaceVerification(False, False, "no face detected")
+
+    evidence = []
+    saved_frames = []
+    controller = FaceEvidenceController(
+        NoFace,
+        evidence.append,
+        config=_fast_config(
+            window_timeout_seconds=0.08,
+            initial_face_window_seconds=0.08,
+        ),
+        evidence_photo_callback=lambda crop, _request, _result: (
+            saved_frames.append(crop.source_frame_number) or "file:///unexpected.jpg"
+        ),
+    )
+    session = FaceVerificationSession(1, 1)
+    try:
+        controller.observe_session(session)
+        controller.request(FaceVerificationRequest(session, FaceVerificationStage.INITIAL_FACE))
+        controller.observe_crop(_decoded_crop(30))
+        deadline = time.monotonic() + 1.0
+        while not evidence and time.monotonic() < deadline:
+            time.sleep(0.01)
+        assert saved_frames == []
+        assert evidence[0].image_url == ""
+        assert evidence[0].similarity == 0.0
+        assert evidence[0].similarity_status == "no_face_detected"
+    finally:
+        controller.stop()
+
+
+def test_detected_face_without_score_reports_measurement_error():
+    class UnmeasuredFace:
+        def reset(self):
+            pass
+
+        def verify(self, _crop):
+            return FaceVerification(
+                False, False, "low quality face", box=(1, 1, 8, 8)
+            )
+
+    evidence = []
+    controller = FaceEvidenceController(
+        UnmeasuredFace,
+        evidence.append,
+        config=_fast_config(
+            window_timeout_seconds=0.08,
+            initial_face_window_seconds=0.08,
+        ),
+    )
+    session = FaceVerificationSession(1, 1)
+    try:
+        controller.observe_session(session)
+        controller.request(FaceVerificationRequest(session, FaceVerificationStage.INITIAL_FACE))
+        controller.observe_crop(_decoded_crop(31))
+        deadline = time.monotonic() + 1.0
+        while not evidence and time.monotonic() < deadline:
+            time.sleep(0.01)
+        assert evidence[0].similarity == 0.0
+        assert evidence[0].similarity_status == "measurement_error"
+    finally:
+        controller.stop()
+
+
+def test_failure_uses_first_face_processed_after_factory_delay():
     release_factory = threading.Event()
 
     class AlwaysMiss:
@@ -530,7 +647,10 @@ def test_initial_first_crop_survives_factory_delay_and_latest_only_queue():
             pass
 
         def verify(self, _crop):
-            return FaceVerification(False, True, "no match")
+            return FaceVerification(
+                False, True, "no match", box=(1, 1, 8, 8), similarity=0.31,
+                similarity_valid=True,
+            )
 
     def delayed_factory():
         release_factory.wait(timeout=2.0)
@@ -556,14 +676,15 @@ def test_initial_first_crop_survives_factory_delay_and_latest_only_queue():
         deadline = time.monotonic() + 1.0
         while not evidence and time.monotonic() < deadline:
             time.sleep(0.01)
-        assert saved_frames == [10]
+        assert saved_frames == [11]
         assert evidence[0].result is FaceEvidenceResult.NOT_PASSED
+        assert evidence[0].similarity == 0.31
     finally:
         release_factory.set()
         controller.stop()
 
 
-def test_initial_first_crop_is_fixed_when_images_arrive_after_window_starts():
+def test_failure_uses_first_face_processed_after_window_starts():
     window_waiting = threading.Event()
     release_queue = threading.Event()
 
@@ -572,7 +693,10 @@ def test_initial_first_crop_is_fixed_when_images_arrive_after_window_starts():
             pass
 
         def verify(self, _crop):
-            return FaceVerification(False, True, "no match")
+            return FaceVerification(
+                False, True, "no match", box=(1, 1, 8, 8), similarity=0.31,
+                similarity_valid=True,
+            )
 
     evidence = []
     saved_frames = []
@@ -607,8 +731,9 @@ def test_initial_first_crop_is_fixed_when_images_arrive_after_window_starts():
         deadline = time.monotonic() + 1.0
         while not evidence and time.monotonic() < deadline:
             time.sleep(0.01)
-        assert saved_frames == [10]
+        assert saved_frames == [11]
         assert evidence[0].result is FaceEvidenceResult.NOT_PASSED
+        assert evidence[0].similarity == 0.31
     finally:
         release_queue.set()
         controller.stop()

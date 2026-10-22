@@ -30,6 +30,9 @@ class FaceVerification:
     box: tuple[int, int, int, int] | None = None
     person_id: str = ""
     similarity: float = 0.0
+    # True only when ``similarity`` was actually calculated for this crop.
+    # A collecting/no-face verdict must not expose the default 0.0 as a score.
+    similarity_valid: bool = False
 
 
 class FaceVerifier:
@@ -131,17 +134,29 @@ class ProductionFaceVerifier(FaceVerifier):
         x1, y1, x2, y2 = (int(v) for v in best["box"])
         box = (x1, y1, x2, y2)
 
+        fsize = np.sqrt(max(0, x2 - x1) * max(0, y2 - y1))
+        # Compute a crop-local score before temporal smoothing.  This score is
+        # used only to pair evidence with this exact image; the acceptance
+        # decision below continues to use the multi-frame averaged embedding.
+        _, crop_similarity = match_embedding(
+            emb, self._database, self._threshold, fsize, self._size_sigma
+        )
+
         self._buffer.append(emb)
         if len(self._buffer) < self._min_frames:
             return FaceVerification(
-                accepted=False, decided=False, detail="collecting frames", box=box
+                accepted=False,
+                decided=False,
+                detail="collecting frames",
+                box=box,
+                similarity=float(crop_similarity),
+                similarity_valid=True,
             )
 
         avg = np.mean(self._buffer, axis=0)
         norm = np.linalg.norm(avg)
         avg = avg / norm if norm > 0 else avg
 
-        fsize = np.sqrt(max(0, x2 - x1) * max(0, y2 - y1))
         matched_name, sim = match_embedding(
             avg, self._database, self._threshold, fsize, self._size_sigma
         )
@@ -153,6 +168,7 @@ class ProductionFaceVerifier(FaceVerifier):
                 detail=f"face not in whitelist (sim={sim:.3f})",
                 box=box,
                 similarity=float(sim),
+                similarity_valid=True,
             )
         return FaceVerification(
             accepted=True,
@@ -161,6 +177,7 @@ class ProductionFaceVerifier(FaceVerifier):
             box=box,
             person_id=str(matched_name),
             similarity=float(sim),
+            similarity_valid=True,
         )
 
     def close(self) -> None:
