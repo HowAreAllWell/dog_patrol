@@ -83,6 +83,7 @@ class FaceEvidence:
     box: tuple[int, int, int, int] | None = None
     person_id: str = ""
     similarity: float = 0.0
+    similarity_status: str = "not_applicable"
     image_url: str = ""
 
 
@@ -311,9 +312,10 @@ class FaceEvidenceController:
             verifier = self._verifier_factory()
             self._worker_verifier = verifier
             verifier.reset()
-            result, detail, box, evidence_crop, person_id, similarity = self._run_window(
-                request, generation, cancel_event, verifier
-            )
+            (
+                result, detail, box, evidence_crop, person_id, similarity,
+                similarity_status,
+            ) = self._run_window(request, generation, cancel_event, verifier)
             if result is FaceEvidenceResult.ERROR:
                 self._publish_error_detail(request, detail)
                 return False
@@ -326,7 +328,7 @@ class FaceEvidenceController:
                     detail = f"{detail}; {warning}" if detail else warning
             self._publish_current(
                 request, generation, result, detail, box,
-                person_id, similarity, image_url,
+                person_id, similarity, similarity_status, image_url,
             )
             return True
         except _MissionCancelled:
@@ -398,7 +400,7 @@ class FaceEvidenceController:
         verifier: FaceVerifier,
     ) -> tuple[
         FaceEvidenceResult, str, tuple[int, int, int, int] | None,
-        DecodedCrop | None, str, float,
+        DecodedCrop | None, str, float, str,
     ]:
         timeout = self._window_timeout_for(request.stage)
         deadline = None if timeout is None else time.monotonic() + timeout
@@ -406,6 +408,7 @@ class FaceEvidenceController:
         last_source_box = None
         first_face_crop = None
         first_face_similarity = 0.0
+        face_detected = False
         while True:
             crop_and_arrival = self._pop_latest_crop(
                 request, generation, cancel_event, deadline
@@ -418,13 +421,27 @@ class FaceEvidenceController:
                     first_face_crop,
                     "",
                     first_face_similarity,
+                    (
+                        "measured"
+                        if first_face_crop is not None
+                        else "measurement_error"
+                        if face_detected
+                        else "no_face_detected"
+                    ),
                 )
             crop, arrival_ns = crop_and_arrival
             verdict = self._verify(verifier, crop)
-            if first_face_crop is None and verdict.box is not None:
-                # Bind failed evidence to the first inference that actually
-                # detected a face.  Its image and similarity must come from
-                # the same verdict; do not substitute a later peak value.
+            face_detected = face_detected or verdict.box is not None
+            if (
+                first_face_crop is None
+                and verdict.box is not None
+                and verdict.similarity_valid
+            ):
+                # Bind failed evidence to the first crop for which face
+                # recognition produced a real score.  Production verification
+                # calculates this crop-local score even while the temporal
+                # decision window is still collecting frames, so image and
+                # similarity always describe the same input crop.
                 first_face_crop = replace(crop, image=crop.image.copy())
                 first_face_similarity = float(verdict.similarity)
             if verdict.detail:
@@ -453,11 +470,14 @@ class FaceEvidenceController:
                 )
                 self._overlay_callback(request, crop, box, result_code)
             if verdict.error:
-                return FaceEvidenceResult.ERROR, verdict.error, box, None, "", 0.0
+                return (
+                    FaceEvidenceResult.ERROR, verdict.error, box, None, "", 0.0,
+                    "measurement_error",
+                )
             if verdict.accepted:
                 return (
                     FaceEvidenceResult.PASSED, verdict.detail, box, crop,
-                    verdict.person_id, verdict.similarity,
+                    verdict.person_id, verdict.similarity, "measured",
                 )
             if deadline is not None and time.monotonic() >= deadline:
                 detail = "verification window elapsed without a match"
@@ -470,6 +490,13 @@ class FaceEvidenceController:
                     first_face_crop,
                     "",
                     first_face_similarity,
+                    (
+                        "measured"
+                        if first_face_crop is not None
+                        else "measurement_error"
+                        if face_detected
+                        else "no_face_detected"
+                    ),
                 )
 
     def _window_timeout_for(self, stage: FaceVerificationStage) -> float | None:
@@ -558,6 +585,7 @@ class FaceEvidenceController:
         box: tuple[int, int, int, int] | None,
         person_id: str,
         similarity: float,
+        similarity_status: str,
         image_url: str,
     ) -> bool:
         with self._condition:
@@ -567,7 +595,7 @@ class FaceEvidenceController:
                 return False
             self._publish(FaceEvidence(
                 request.session, request.stage, result, detail, box,
-                person_id, similarity, image_url,
+                person_id, similarity, similarity_status, image_url,
             ))
             return True
 
@@ -601,6 +629,7 @@ class FaceEvidenceController:
                     request.stage,
                     FaceEvidenceResult.ERROR,
                     detail,
+                    similarity_status="measurement_error",
                 )
             )
 
@@ -868,6 +897,7 @@ class FaceEvidenceProviderNode(Node):
         msg.detail = evidence.detail[: self._max_detail_length]
         msg.person_id = evidence.person_id
         msg.similarity = float(evidence.similarity)
+        msg.similarity_status = evidence.similarity_status
         msg.image_url = evidence.image_url
         self._evidence_pub.publish(msg)
 
