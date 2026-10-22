@@ -181,6 +181,8 @@
 未通过照片携带的 `similarity` 必须由同一张局部图实际计算，不能使用收集阶段的默认
 `0.0`，也不能替换为后续图像的最高分。默认五帧收集阶段会为证据图单独计算单帧相似度，
 但最终通过/不通过仍沿用多帧平均特征，证据计算不会改变核验决策流程。
+通过照片对应实际触发通过的输入局部图；其 `similarity` 是现有多帧核验结果分数，允许包含
+多帧平均特征与既有尺寸加权，不要求改成该输入图的单帧分数。
 全程没有成功检测识别人脸时不保存人脸照片，`similarity=0.0` 表示没有人脸证据，而非一次
 有效的零分测量，并同时返回 `similarity_status=no_face_detected`。成功计算时状态为
 `measured`，计算异常时为 `measurement_error`，非人脸提供方或取消结果可使用
@@ -192,9 +194,8 @@
 `file:///data/dog_patrol/photos/face/state-17/target-12/1792438238000000000_target-12_initial_face_passed_f83.jpg`。
 这类 `file://` 地址只能指向机器人本地文件，平台需另行读取或上传，不能当成公网图片链接。
 
-人脸现有 `AuthorizationEvidence` 还提供 `person_id` 和 `similarity`，后者是人脸匹配相似度。
-当前未通过结果的 `similarity` 取核验窗口内的最高值，不能当成开始帧对应的分数。
-新增截图要求的“人脸照片及对应置信度”仍待修复合入。
+读取人脸核验证据时，照片地址取 `AuthorizationEvidence.image_url`，身份取 `person_id`，
+分数取 `similarity`，并结合 `similarity_status` 判断该分数是有效测量、无人脸、计算异常或不适用。
 
 ### 3. 口令检测结果照片及置信度
 
