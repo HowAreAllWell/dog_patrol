@@ -28,6 +28,14 @@ class EventPhotoRecorder {
     std::size_t frame_history_capacity{16};
     std::size_t write_queue_capacity{16};
     std::uint64_t max_frame_age_ns{1000000000ULL};
+    // Voice JSON results are retained even when image capture is disabled.
+    bool photos_enabled{true};
+  };
+
+  struct VoiceConfidence {
+    std::uint8_t vote_count{0};
+    std::uint8_t confidence_percent{0};
+    std::vector<std::uint8_t> matching_channels;
   };
 
   struct Metrics {
@@ -58,7 +66,8 @@ class EventPhotoRecorder {
   // Event timestamps and source-frame timestamps must use the same clock.
   void RecordVoice(std::uint32_t state_seq, int target_id,
                    std::uint32_t round_number, std::uint8_t event,
-                   std::uint64_t event_stamp_ns);
+                   std::uint64_t event_stamp_ns,
+                   std::optional<VoiceConfidence> confidence = std::nullopt);
 
   // Waits for queued writes. Unmatched voice events are reported and discarded.
   void Flush();

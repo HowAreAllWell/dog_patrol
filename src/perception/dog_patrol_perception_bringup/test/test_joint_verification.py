@@ -22,7 +22,7 @@ from dog_patrol_perception_face.verifier import FaceVerification
 from dog_patrol_perception_orchestrator.authorization_node import PerceptionAuthorizationNode
 from dog_patrol_perception_voice.adapter import VoiceTaskCancelled
 from dog_patrol_perception_voice.provider import VoiceEvidenceProviderNode
-from dog_patrol_perception_voice.result import VoiceWindowEvent, VoiceWindowResult
+from dog_patrol_perception_voice.result import VoiceWindowEvent, VoiceWindowObservation, VoiceWindowResult
 
 
 class SimulatedVoiceTask:
@@ -45,12 +45,15 @@ class SimulatedVoiceTask:
         assert self.prompt_done.wait(5.0), "test did not finish simulated playback"
         if self.cancelled.is_set():
             raise VoiceTaskCancelled("cancelled during playback")
-        on_event(VoiceWindowEvent.WAIT_STARTED)
+        on_event(VoiceWindowObservation(VoiceWindowEvent.WAIT_STARTED))
         self.listening.set()
         assert self.answer_ready.wait(5.0), "test did not finish simulated response"
         if self.cancelled.is_set():
             raise VoiceTaskCancelled("cancelled while listening")
-        on_event(VoiceWindowEvent.PASSED if self.accepted else VoiceWindowEvent.NOT_PASSED)
+        on_event(VoiceWindowObservation(
+            VoiceWindowEvent.PASSED if self.accepted else VoiceWindowEvent.NOT_PASSED,
+            (0,) if self.accepted else (),
+        ))
         return VoiceWindowResult(self.accepted, 0.1)
 
     def cancel(self):

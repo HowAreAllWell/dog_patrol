@@ -1254,3 +1254,10 @@
 - 涉及文件：`README.md`、`docs/issue4_tracking_baseline_audit.md`、`worklog.md`；源仓远端新增 `deploy/dog_patrol-integration` 分支。
 - 验证：source ROS 2 和 dog_patrol overlay 后，源基线 `colcon build --packages-select vision_demo_host` 通过；`colcon test --packages-select vision_demo_host --return-code-on-test-failure` 为 53/53 CTest 通过，汇总 392 tests、0 errors/failures/skipped。dog_patrol 三个现有 package 的独立 worktree 构建通过，测试汇总 29 tests、0 errors/failures/skipped；历史对象和规则敏感信息扫描结果见审计文档。
 - 后续：后续迁移票在临时 clone 中执行过滤历史导入，并对导入后的新 commit 图二次复扫；真实 TensorRT/Hik 现场验收不属于本票。
+
+## 2026-10-21 - 按麦克风票数回传并保存语音置信度
+
+- 需求：0/1/2/3/4～6 票分别映射为 0/50/75/90/100%；一票仍通过，每轮置信度与语音照片关联保存。
+- 完成：增加不可变的 VoiceWindowObservation 与业务分数查询，在判定时固定通道/票数快照；扩展 VoiceVerificationEvent 并经 provider、tracking 完整透传；EventPhotoRecorder 异步写入与 JPEG 同名的 JSON，记录会话、目标、轮次、票数、置信度、时间、图片地址和状态，防覆盖且原子发布 JSON。照片关闭、缺帧或图片写入失败但目录可写时仍保留记录；取消轮次不补造结果。不记录识别文本、口令或 PCM。
+- 测试：本机可运行语音检查 76 passed、2 skipped（缺少 ROS）、1 deselected（已有 POSIX 执行权限检查不适用于 Windows）；Python AST 与 4 个 C++ 文件相对基线的语法检查、git diff --check 通过。新增 7 个 C++ 照片/JSON 测试，尚未执行。
+- 限制：当前 Windows 无 ROS 2、Linux 编译环境和 OpenCV C++ 开发依赖，未进行 colcon/C++ gtest、ROS 集成或 Orin 硬件验收。部署前须统一重新生成接口并构建相关节点，不能混用新旧 .msg 生成物。

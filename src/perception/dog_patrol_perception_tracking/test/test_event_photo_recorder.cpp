@@ -3,6 +3,7 @@
 #include <ctime>
 #include <filesystem>
 #include <fstream>
+#include <iterator>
 #include <memory>
 #include <mutex>
 #include <string>
@@ -50,6 +51,11 @@ std::string LocalSecond(std::uint64_t stamp) {
   return text;
 }
 
+std::string ReadText(const std::filesystem::path &path) {
+  std::ifstream stream(path);
+  return {std::istreambuf_iterator<char>(stream), std::istreambuf_iterator<char>()};
+}
+
 class PhotoRecorderTest : public ::testing::Test {
  protected:
   void SetUp() override {
@@ -81,14 +87,15 @@ class PhotoRecorderTest : public ::testing::Test {
   }
 
   std::vector<std::filesystem::path> Files(const std::string &directory,
-                                          const std::string &round_tag = "") {
+                                          const std::string &round_tag = "",
+                                          const std::string &extension = ".jpg") {
     std::vector<std::filesystem::path> files;
     if (!std::filesystem::is_directory(root_ / directory)) {
       return files;
     }
     for (const auto &entry : std::filesystem::directory_iterator(root_ / directory)) {
       const auto name = entry.path().filename().string();
-      if (entry.path().extension() == ".jpg" &&
+      if (entry.path().extension() == extension &&
           (round_tag.empty() || name.find(round_tag + ".") != std::string::npos ||
            name.find(round_tag + "_") != std::string::npos)) {
         files.push_back(entry.path());
@@ -466,6 +473,154 @@ TEST_F(PhotoRecorderTest, PendingEventsAndWriteQueueAreBoundedAndReportDrops) {
 TEST_F(PhotoRecorderTest, InvalidConfigurationIsRejected) {
   config_.frame_history_capacity = 0;
   EXPECT_THROW(Recorder(), std::invalid_argument);
+}
+
+TEST_F(PhotoRecorderTest, VoiceConfidenceUsesDecisionSnapshotAndSharesPhotoBasename) {
+  auto recorder = Recorder();
+  const auto mission = Mission(MissionPhase::kVerifyIdentity, 20);
+  Frame(*recorder, mission, kTime, kBlue);
+  recorder->RecordVoice(20, 7, 1, EventPhotoRecorder::WAIT_STARTED, kTime + 100 * kMs);
+  Frame(*recorder, mission, kTime + 200 * kMs, kGreen);
+  Frame(*recorder, mission, kTime + 400 * kMs, kRed);
+  EventPhotoRecorder::VoiceConfidence confidence{2, 75, {1, 4}};
+  recorder->RecordVoice(20, 7, 1, EventPhotoRecorder::PASSED, kTime + 300 * kMs, confidence);
+  confidence.matching_channels.clear();  // The queued job owns its snapshot.
+  recorder->RecordVoice(20, 7, 1, EventPhotoRecorder::PASSED, kTime + 300 * kMs,
+                        EventPhotoRecorder::VoiceConfidence{1, 50, {0}});
+  recorder->Flush();
+  const auto photos = Files("voice/passed");
+  const auto records = Files("voice/passed", "", ".json");
+  ASSERT_EQ(photos.size(), 1U);
+  ASSERT_EQ(records.size(), 1U);
+  EXPECT_EQ(photos[0].stem(), records[0].stem());
+  ExpectColor(photos[0], kGreen);
+  const auto json = ReadText(records[0]);
+  EXPECT_NE(json.find("\"state_seq\": 20"), std::string::npos);
+  EXPECT_NE(json.find("\"target_id\": 7"), std::string::npos);
+  EXPECT_NE(json.find("\"round_number\": 1"), std::string::npos);
+  EXPECT_NE(json.find("\"vote_count\": 2"), std::string::npos);
+  EXPECT_NE(json.find("\"matching_channels\": [1, 4]"), std::string::npos);
+  EXPECT_NE(json.find("\"confidence_percent\": 75"), std::string::npos);
+  EXPECT_NE(json.find("\"image_file\": \"" + photos[0].filename().string() + "\""), std::string::npos);
+  EXPECT_NE(json.find("\"image_stamp_ns\": " + std::to_string(kTime + 200 * kMs)), std::string::npos);
+  EXPECT_NE(json.find("\"result_stamp_ns\": " + std::to_string(kTime + 300 * kMs)), std::string::npos);
+  EXPECT_TRUE(Files("voice/passed", "", ".tmp").empty());
+}
+
+TEST_F(PhotoRecorderTest, FailedZeroAndLaterPassedRoundKeepSeparateMetadata) {
+  auto recorder = Recorder();
+  const auto mission = Mission(MissionPhase::kVerifyIdentity, 20);
+  Frame(*recorder, mission, kTime, kBlue);
+  recorder->RecordVoice(20, 7, 1, EventPhotoRecorder::WAIT_STARTED, kTime + 100 * kMs);
+  Frame(*recorder, mission, kTime + 200 * kMs, kGreen);
+  recorder->RecordVoice(20, 7, 1, EventPhotoRecorder::NOT_PASSED, kTime + 250 * kMs,
+                        EventPhotoRecorder::VoiceConfidence{0, 0, {}});
+  recorder->RecordVoice(20, 7, 2, EventPhotoRecorder::WAIT_STARTED, kTime + 260 * kMs);
+  Frame(*recorder, mission, kTime + 300 * kMs, kRed);
+  recorder->RecordVoice(20, 7, 2, EventPhotoRecorder::PASSED, kTime + 300 * kMs,
+                        EventPhotoRecorder::VoiceConfidence{3, 90, {0, 2, 5}});
+  recorder->Flush();
+  const auto failed = Files("voice/failed");
+  ASSERT_EQ(failed.size(), 1U);
+  ExpectColor(failed[0], kBlue);
+  const auto failed_json = Files("voice/failed", "", ".json");
+  const auto passed_json = Files("voice/passed", "", ".json");
+  ASSERT_EQ(failed_json.size(), 1U);
+  ASSERT_EQ(passed_json.size(), 1U);
+  EXPECT_NE(ReadText(failed_json[0]).find("\"confidence_valid\": true"), std::string::npos);
+  EXPECT_NE(ReadText(failed_json[0]).find("\"confidence_percent\": 0"), std::string::npos);
+  EXPECT_NE(ReadText(passed_json[0]).find("\"confidence_percent\": 90"), std::string::npos);
+  EXPECT_NE(ReadText(passed_json[0]).find("\"round_number\": 2"), std::string::npos);
+}
+
+TEST_F(PhotoRecorderTest, MissingSceneRetainsConfidenceWithNullPhoto) {
+  auto recorder = Recorder();
+  const auto mission = Mission(MissionPhase::kVerifyIdentity, 20);
+  Frame(*recorder, mission, kTime, kBlue);
+  recorder->RecordVoice(20, 7, 1, EventPhotoRecorder::WAIT_STARTED, kTime + 1500 * kMs);
+  recorder->RecordVoice(20, 7, 1, EventPhotoRecorder::PASSED, kTime + 1700 * kMs,
+                        EventPhotoRecorder::VoiceConfidence{1, 50, {0}});
+  recorder->Flush();
+  EXPECT_TRUE(Files("voice/passed").empty());
+  const auto records = Files("voice/passed", "", ".json");
+  ASSERT_EQ(records.size(), 1U);
+  const auto json = ReadText(records[0]);
+  EXPECT_NE(json.find("\"confidence_percent\": 50"), std::string::npos);
+  EXPECT_NE(json.find("\"image_file\": null"), std::string::npos);
+  EXPECT_NE(json.find("\"image_stamp_ns\": null"), std::string::npos);
+  EXPECT_NE(json.find("\"photo_status\": \"missing_frame\""), std::string::npos);
+}
+
+TEST_F(PhotoRecorderTest, DisabledPhotosStillPersistConfidenceAndAvoidJsonOnlyCollisions) {
+  config_.photos_enabled = false;
+  for (int instance = 0; instance < 2; ++instance) {
+    auto recorder = Recorder();
+    Frame(*recorder, Mission(MissionPhase::kVerifyIdentity, 20), kTime, kBlue);
+    recorder->RecordVoice(20, 7, 1, EventPhotoRecorder::WAIT_STARTED, kTime + 100 * kMs);
+    recorder->RecordVoice(20, 7, 1, EventPhotoRecorder::PASSED, kTime + 200 * kMs,
+                          EventPhotoRecorder::VoiceConfidence{4, 100, {0, 1, 2, 3}});
+  }
+  EXPECT_TRUE(Files("voice/passed").empty());
+  const auto records = Files("voice/passed", "", ".json");
+  ASSERT_EQ(records.size(), 2U);
+  EXPECT_EQ(records[1].filename().string(), LocalSecond(kTime) + "_t7_r1_1.json");
+  for (const auto &record : records) {
+    const auto json = ReadText(record);
+    EXPECT_NE(json.find("\"confidence_percent\": 100"), std::string::npos);
+    EXPECT_NE(json.find("\"image_file\": null"), std::string::npos);
+    EXPECT_NE(json.find("\"photo_status\": \"disabled\""), std::string::npos);
+  }
+}
+
+TEST_F(PhotoRecorderTest, InvalidScoresAndDuplicateChannelsCannotConsumeTheRound) {
+  auto recorder = Recorder();
+  Frame(*recorder, Mission(MissionPhase::kVerifyIdentity, 20), kTime, kBlue);
+  recorder->RecordVoice(20, 7, 1, EventPhotoRecorder::WAIT_STARTED, kTime);
+  for (const auto &invalid : std::vector<EventPhotoRecorder::VoiceConfidence>{
+           {1, 25, {0}}, {2, 75, {0, 0}}, {1, 50, {6}}, {0, 0, {}}}) {
+    recorder->RecordVoice(20, 7, 1, EventPhotoRecorder::PASSED, kTime, invalid);
+  }
+  recorder->RecordVoice(20, 7, 1, EventPhotoRecorder::PASSED, kTime,
+                        EventPhotoRecorder::VoiceConfidence{6, 100, {0, 1, 2, 3, 4, 5}});
+  recorder->Flush();
+  EXPECT_EQ(recorder->GetMetrics().invalid_events, 4U);
+  const auto records = Files("voice/passed", "", ".json");
+  ASSERT_EQ(records.size(), 1U);
+  EXPECT_NE(ReadText(records[0]).find("\"vote_count\": 6"), std::string::npos);
+}
+
+TEST_F(PhotoRecorderTest, LegacyMissingMeasurementIsNullRatherThanMeasuredZero) {
+  auto recorder = Recorder();
+  Frame(*recorder, Mission(MissionPhase::kVerifyIdentity, 20), kTime, kBlue);
+  recorder->RecordVoice(20, 7, 1, EventPhotoRecorder::WAIT_STARTED, kTime);
+  recorder->RecordVoice(20, 7, 1, EventPhotoRecorder::PASSED, kTime);
+  recorder->Flush();
+  const auto records = Files("voice/passed", "", ".json");
+  ASSERT_EQ(records.size(), 1U);
+  const auto json = ReadText(records[0]);
+  EXPECT_NE(json.find("\"confidence_valid\": false"), std::string::npos);
+  EXPECT_NE(json.find("\"vote_count\": null"), std::string::npos);
+  EXPECT_NE(json.find("\"confidence_percent\": null"), std::string::npos);
+}
+
+TEST_F(PhotoRecorderTest, StaleJsonTemporaryFileDoesNotOverwriteHistoryOrLoseTheNewResult) {
+  std::filesystem::create_directories(root_ / "voice/passed");
+  const auto stale = root_ / "voice/passed" / (LocalSecond(kTime) + "_t7_r1.json.tmp");
+  std::ofstream(stale) << "incomplete earlier record";
+  auto recorder = Recorder();
+  Frame(*recorder, Mission(MissionPhase::kVerifyIdentity, 20), kTime, kBlue);
+  recorder->RecordVoice(20, 7, 1, EventPhotoRecorder::WAIT_STARTED, kTime);
+  recorder->RecordVoice(20, 7, 1, EventPhotoRecorder::PASSED, kTime,
+                        EventPhotoRecorder::VoiceConfidence{1, 50, {0}});
+  recorder->Flush();
+  const auto photos = Files("voice/passed");
+  const auto records = Files("voice/passed", "", ".json");
+  ASSERT_EQ(photos.size(), 1U);
+  ASSERT_EQ(records.size(), 1U);
+  EXPECT_EQ(photos[0].filename().string(), LocalSecond(kTime) + "_t7_r1_1.jpg");
+  EXPECT_EQ(photos[0].stem(), records[0].stem());
+  EXPECT_EQ(ReadText(stale), "incomplete earlier record");
+  EXPECT_EQ(recorder->GetMetrics().write_errors, 0U);
 }
 
 }  // namespace

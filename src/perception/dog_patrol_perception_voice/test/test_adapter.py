@@ -155,3 +155,16 @@ def _capture_error(errors: list[BaseException], operation) -> None:
         operation()
     except BaseException as exc:
         errors.append(exc)
+
+
+def test_normalizing_attempt_number_preserves_measured_votes_and_confidence():
+    expected = VoiceWindowResult(True, 0.1, matching_channels=(0, 2, 5))
+    adapter = R818VoiceAdapter(
+        stream=FakeTaskStream(), recognizer=FakeWindowRecognizer([expected]),
+        prompt_player=FakePromptPlayer(),
+    )
+    with adapter.task() as task:
+        actual = task.respond()
+    assert actual.attempt_number == 1
+    assert actual.matching_channels == expected.matching_channels
+    assert actual.confidence_percent == 90
