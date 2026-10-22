@@ -66,6 +66,30 @@ tracking 将每轮照片按结果保存到照片根目录下的 `voice/passed/`�
 `YYYYMMDD_HHMMSS_t<ID>_rN.jpg`，结果由目录区分；
 `ID` 为目标语义 ID，`N` 从 1 开始，表示第几次播报后的口令核验。同名文件追加短序号，避免覆盖。
 
+每轮在判定时固定匹配正确口令的不同麦克风通道，按票数生成业务置信度：
+
+| 命中票数 | 0 | 1 | 2 | 3 | 4～6 |
+| --- | --- | --- | --- | --- | --- |
+| `confidence_percent` | 0 | 50 | 75 | 90 | 100 |
+
+重复识别不对同一通道重复计票，不跨轮累加；一票仍然通过，不延长原有响应窗或 vote guard。
+这项置信度是固定票数映射，不是 Vosk 的词级概率。`VoiceWindowResult` 的 `vote_count` 和
+`confidence_percent` 可直接查询；终态 `VoiceWindowObservation` 在设备清理前携带相同快照。
+`WAIT_STARTED` 不含测量，`confidence_valid=false`；正常零票未通过则为有效的 `0%`。
+
+`VoiceVerificationEvent` 追加 `confidence_valid`、`vote_count`、`confidence_percent` 和
+`matching_channels`。tracking 将每轮结果异步写入照片旁的同名 JSON，例如
+`voice/passed/20261021_143010_t12_r1.jpg` 和 `20261021_143010_t12_r1.json`。
+JSON 包含 `state_seq`、`target_id`、轮次、结果、票数、命中通道、置信度、计算方法、等待开始/
+判定/图片时间，以及 `image_file`、`photo_status`；不保存识别文本、正确口令或 PCM。
+照片与 JSON 统一使用实际防覆盖后的文件名，JSON 在写完后原子发布，不覆盖历史记录。
+
+照片关闭或缺帧时仍保存 JSON，`image_file=null`，`photo_status` 为 `disabled` 或 `missing_frame`；
+没有源图时改用判定时间命名，`image_stamp_ns=null`。图片编码/写入失败而目录仍可写时，保留
+JSON 并标记 `write_failed`。未完成的取消轮次不补造结果；取消前合法完成的记录可继续异步落盘。
+注入/旧的核心结果缺少通道测量时标记无效，JSON 中票数与置信度为 `null`，不伪造零分。
+消息变更后须统一重新生成接口并重编译 voice、tracking、face、orchestrator 和 bringup。
+
 部署时提供 Vosk 模型目录并启动：
 
 ```bash

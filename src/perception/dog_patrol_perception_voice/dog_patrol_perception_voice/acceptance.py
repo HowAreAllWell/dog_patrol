@@ -55,7 +55,7 @@ from .preflight import (
     default_helper_path,
 )
 from .prompt import FfmpegAlsaPromptPlayer
-from .result import VoiceWindowEvent, VoiceWindowResult
+from .result import VoiceWindowEvent, VoiceWindowObservation, VoiceWindowResult
 from .r818_stream import R818StreamingVoskSession, SubprocessAdbEncodedPcmStream
 from .vosk import load_vosk_model
 
@@ -342,7 +342,7 @@ class _FixtureRecognizer:
     ) -> VoiceWindowResult:
         self._record.recognition_started[attempt_number].set()
         if on_event is not None:
-            on_event(VoiceWindowEvent.WAIT_STARTED)
+            on_event(VoiceWindowObservation(VoiceWindowEvent.WAIT_STARTED))
         if self._behavior.cancel_at == f"window-{attempt_number}":
             if not self._record.stop_requested.wait(timeout=3.0):
                 raise TimeoutError("response cancellation was not delivered")
@@ -356,13 +356,14 @@ class _FixtureRecognizer:
                 if callable(close):
                     close()
         window = self._behavior.windows[attempt_number - 1]
-        if on_event is not None:
-            on_event(VoiceWindowEvent.PASSED if window.accepted else VoiceWindowEvent.NOT_PASSED)
-        return VoiceWindowResult(
+        result = VoiceWindowResult(
             accepted=window.accepted,
             decision_time_seconds=window.decision_time_seconds,
             attempt_number=attempt_number,
         )
+        if on_event is not None:
+            on_event(result.observation)
+        return result
 
 
 class _FixtureAdapterFactory:

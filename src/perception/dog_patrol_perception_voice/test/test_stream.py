@@ -356,7 +356,74 @@ def test_window_events_mark_open_and_decision_once(text, final_text, accepted) -
 
     result = recognizer.recognize(3, 10.0, on_event=record)
     assert result.accepted is accepted
-    assert events == [
+    assert [item.event for item in events] == [
         VoiceWindowEvent.WAIT_STARTED,
         VoiceWindowEvent.PASSED if accepted else VoiceWindowEvent.NOT_PASSED,
     ]
+    assert events[0].confidence_valid is False
+    assert events[1].confidence_valid is True
+    assert events[1].confidence_percent == (50 if accepted else 0)
+    assert events[1].matching_channels == result.matching_channels
+
+
+@pytest.mark.parametrize("votes,percent", [(0, 0), (1, 50), (2, 75), (3, 90), (4, 100), (5, 100), (6, 100)])
+@pytest.mark.parametrize("final_only", [False, True])
+def test_window_confidence_uses_distinct_channels_at_decision(votes, percent, final_only):
+    recognizers = [
+        FakeVoskRecognizer(**{
+            "final_result" if final_only else "result": "blue star" if channel < votes else "wrong"
+        }) for channel in range(6)
+    ]
+    stream = FakeWindowStream([[bytes(range(16))]])
+    session = R818StreamingVoskSession(
+        stream, VoiceConfig(vote_guard_seconds=0.0), model=object(),
+        recognizer_factory=SequencedFactory(recognizers),
+    )
+    events = []
+    result = session.recognize(1, 10.0, on_event=events.append)
+    assert result.accepted is (votes > 0)
+    assert result.vote_count == votes
+    assert result.confidence_percent == percent
+    assert len(events) == 2
+    assert events[1] == result.observation
+    assert events[1].matching_channels == tuple(range(votes))
+
+
+def test_repeated_results_from_one_channel_count_once_and_rounds_do_not_accumulate():
+    frame = bytes(range(16)) * 160  # 10ms per chunk
+    factory = SequencedFactory([
+        FakeVoskRecognizer(result="blue star"), *(FakeVoskRecognizer() for _ in range(5)),
+        *(FakeVoskRecognizer() for _ in range(6)),
+    ])
+    session = R818StreamingVoskSession(
+        FakeWindowStream([[frame, frame, frame], [frame]]), VoiceConfig(vote_guard_seconds=0.015),
+        model=object(), recognizer_factory=factory,
+    )
+    assert session.recognize(1, 10.0).confidence_percent == 50
+    second = session.recognize(2, 10.0)
+    assert second.vote_count == 0
+    assert second.confidence_percent == 0
+
+
+def test_pass_snapshot_is_emitted_before_closing_the_audio_window():
+    events = []
+
+    def closing_chunks():
+        try:
+            yield bytes(range(16))
+        finally:
+            assert len(events) == 2
+            assert events[-1].confidence_percent == 75
+
+    class Stream:
+        def window_chunks(self, _timeout):
+            return closing_chunks()
+
+    session = R818StreamingVoskSession(
+        Stream(), VoiceConfig(vote_guard_seconds=0.0), model=object(),
+        recognizer_factory=SequencedFactory([
+            FakeVoskRecognizer(result="blue star"), FakeVoskRecognizer(result="blue star"),
+            *(FakeVoskRecognizer() for _ in range(4)),
+        ]),
+    )
+    assert session.recognize(1, 10.0, on_event=events.append).confidence_percent == 75
