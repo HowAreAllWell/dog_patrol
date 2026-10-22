@@ -181,7 +181,13 @@ evidence_photo_max_files: 10000
 人脸算法的唯一图像输入仍是 tracking 发布的主目标 crop，本模块所称结果“帧”就是未经再次
 裁剪或绘制的该输入 crop。人脸通过时保存实际通过帧及该帧的 `similarity`；人脸未通过时保存
 本阶段第一次成功检测到人脸的 crop 及该次检测对应的 `similarity`，而不是后续帧的最高值。
+即使默认 `min_frames_for_decision=5` 尚处于多帧收集阶段，识别器也会单独计算该 crop 的
+单帧相似度用于证据配对；该分数不参与且不改变原有多帧平均后的通过/不通过判定。
+只有完成特征提取并得到有效相似度的 crop 才能成为“第一次成功检测识别人脸”的证据，
+不会把未计算的默认 `0.0` 当成有效置信度。
 全程未检测到人脸时不返回照片且 `similarity=0.0`。保存路径以
+此时对外消息同时返回 `similarity_status=no_face_detected`，明确表示没有人脸可供计算，
+而不是一次真实的零分测量。成功计算时为 `measured`，计算异常时为 `measurement_error`。
 `file://` URL 写入 `AuthorizationEvidence.image_url`。文件名以源拍摄时间开头并包含目标 ID；
 碰撞时追加序号，节点重启也不会覆盖保留期内的旧照片。同时返回匹配的 `person_id` 和
 `similarity`；照片写入失败只追加诊断，不改变已经得到的人脸业务结果。
