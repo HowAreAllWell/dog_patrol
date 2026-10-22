@@ -188,7 +188,7 @@
 
 人脸现有 `AuthorizationEvidence` 还提供 `person_id` 和 `similarity`，后者是人脸匹配相似度。
 当前未通过结果的 `similarity` 取核验窗口内的最高值，不能当成开始帧对应的分数。
-新增截图要求的“人脸照片及对应置信度”仍待修复合入；当前不要将其视为已经完成，也不要套用下述语音票数计分规则。
+新增截图要求的“人脸照片及对应置信度”仍待修复合入。
 
 ### 3. 口令检测结果照片及置信度
 
@@ -207,27 +207,13 @@
 
 每轮另保存一份与照片同名的 JSON，例如 `voice/passed/20261021_143010_t12_r1.json`。
 图片和 JSON 的文件名主体一致；发生同名时，两者使用相同的 `_1`、`_2` 后缀。
-JSON 通过 `state_seq + target_id + round_number` 关联当前核验轮次，保存结果、命中麦克风通道、
-票数、置信度、等待开始/判定/源帧时间，以及 `image_file` 和 `photo_status`。
-
-**当前每轮只有一个按麦克风命中票数换算的分数，不是模型对口令识别的置信度。**
-代码没有提取或保存各麦克风的 Vosk 词级置信度，也没有生成整句口令的模型分数。
-下表采用固定业务计分，单位为百分数整数：
-
-| 本轮匹配正确口令的不同麦克风票数 | 0 | 1 | 2 | 3 | 4～6 |
-|---|---|---|---|---|---|
-| `confidence_percent` | 0 | 50 | 75 | 90 | 100 |
-
-一票仍可通过；同一通道不重复计票，不跨轮累积，不等待更多票而延长核验时间。
-`confidence_method` 为 `channel_votes_50_75_90_100_v1`，不表示 Vosk 词级概率。
-例如两路麦克风都识别出正确口令，本轮分数就是 `75`，不能解释成模型认为这次识别有 75% 的正确概率。
-这张映射表目前固定在代码中，没有新增 YAML、启动或运行时配置项。
-正常零票未通过是有效的 `0%`；等待开始或缺少通道测量时没有有效分数，不能视为测得零票。
-取消或设备故障不补造正常的零分未通过记录。
+JSON 通过 `state_seq + target_id + round_number` 关联当前核验轮次。
+口令置信度读取 `confidence_percent`，取值范围为 `0`～`100`；先检查 `confidence_valid` 是否为 `true`。
+没有有效分数时 JSON 中为 `null`，不要当成零分。取消或设备故障不补造正常的未通过记录。
 
 默认保存路径为 `~/.ros/dog_patrol/photos/voice/passed/` 或 `voice/failed/`，分数不写进图片内容或文件名。
 通过启动参数 `photos_root` 修改共享根目录后，新生成的照片与 JSON 会保存到新根目录下的相应分类目录，已有文件保留在原处。
-下面是两票通过时的 JSON 字段节选，完整记录还包含等待开始、判定及源帧时间：
+下面仅列出读取置信度和关联照片所需的 JSON 字段：
 
 ```json
 {
@@ -236,10 +222,7 @@ JSON 通过 `state_seq + target_id + round_number` 关联当前核验轮次，�
   "round_number": 1,
   "result": "passed",
   "confidence_valid": true,
-  "vote_count": 2,
-  "matching_channels": [1, 4],
   "confidence_percent": 75,
-  "confidence_method": "channel_votes_50_75_90_100_v1",
   "image_file": "20261021_143010_t12_r1.jpg",
   "photo_status": "saved"
 }
@@ -250,9 +233,7 @@ JSON 通过 `state_seq + target_id + round_number` 关联当前核验轮次，�
 | `state_seq`、`target_id`、`round_number` | 联合关联任务状态、目标语义 ID 和本次口令轮次，避免混用不同目标或轮次的结果 |
 | `result` | `passed` 为通过，`not_passed` 为未通过；后者保存在 `voice/failed/` |
 | `confidence_valid` | 先检查此标记，只有 `true` 才能把分数作为有效测量读取 |
-| `vote_count`、`matching_channels` | 命中票数及通道列表；通道编号为 `0`～`5`，示例 `[1, 4]` 表示编号 1 和 4 的两个通道 |
-| `confidence_percent` | 本轮票数分，`75` 表示 75 分；没有有效测量时 JSON 为 `null`，不是零分 |
-| `confidence_method` | 当前固定为 `channel_votes_50_75_90_100_v1`，标明采用上述票数换算方式 |
+| `confidence_percent` | 本轮口令置信度，`75` 表示 `75%`；没有有效测量时 JSON 为 `null`，不是零分 |
 | `wait_started_stamp_ns`、`result_stamp_ns`、`image_stamp_ns` | 本轮实际等待开始、判定、照片源帧时间，单位为纳秒，使用事件与相机一致的时间域；缺图时源帧时间为 `null` |
 | `image_file` | 同目录下照片的文件名，不是绝对路径或网络 URL；用 JSON 所在目录拼接即可定位照片，缺图时为 `null` |
 | `photo_status` | `saved` 已保存照片；`disabled` 关闭照片；`missing_frame` 缺有效帧；`write_failed` 图片编码或写入失败 |
@@ -518,7 +499,7 @@ ls -R "$HOME/.ros/dog_patrol/photos"
 
 1. 实际建立目标事件后，在 `tracking/event/` 查看整帧照片。
 2. 人脸有核验结果后，在 `face/state-<序号>/target-<语义ID>/` 查看目标局部图；按 `initial_face_passed`、`initial_face_not_passed` 或联合阶段的 `passed` 标记核对取帧规则。
-3. 目标进入口令核验后，本轮通过查看 `voice/passed/`，本轮未通过查看 `voice/failed/`，核对文件名中的 `t<ID>` 和 `rN`；打开同名 JSON 查看本轮票数分，并用 `image_file` 对应照片。
+3. 目标进入口令核验后，本轮通过查看 `voice/passed/`，本轮未通过查看 `voice/failed/`，核对文件名中的 `t<ID>` 和 `rN`；打开同名 JSON 查看本轮口令置信度，并用 `image_file` 对应照片。
 4. 连续丢失达到配置时长后，在 `tracking/lost/` 查看最后可见画面；其拍摄时间会早于丢失判定时间。
 
 也可监听人脸证据消息，查看 `provider: face` 的 `image_url`、目标 ID 和阶段：
@@ -529,7 +510,7 @@ ros2 topic echo /perception/authorization_evidence
 
 `image_url` 为空时检查人脸照片总开关、独立开关、有效输入和写盘日志；核验结果本身不保证一定有图片。
 
-**查看语音分数：** 默认目录中的一份记录可用以下命令打开；文件名替换成实际生成的 JSON：
+**查看口令置信度：** 默认目录中的一份记录可用以下命令打开；文件名替换成实际生成的 JSON：
 
 ```bash
 python3 -m json.tool "$HOME/.ros/dog_patrol/photos/voice/passed/20261021_143010_t12_r1.json"
@@ -539,17 +520,16 @@ python3 -m json.tool "$HOME/.ros/dog_patrol/photos/voice/passed/20261021_143010_
 JSON 与图片同名，发生文件名碰撞时两者使用相同短序号；照片未保存时也应检查是否有独立的 JSON 记录。
 照片与 JSON 的写入由任务模式的 tracking 照片记录器负责，单独启动语音节点只会发布消息，不会自动保存 JSON。
 
-实时查看每轮分数可使用：
+实时查看每轮口令置信度可使用：
 
 ```bash
 ros2 topic echo /perception/voice_verification_event
 ```
 
 `event: 0` 是等待开始，`confidence_valid: false`，消息中的默认零值不代表零分；
-`event: 1` 是通过，`event: 2` 是未通过，读取有效的终态票数及分数即可。
+`event: 1` 是通过，`event: 2` 是未通过，读取终态消息中有效的 `confidence_percent` 即可。
 通过消息中的 `observed_state_seq`、`target_id`、`round_number` 关联本轮；保存到 JSON 后状态序号字段名为 `state_seq`。
 默认话题可通过启动参数 `voice_verification_event_topic` 修改，使用自定义值时需监听对应话题。
-此事件中的 `matching_channels` 是命中通道列表，没有单路模型置信度；`AuthorizationEvidence` 中语音的 `detail` 也会附带票数与分数文字，结构化接入应使用语音事件。
 实时 ROS 话题与本地 JSON 均不等于已经上传到平台；平台需要自行订阅该话题，或读取 JSON 及其关联的照片。
 
 没有照片时，先确认照片开关、实际根目录、对应事件是否发生，再查看 tracking 节点中的 `event photo:` 错误日志。
@@ -582,13 +562,12 @@ ros2 topic echo /perception/voice_verification_event
 
 | 设置 | 默认值与用途 |
 |---|---|
-| 完整感知启动的 `voice_verification_event_topic` | `/perception/voice_verification_event`；通知照片模块实际等待开始、通过和未通过时刻，终态事件携带每轮票数分 |
+| 完整感知启动的 `voice_verification_event_topic` | `/perception/voice_verification_event`；通知照片模块实际等待开始、通过和未通过时刻，终态事件携带每轮口令置信度 |
 | tracking 的 `photos.voice_event_topic` | 必须与语音节点的 `voice_verification_event_topic` 一致；完整感知启动会统一传入 |
 | `use_sim_time` | 默认 `false`；仿真时保持相机、语音、主控在同一时间域，供选帧使用 |
 
 跟踪、语音保存照片使用源图副本，JPEG 编码和写盘在后台线程中执行。帧历史和写队列默认各最多 16 帧，退出时排空已经入队的照片。
-语音 JSON 与图片在同一个后台任务中写入；`VoiceVerificationEvent` 结果事件携带固定的票数、
-置信度有效标记、百分数及命中通道，不能在硬件清理后重新取票或换成新一轮的分数。
+语音 JSON 与图片在同一个后台任务中写入；`VoiceVerificationEvent` 结果事件携带本轮置信度及有效标记，保存时须与当前目标、轮次对应。
 这些缓存大小没有作为本次面向使用者的 ROS 配置项开放。
 
 `AuthorizationCommand`、`AuthorizationEvidence` 新增 `round_number`，另有 `VoiceVerificationEvent`。
@@ -603,5 +582,5 @@ tracking 自动换算并释放到期排除项，调用方不应把“收到响�
 人脸图像和路径配置细节见[人脸模块说明](../../src/perception/dog_patrol_perception_face/README.md)；
 去重接口与联调细节见[ReID 模块说明](../../src/perception/dog_patrol_reid_provider/README.md)。
 
-照片记录器 26 项自动化测试已通过，覆盖取帧、语义 ID、轮次、目录、同名防覆盖及语音分数 JSON。
+照片记录器 26 项自动化测试已通过，覆盖取帧、语义 ID、轮次、目录、同名防覆盖及语音置信度 JSON。
 普通环境可通过 `TRACKING_ENABLE_ORIN_RUNTIME=OFF` 编译检查；相机、R818 收音播报和 Orin 连续运行仍需部署设备验收。
